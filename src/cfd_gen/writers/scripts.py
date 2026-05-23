@@ -45,7 +45,15 @@ runApplication renumberMesh -overwrite -noFunctionObjects
 # Solve
 runApplication -s solver decomposePar
 runParallel -s potential potentialFoam -noFunctionObjects || true
+
+# Start convergence monitor in background
+python3 -m cfd_gen.postproc.convergence_monitor --interval 10 --min-iters 200 > log.convergenceMonitor 2>&1 &
+MONITOR_PID=$!
+
 runParallel simpleFoam || true
+
+# Stop monitor
+kill $MONITOR_PID 2>/dev/null || true
 
 # Always reconstruct (even if solver was interrupted)
 runApplication reconstructPar
@@ -114,7 +122,15 @@ renumberMesh -overwrite -noFunctionObjects > log.renumberMesh 2>&1
 # Solve
 decomposePar > log.decomposePar.solver 2>&1
 mpirun -np $SLURM_NTASKS potentialFoam -noFunctionObjects -parallel > log.potentialFoam 2>&1 || true
+
+# Start convergence monitor in background
+python3 -m cfd_gen.postproc.convergence_monitor --interval 10 --min-iters 200 > log.convergenceMonitor 2>&1 &
+MONITOR_PID=$!
+
 mpirun -np $SLURM_NTASKS simpleFoam -parallel > log.simpleFoam 2>&1 || true
+
+# Stop monitor
+kill $MONITOR_PID 2>/dev/null || true
 
 # Always reconstruct
 reconstructPar > log.reconstructPar 2>&1

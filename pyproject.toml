@@ -15,6 +15,7 @@ plot = ["matplotlib>=3.5"]
 [project.scripts]
 cfd-setup = "cfd_gen.cli:setup_main"
 cfd-forces = "cfd_gen.cli:forces_main"
+cfd-monitor = "cfd_gen.postproc.convergence_monitor:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/cfd_gen"]
