@@ -28,9 +28,8 @@
 **/*_*.log
 
 # ============================================================
-# STL geometry files (large, tracked separately or via LFS)
+# STL geometry files inside cases (copies of source STL/)
 # ============================================================
-STL/
 **/constant/triSurface/*.stl
 **/constant/triSurface/*.STL
 
