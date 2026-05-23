@@ -1,0 +1,32 @@
+{
+    "_comment": "fidelity: 'fast', 'standard', or 'fine'",
+
+    "case_name": "FW",
+    "stl_files": ["FW01V3.STL"],
+    "fidelity": "standard",
+
+    "flow": {
+        "velocity": 16.67,
+        "direction": "-z",
+        "ground": true
+    },
+
+    "outputs": {
+        "drag_axis": "-z",
+        "downforce_axis": "-y"
+    },
+
+    "domain_box": {
+        "min": [0.0, 0.0, -7.5],
+        "max": [2.5, 2.5, 2.0]
+    },
+
+    "domain_faces": {
+        "-x": "symmetry",
+        "+x": "farField",
+        "-y": "ground",
+        "+y": "farField",
+        "+z": "inlet",
+        "-z": "outlet"
+    }
+}

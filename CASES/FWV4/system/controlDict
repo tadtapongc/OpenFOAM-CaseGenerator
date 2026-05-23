@@ -1,0 +1,84 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2512                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      controlDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+application     simpleFoam;
+
+startFrom       latestTime;
+stopAt          endTime;
+endTime         1500;
+deltaT          1;
+
+writeControl    timeStep;
+writeInterval   500;
+purgeWrite      2;
+writeFormat     binary;
+writePrecision  8;
+writeCompression off;
+timeFormat      general;
+timePrecision   6;
+runTimeModifiable true;
+writeAtEnd      true;
+
+functions
+{
+    forces
+    {
+        type            forces;
+        libs            (forces);
+        writeControl    timeStep;
+        writeInterval   1;
+        patches         (FrontWing);
+        rho             rhoInf;
+        rhoInf          1.225;
+        CofR            (0 0 0);
+    }
+
+    forceCoeffs
+    {
+        type            forceCoeffs;
+        libs            (forces);
+        writeControl    timeStep;
+        writeInterval   1;
+        patches         (FrontWing);
+        rho             rhoInf;
+        rhoInf          1.225;
+        CofR            (0 0 0);
+        liftDir         (0 -1 0);
+        dragDir         (0 0 -1);
+        pitchAxis       (-1 0 0);
+        magUInf         16.67;
+        lRef            1.0;
+        Aref            1.0;
+    }
+
+    residuals
+    {
+        type            solverInfo;
+        libs            (utilityFunctionObjects);
+        writeControl    timeStep;
+        writeInterval   1;
+        fields          (U p k omega);
+    }
+
+    yPlus
+    {
+        type            yPlus;
+        libs            (fieldFunctionObjects);
+        writeControl    writeTime;
+    }
+}
+
+
+// ************************************************************************* //

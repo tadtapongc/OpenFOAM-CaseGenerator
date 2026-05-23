@@ -1,0 +1,27 @@
+#!/bin/bash
+set -e
+cd "${0%/*}" || exit
+. ${WM_PROJECT_DIR:?}/bin/tools/RunFunctions
+
+echo "Case: $(basename $(pwd)) | Cores: 10 | Iters: 1500"
+
+# Mesh
+runApplication surfaceFeatureExtract
+runApplication blockMesh
+runApplication decomposePar
+runParallel snappyHexMesh -overwrite -noFunctionObjects
+runApplication reconstructParMesh -constant
+rm -rf processor*
+runApplication checkMesh -allGeometry -allTopology -noFunctionObjects
+runApplication renumberMesh -overwrite -noFunctionObjects
+
+# Solve
+runApplication -s solver decomposePar
+runParallel -s potential potentialFoam -noFunctionObjects || true
+runParallel simpleFoam || true
+
+# Always reconstruct (even if solver was interrupted)
+runApplication reconstructPar
+rm -rf processor*
+
+echo "Done. Results in $(pwd)"

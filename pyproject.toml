@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cfd-gen"
+version = "1.0.0"
+description = "Geometry-agnostic OpenFOAM case generator for external aerodynamics"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+plot = ["matplotlib>=3.5"]
+
+[project.scripts]
+cfd-setup = "cfd_gen.cli:setup_main"
+cfd-forces = "cfd_gen.cli:forces_main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cfd_gen"]
