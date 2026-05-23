@@ -191,7 +191,7 @@ def live_monitor(config_path: str | None, interval: float = 3) -> None:
             ax.set_xlabel("Iteration")
             ax.grid(True, alpha=0.3)
 
-            conv_str = "✓ CONVERGED" if stats["pct"] < 0.5 else f"±{stats['pct']:.2f}%"
+            conv_str = "✓ CONVERGED" if stats["pct"] < 0.25 else f"±{stats['pct']:.2f}%"
             ax.set_title(
                 f"Drag ({drag_axis})  |  Avg: {stats['avg']:.2f} N  |  Var: {conv_str}  |  "
                 f"Range: [{stats['min']:.2f}, {stats['max']:.2f}]  |  {len(times)} iters",
@@ -232,7 +232,7 @@ def live_monitor(config_path: str | None, interval: float = 3) -> None:
 
             # Stats in title
             ld = abs(stats["avg"] / d_stats["avg"]) if d_stats["avg"] != 0 else 0
-            conv_str = "✓ CONVERGED" if stats["pct"] < 0.5 else f"±{stats['pct']:.2f}%"
+            conv_str = "✓ CONVERGED" if stats["pct"] < 0.25 else f"±{stats['pct']:.2f}%"
             ax.set_title(
                 f"Downforce ({df_axis})  |  Avg: {stats['avg']:.2f} N  |  Var: {conv_str}  |  "
                 f"L/D: {ld:.2f}  |  {len(times)} iters",
@@ -276,7 +276,7 @@ def live_monitor(config_path: str | None, interval: float = 3) -> None:
                 f"\n"
                 f"{'─' * 50}\n"
                 f"  Status: {'✓ CONVERGED' if conv else '✗ NOT CONVERGED'}\n"
-                f"  (threshold: ±0.5% over last 100 iters)\n"
+                f"  (threshold: ±0.25% over last 100 iters)\n"
                 f"\n"
                 f"  Note: If half-model (symmetry), multiply forces by 2.\n"
                 f"{'═' * 50}"

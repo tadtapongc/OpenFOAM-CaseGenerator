@@ -156,14 +156,14 @@ def check_convergence(
     drags: list[float],
     downforces: list[float],
     window: int = 100,
-    threshold: float = 0.5,
+    threshold: float = 0.25,
 ) -> tuple[bool, float, float, float, float]:
     """Check force convergence.
 
     Returns:
         (converged, drag_pct, df_pct, drag_avg, df_avg)
 
-    Threshold is 0.5% — slightly relaxed for robustness.
+    Threshold is 0.25% — tight convergence for reliable results.
     """
     if len(drags) < window:
         window = len(drags)
