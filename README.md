@@ -296,7 +296,7 @@ The ground patch uses a moving wall at freestream velocity to simulate road-rela
 
 ### Convergence Criterion
 
-Forces are considered converged when the standard deviation / mean < 0.25% over the last 100 iterations.
+Forces are considered converged when the standard deviation / mean < 0.5% over the last 200 iterations.
 
 ---
 

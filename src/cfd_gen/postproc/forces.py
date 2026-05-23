@@ -155,15 +155,15 @@ def read_forces(
 def check_convergence(
     drags: list[float],
     downforces: list[float],
-    window: int = 100,
-    threshold: float = 0.25,
+    window: int = 200,
+    threshold: float = 0.5,
 ) -> tuple[bool, float, float, float, float]:
     """Check force convergence.
 
     Returns:
         (converged, drag_pct, df_pct, drag_avg, df_avg)
 
-    Threshold is 0.25% — tight convergence for reliable results.
+    Threshold is 0.5% over 200 iterations — reliable for external aero.
     """
     if len(drags) < window:
         window = len(drags)
@@ -210,7 +210,7 @@ def print_summary(
     if drags[-1] != 0:
         print(f"  L/D:              {abs(downforces[-1]/drags[-1]):>10.3f}")
     print(f"{'-'*55}")
-    print(f"  Averaged (last 100):")
+    print(f"  Averaged (last 200):")
     print(f"    Drag:       {d_avg:>10.3f} N  (±{d_pct:.3f}%)")
     print(f"    Downforce:  {f_avg:>10.3f} N  (±{f_pct:.3f}%)")
     print(f"    L/D:        {ld:>10.3f}")

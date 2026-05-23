@@ -55,9 +55,9 @@ def monitor(
     case_dir: Path | None = None,
     config_path: str | None = None,
     interval: float = 10,
-    min_iters: int = 200,
-    threshold: float = 0.25,
-    window: int = 100,
+    min_iters: int = 300,
+    threshold: float = 0.5,
+    window: int = 200,
 ) -> bool:
     """Monitor forces and stop solver when converged.
 
@@ -136,12 +136,12 @@ def main() -> None:
                         help="Config JSON for axis info (default: case_config.json)")
     parser.add_argument("--interval", "-i", type=float, default=10,
                         help="Check interval in seconds (default: 10)")
-    parser.add_argument("--min-iters", "-m", type=int, default=200,
-                        help="Minimum iterations before checking (default: 200)")
-    parser.add_argument("--threshold", "-t", type=float, default=0.25,
-                        help="Convergence threshold %% (default: 0.25)")
-    parser.add_argument("--window", "-w", type=int, default=100,
-                        help="Averaging window (default: 100)")
+    parser.add_argument("--min-iters", "-m", type=int, default=300,
+                        help="Minimum iterations before checking (default: 300)")
+    parser.add_argument("--threshold", "-t", type=float, default=0.5,
+                        help="Convergence threshold %% (default: 0.5)")
+    parser.add_argument("--window", "-w", type=int, default=200,
+                        help="Averaging window (default: 200)")
     args = parser.parse_args()
 
     try:

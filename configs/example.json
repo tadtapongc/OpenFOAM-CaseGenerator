@@ -1,7 +1,7 @@
 {
     "_comment": "fidelity: 'fast', 'standard', or 'fine'",
 
-    "case_name": "FW03fast",
+    "case_name": "FW03fastV3",
     "stl_files": ["FW03.STL"],
     "fidelity": "fast",
 

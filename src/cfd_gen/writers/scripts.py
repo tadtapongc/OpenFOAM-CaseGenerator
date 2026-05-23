@@ -53,9 +53,9 @@ DRAG_IDX = {drag_idx}
 DRAG_SIGN = {drag_sign}
 DF_IDX = {df_idx}
 DF_SIGN = {df_sign}
-THRESHOLD = 0.25    # percent
-WINDOW = 100        # iterations to average
-MIN_ITERS = 200     # minimum before checking
+THRESHOLD = 0.5     # percent
+WINDOW = 200        # iterations to average
+MIN_ITERS = 300     # minimum before checking
 INTERVAL = 10       # seconds between checks
 
 
