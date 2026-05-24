@@ -208,16 +208,45 @@ def write_snappy_hex_mesh_dict(cfg: dict[str, Any], case_dir: Path) -> None:
     if cfg["flow"]["ground"]:
         layer_lines.append(f'        "{patches["ground"]}" {{ nSurfaceLayers {n_layers}; }}')
 
-    # Location in mesh — far from geometry
+    # Location in mesh — inlet-ceiling-farwall corner (always outside geometry)
+    #
+    # Strategy: place the point at the domain corner that is maximally far
+    # from where geometry lives (geometry is downstream, near ground, near
+    # symmetry plane). This is robust for all external aero configurations.
     box = cfg["domain_box"]
     flow_idx, flow_sign = flow_axis_index_sign(cfg)
     up_idx = up_axis_index(cfg)
-    loc = [(box["min"][i] + box["max"][i]) / 2 for i in range(3)]
-    loc[up_idx] = box["min"][up_idx] + (box["max"][up_idx] - box["min"][up_idx]) * 0.9
+    lateral_idx = next(i for i in range(3) if i != flow_idx and i != up_idx)
+    extent = [box["max"][i] - box["min"][i] for i in range(3)]
+
+    loc = [0.0, 0.0, 0.0]
+
+    # Flow axis: near inlet (upstream side)
     if flow_sign > 0:
-        loc[flow_idx] = box["min"][flow_idx] + (box["max"][flow_idx] - box["min"][flow_idx]) * 0.1
+        loc[flow_idx] = box["min"][flow_idx] + extent[flow_idx] * 0.05
     else:
-        loc[flow_idx] = box["min"][flow_idx] + (box["max"][flow_idx] - box["min"][flow_idx]) * 0.9
+        loc[flow_idx] = box["max"][flow_idx] - extent[flow_idx] * 0.05
+
+    # Up axis: near ceiling (top of domain, far from ground)
+    loc[up_idx] = box["max"][up_idx] - extent[up_idx] * 0.05
+
+    # Lateral axis: away from symmetry plane (toward far wall)
+    domain_faces = cfg.get("domain_faces", {})
+    sym_dir = None
+    for face_dir, patch_name in domain_faces.items():
+        if "symmetry" in patch_name.lower():
+            sym_dir = face_dir
+            break
+
+    if sym_dir and sym_dir.endswith("xyz"[lateral_idx]):
+        # Symmetry is on the lateral axis — move to the opposite side
+        if sym_dir.startswith("-"):
+            loc[lateral_idx] = box["max"][lateral_idx] - extent[lateral_idx] * 0.05
+        else:
+            loc[lateral_idx] = box["min"][lateral_idx] + extent[lateral_idx] * 0.05
+    else:
+        # No symmetry on lateral axis — center is safe
+        loc[lateral_idx] = (box["min"][lateral_idx] + box["max"][lateral_idx]) / 2
 
     content = f"""\
 castellatedMesh true;

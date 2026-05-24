@@ -142,6 +142,21 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
 
     combined_bounds = (tuple(all_min), tuple(all_max))
 
+    # Warn if STL is too close to domain boundary
+    box = cfg["domain_box"]
+    axis_labels = ["x", "y", "z"]
+    for i in range(3):
+        clearance_min = all_min[i] - box["min"][i]
+        clearance_max = box["max"][i] - all_max[i]
+        stl_extent = all_max[i] - all_min[i]
+        min_clearance = max(0.1, stl_extent * 0.1)  # at least 10% of geometry size
+        if clearance_min < min_clearance:
+            print(f"  ⚠  STL very close to domain boundary: "
+                  f"{axis_labels[i]}_min (clearance: {clearance_min:.3f} m)")
+        if clearance_max < min_clearance:
+            print(f"  ⚠  STL very close to domain boundary: "
+                  f"{axis_labels[i]}_max (clearance: {clearance_max:.3f} m)")
+
     # Derive mesh parameters from geometry
     cfg["domain_box"] = cfg["domain_box"]  # required in config
     cfg["mesh_params"] = compute_mesh_params(cfg, combined_bounds)

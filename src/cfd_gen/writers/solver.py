@@ -202,7 +202,7 @@ solvers
         solver          {p["solver"]};
         smoother        {p["smoother"]};
         tolerance       {p["tolerance"]};
-        relTol          0.001;
+        relTol          {p["relTol"]};
         nPreSweeps      {p["nPreSweeps"]};
         nPostSweeps     {p["nPostSweeps"]};
         cacheAgglomeration {bool_str(p["cacheAgglomeration"])};
