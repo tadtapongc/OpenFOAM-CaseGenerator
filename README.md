@@ -2,7 +2,7 @@
 
 A geometry-agnostic OpenFOAM case generator for external aerodynamics simulations. Give it an STL file and a minimal JSON config — it produces a complete, ready-to-run OpenFOAM case with meshing, solving, and post-processing.
 
-Built for FSAE/Formula Student front wing development, but works with any external aero geometry.
+Built for FSAE/Formula Student aero part development, but works with any external aero geometry.
 
 ---
 
@@ -27,8 +27,8 @@ Built for FSAE/Formula Student front wing development, but works with any extern
 ### Installation
 
 ```bash
-git clone https://github.com/<your-username>/cfd-gen.git
-cd cfd-gen
+git clone https://github.com/tadtapongc/OpenFOAM-CaseGenerator
+cd OpenFOAM-CaseGenerator
 pip install -e .
 ```
 
