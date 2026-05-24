@@ -215,6 +215,11 @@ cd "${{0%/*}}" || exit
 
 echo "Case: $(basename $(pwd)) | Cores: {n} | Iters: {end_time}"
 
+# Restore stopAt in case convergence monitor changed it on a previous run
+if [ -f system/controlDict ]; then
+    sed -i 's/stopAt.*writeNow/stopAt          endTime/' system/controlDict
+fi
+
 # Mesh
 runApplication surfaceFeatureExtract
 runApplication blockMesh
@@ -252,6 +257,11 @@ echo "Done. Results in $(pwd)"
 set -e
 cd "${{0%/*}}" || exit
 . ${{WM_PROJECT_DIR:?}}/bin/tools/RunFunctions
+
+# Restore stopAt in case convergence monitor changed it on a previous run
+if [ -f system/controlDict ]; then
+    sed -i 's/stopAt.*writeNow/stopAt          endTime/' system/controlDict
+fi
 
 runApplication surfaceFeatureExtract
 runApplication blockMesh
@@ -304,6 +314,11 @@ source ${{FOAM_INST_DIR:?}}/etc/bashrc 2>/dev/null || true
 
 set -e
 echo "Job $SLURM_JOB_ID | $(hostname) | $(date)"
+
+# Restore stopAt in case convergence monitor changed it on a previous run
+if [ -f system/controlDict ]; then
+    sed -i 's/stopAt.*writeNow/stopAt          endTime/' system/controlDict
+fi
 
 # Mesh
 surfaceFeatureExtract > log.surfaceFeatureExtract 2>&1

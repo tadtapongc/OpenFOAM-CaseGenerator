@@ -43,6 +43,16 @@ def write_fields(cfg: dict[str, Any], case_dir: Path) -> None:
         if moving_ground else "slip;"
     )
 
+    # Ground turbulence BCs: wall functions for moving ground, zeroGradient for slip
+    if moving_ground:
+        ground_k = f"{k_wf};\n        value           uniform {kv};"
+        ground_omega = f"{omega_wf};\n        value           uniform {ov};"
+        ground_nut = f"{nut_wf};\n        value           uniform 0;"
+    else:
+        ground_k = "zeroGradient;"
+        ground_omega = "zeroGradient;"
+        ground_nut = f"calculated;\n        value           uniform {nv};"
+
     zero_dir = case_dir / "0"
     zero_dir.mkdir(parents=True, exist_ok=True)
 
@@ -144,8 +154,7 @@ boundaryField
     }}
     {patches["ground"]}
     {{
-        type            {k_wf};
-        value           uniform {kv};
+        type            {ground_k}
     }}
     {patches["walls"]}
     {{
@@ -183,8 +192,7 @@ boundaryField
     }}
     {patches["ground"]}
     {{
-        type            {omega_wf};
-        value           uniform {ov};
+        type            {ground_omega}
     }}
     {patches["walls"]}
     {{
@@ -223,8 +231,7 @@ boundaryField
     }}
     {patches["ground"]}
     {{
-        type            {nut_wf};
-        value           uniform 0;
+        type            {ground_nut}
     }}
     {patches["walls"]}
     {{

@@ -205,7 +205,8 @@ def write_snappy_hex_mesh_dict(cfg: dict[str, Any], case_dir: Path) -> None:
     n_layers = layers["n_layers"]
     for name in stl_names:
         layer_lines.append(f'        "{name}" {{ nSurfaceLayers {n_layers}; }}')
-    layer_lines.append(f'        "{patches["ground"]}" {{ nSurfaceLayers {n_layers}; }}')
+    if cfg["flow"]["ground"]:
+        layer_lines.append(f'        "{patches["ground"]}" {{ nSurfaceLayers {n_layers}; }}')
 
     # Location in mesh — far from geometry
     box = cfg["domain_box"]
