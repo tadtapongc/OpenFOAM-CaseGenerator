@@ -101,7 +101,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "solver": "GAMG",
             "smoother": "DICGaussSeidel",
             "tolerance": 1e-7,
-            "relTol": 0.001,
+            "relTol": 0.01,
             "nPreSweeps": 0,
             "nPostSweeps": 2,
             "cacheAgglomeration": True,

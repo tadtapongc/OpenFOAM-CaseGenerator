@@ -1,7 +1,7 @@
 {
     "_": "fidelity: fast | standard | fine",
 
-    "case_name": "RW-ICEV6",
+    "case_name": "RW-ICEV7",
     "stl_files": ["RW_ICE.STL"],
     "fidelity": "standard",
 

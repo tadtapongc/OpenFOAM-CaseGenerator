@@ -1,26 +1,45 @@
 {
-    "_comment": "fidelity: 'fast', 'standard', or 'fine'",
+    "_README": "=== CFD-GEN CONFIGURATION FILE ===",
+    "_README2": "Only fields WITHOUT underscore prefix are used. Fields starting with _ are comments.",
+    "_README3": "All fields below are REQUIRED. Everything else uses universal defaults (see config.py).",
 
-    "case_name": "FW03fastV3",
-    "stl_files": ["FW03.STL"],
-    "fidelity": "fast",
+    "_case_name": "Unique name for this case. Output goes to CASES/<case_name>/",
+    "case_name": "my_wing",
 
+    "_stl_files": "List of STL filenames in the STL/ directory. ASCII format only.",
+    "stl_files": ["my_geometry.STL"],
+
+    "_fidelity": "Mesh/solver quality preset: 'fast' (5-10 min), 'standard' (30-60 min), 'fine' (2-4 hrs)",
+    "fidelity": "standard",
+
+    "_flow": "Flow conditions",
+    "_flow_velocity": "  velocity: freestream speed in m/s",
+    "_flow_direction": "  direction: +x, -x, +y, -y, +z, -z (direction the air travels)",
+    "_flow_ground": "  ground: true = moving wall at freestream speed (ground effect), false = slip wall",
     "flow": {
         "velocity": 16.67,
         "direction": "-z",
         "ground": true
     },
 
+    "_outputs": "Which axes to report forces on",
+    "_outputs_drag": "  drag_axis: direction of drag force (same as flow direction)",
+    "_outputs_df": "  downforce_axis: direction of downforce (typically toward ground)",
     "outputs": {
         "drag_axis": "-z",
         "downforce_axis": "-y"
     },
 
+    "_domain_box": "Wind tunnel bounding box [x, y, z] in meters. Must fully contain the STL with clearance.",
+    "_domain_box2": "Rule of thumb: 5x geometry upstream, 10x downstream, 5x lateral/top",
     "domain_box": {
         "min": [0.0, 0.0, -7.5],
         "max": [2.5, 2.5, 2.0]
     },
 
+    "_domain_faces": "Assign each face of the domain box to a boundary type.",
+    "_domain_faces2": "Available types: inlet, outlet, ground, farField, symmetry",
+    "_domain_faces3": "Face keys: -x, +x, -y, +y, -z, +z (normal direction of each box face)",
     "domain_faces": {
         "-x": "symmetry",
         "+x": "farField",
