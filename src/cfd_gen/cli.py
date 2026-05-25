@@ -193,7 +193,11 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
     print(f"    Base cell:      {mesh['base_cell_size']} m")
     print(f"    Surface level:  {mesh['surface_level']}")
     print(f"    Edge level:     {mesh['edge_level']}")
-    print(f"    Refinement regions: {len(mesh['refinement_regions'])}")
+    dist_levels = mesh.get('distance_levels', [])
+    if dist_levels:
+        shells = ", ".join(f"{d*1000:.0f}mm→L{l}" for d, l in dist_levels)
+        print(f"    Distance shells: {shells}")
+    print(f"    Wake regions:   {len(mesh['refinement_regions'])}")
 
     # Dry run — stop here
     if dry_run:

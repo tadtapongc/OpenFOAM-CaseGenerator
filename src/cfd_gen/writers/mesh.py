@@ -170,7 +170,8 @@ def write_snappy_hex_mesh_dict(cfg: dict[str, Any], case_dir: Path) -> None:
 
     surface_level = mesh["surface_level"]
     edge_level = mesh["edge_level"]
-    regions = mesh["refinement_regions"]
+    regions = mesh["refinement_regions"]  # box-based (wake only)
+    distance_levels = mesh.get("distance_levels", [])  # distance-based shells
 
     # Geometry block
     geo_lines = []
@@ -196,6 +197,16 @@ def write_snappy_hex_mesh_dict(cfg: dict[str, Any], case_dir: Path) -> None:
 
     # Refinement regions
     ref_region_lines = []
+
+    # Distance-based refinement on STL surfaces (replaces nearBody box)
+    # Cells are refined based on proximity to geometry — conforms to shape
+    if distance_levels:
+        levels_str = " ".join(f"({d} {l})" for d, l in distance_levels)
+        for name in stl_names:
+            ref_region_lines.append(
+                f"        {name} {{ mode distance; levels ({levels_str}); }}")
+
+    # Box-based refinement for wake region
     for r in regions:
         ref_region_lines.append(
             f"        {r['name']} {{ mode inside; levels ((1e15 {r['level']})); }}")

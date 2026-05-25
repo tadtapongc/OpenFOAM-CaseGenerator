@@ -178,6 +178,13 @@ FIDELITY_PRESETS: dict[str, dict[str, Any]] = {
         "nLayerIter": 30,
         "nRelaxIter_layers": 5,
         "slurm_time": "04:00:00",
+        # Distance-based refinement shells (distance, level)
+        # Shells conform to geometry shape — replaces nearBody box
+        "distance_levels": [
+            (0.015, 4),   # 15mm → level 4
+            (0.060, 3),   # 60mm → level 3
+            (0.200, 2),   # 200mm → level 2
+        ],
     },
     "standard": {
         # Balanced — good accuracy, reasonable time (~30-60 min)
@@ -197,6 +204,12 @@ FIDELITY_PRESETS: dict[str, dict[str, Any]] = {
         "nLayerIter": 50,
         "nRelaxIter_layers": 10,
         "slurm_time": "08:00:00",
+        # Distance-based refinement shells
+        "distance_levels": [
+            (0.010, 5),   # 10mm → level 5
+            (0.040, 4),   # 40mm → level 4
+            (0.150, 3),   # 150mm → level 3
+        ],
     },
     "fine": {
         # Final report quality — accurate numbers (~2-4 hours)
@@ -216,6 +229,12 @@ FIDELITY_PRESETS: dict[str, dict[str, Any]] = {
         "nLayerIter": 50,
         "nRelaxIter_layers": 10,
         "slurm_time": "12:00:00",
+        # Distance-based refinement shells
+        "distance_levels": [
+            (0.005, 6),   # 5mm → level 6
+            (0.020, 5),   # 20mm → level 5
+            (0.080, 4),   # 80mm → level 4
+        ],
     },
 }
 
@@ -230,14 +249,20 @@ def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str,
     Philosophy: relative sizing for everything. No absolute cell sizes.
     The mesh adapts to whatever geometry you throw at it.
 
+    Refinement strategy:
+        - Distance-based shells around the STL surface (replaces nearBody box).
+          Cells are refined based on proximity to the geometry, giving smooth
+          transitions that conform to the actual shape.
+        - Box-based wake region downstream (distance mode can't reach the far wake).
+
     Fidelity levels:
         "fast"     — iterative design, quick turnaround
         "standard" — balanced accuracy/speed (default)
         "fine"     — final report quality
 
     Returns dict with:
-        base_cell_size, surface_level, edge_level, near_body_level,
-        wake_level, refinement_regions, n_layers, etc.
+        base_cell_size, surface_level, edge_level, distance_levels,
+        refinement_regions (wake only), n_layers, etc.
     """
     smin, smax = combined_bounds
     extents = [smax[i] - smin[i] for i in range(3)]
@@ -260,24 +285,22 @@ def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str,
     surface_level = preset["surface_level"]
     edge_level = preset["edge_level"]
 
-    # Refinement regions
-    near_body_level = max(2, surface_level[1] - 2)
+    # Distance-based refinement shells (replaces nearBody box)
+    # Each tuple is (distance_from_surface_m, refinement_level)
+    distance_levels = preset["distance_levels"]
+
+    # Wake box (kept as box-based — distance mode can't reach far wake)
     wake_level = max(1, surface_level[1] - 3)
 
-    # Compute refinement region boxes
     flow_idx, flow_sign = flow_axis_index_sign(cfg)
     up_idx = up_axis_index(cfg)
 
     pad = [max(0.05, d * 0.2) for d in extents]
 
-    # Near-body box
-    near_min = [smin[i] - pad[i] for i in range(3)]
-    near_max = [smax[i] + pad[i] for i in range(3)]
-    near_min[up_idx] = -0.01  # extend to ground
-
-    # Wake box
-    wake_min = list(near_min)
-    wake_max = list(near_max)
+    # Wake box starts at geometry trailing edge, extends downstream
+    wake_min = [smin[i] - pad[i] for i in range(3)]
+    wake_max = [smax[i] + pad[i] for i in range(3)]
+    wake_min[up_idx] = -0.01  # extend to ground
     wake_length = max(2.0, extents[flow_idx] * 4.0)
 
     if flow_sign > 0:
@@ -288,8 +311,6 @@ def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str,
         wake_min[flow_idx] = smin[flow_idx] - wake_length
 
     refinement_regions = [
-        {"name": "nearBody", "min": [round(v, 3) for v in near_min],
-         "max": [round(v, 3) for v in near_max], "level": near_body_level},
         {"name": "wakeBox", "min": [round(v, 3) for v in wake_min],
          "max": [round(v, 3) for v in wake_max], "level": wake_level},
     ]
@@ -298,6 +319,7 @@ def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str,
         "base_cell_size": round(base_cell, 4),
         "surface_level": surface_level,
         "edge_level": edge_level,
+        "distance_levels": distance_levels,
         "refinement_regions": refinement_regions,
         "nCellsBetweenLevels": preset.get("nCellsBetweenLevels", 3),
         "maxGlobalCells": preset.get("maxGlobalCells", 20_000_000),
