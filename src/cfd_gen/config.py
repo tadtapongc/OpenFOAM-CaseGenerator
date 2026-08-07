@@ -73,8 +73,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
     # SLURM
     "slurm": {
+        "qos": "cu_long",
+        "partition": "cpu",
         "time": "04:00:00",
-        "openfoam_module": "openfoam/v2512",
+        "mem_per_cpu": "3G",
+        "cpus_per_task": 1,
+        "openfoam_module": None,
+        "openfoam_source": "$HOME/OpenFOAM/OpenFOAM-v2606/etc/bashrc",
     },
 
     # Solver settings (conservative, never-diverge)

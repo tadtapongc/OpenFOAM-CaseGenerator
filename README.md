@@ -129,7 +129,12 @@ Only 4 fields are required — everything else uses universal defaults optimized
 | `force_refs` | `lRef` | 1.0 | Reference length for coefficients |
 | `force_refs` | `Aref` | 1.0 | Reference area for coefficients |
 | `slurm` | `time` | auto | Wall time (from fidelity) |
-| `slurm` | `openfoam_module` | `openfoam/v2512` | Module to load |
+| `slurm` | `qos` | `cu_long` | Job Quality of Service |
+| `slurm` | `partition` | `cpu` | SLURM partition |
+| `slurm` | `mem_per_cpu` | `3G` | Memory requested per CPU |
+| `slurm` | `cpus_per_task` | 1 | CPUs allocated per task |
+| `slurm` | `openfoam_module` | `null` | Module to load (overrides source if set) |
+| `slurm` | `openfoam_source` | `$HOME/.../bashrc` | Script to source for OpenFOAM |
 
 ---
 

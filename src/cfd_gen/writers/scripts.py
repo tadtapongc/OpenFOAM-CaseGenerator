@@ -197,8 +197,20 @@ def write_scripts(cfg: dict[str, Any], case_dir: Path) -> None:
     """Write all execution scripts."""
     n = cfg["parallel"]["n_procs"]
     case_name = cfg["case_name"]
-    slurm = cfg["slurm"]
+    slurm = cfg.get("slurm", {})
     end_time = cfg["solver"]["end_time"]
+
+    # ----- SLURM settings with good defaults for CU e-Science -----
+    qos = slurm.get("qos", "cu_long")
+    partition = slurm.get("partition", "cpu")
+    time_limit = slurm.get("time", "04:00:00")
+    mem_per_cpu = slurm.get("mem_per_cpu", "3G")
+    cpus_per_task = slurm.get("cpus_per_task", 1)
+    openfoam_module = slurm.get("openfoam_module", None)
+    openfoam_source = slurm.get(
+        "openfoam_source",
+        "$HOME/OpenFOAM/OpenFOAM-v2606/etc/bashrc"
+    )
 
     # ---- convergence_monitor.py (self-contained) ----
     _write_script(
@@ -300,53 +312,93 @@ fi
 [ -d 0.orig ] && rm -rf 0 && cp -r 0.orig 0
 """)
 
-    # ---- run.sh (SLURM) ----
+    # ---- run.sh (SLURM) - Full improved version ----
+    openfoam_load = (
+        f"module load {openfoam_module}"
+        if openfoam_module
+        else f"source {openfoam_source}"
+    )
+
     _write_script(case_dir / "run.sh", f"""\
 #!/bin/bash
 #SBATCH --job-name={case_name}
+#SBATCH --qos={qos}
+#SBATCH --partition={partition}
 #SBATCH --nodes=1
 #SBATCH --ntasks={n}
-#SBATCH --time={slurm["time"]}
+#SBATCH --cpus-per-task={cpus_per_task}
+#SBATCH --mem-per-cpu={mem_per_cpu}
+#SBATCH --time={time_limit}
 #SBATCH --output={case_name}_%j.log
 
-module load {slurm["openfoam_module"]}
+echo "=============================================="
+echo "Job ID   : $SLURM_JOB_ID"
+echo "Node     : $(hostname)"
+echo "Cores    : $SLURM_NTASKS"
+echo "QoS      : {qos}"
+echo "Started  : $(date)"
+echo "=============================================="
+
+# Load environment
+module purge
+{openfoam_load}
+
+# Extra safety
 source ${{FOAM_INST_DIR:?}}/etc/bashrc 2>/dev/null || true
 
 set -e
-echo "Job $SLURM_JOB_ID | $(hostname) | $(date)"
 
-# Restore stopAt in case convergence monitor changed it on a previous run
+# Restore stopAt (in case previous run was stopped by monitor)
 if [ -f system/controlDict ]; then
     sed -i 's/stopAt.*writeNow/stopAt          endTime/' system/controlDict
 fi
 
-# Mesh
+# ======================== MESH ========================
+echo ">>> Running surfaceFeatureExtract"
 surfaceFeatureExtract > log.surfaceFeatureExtract 2>&1
+
+echo ">>> Running blockMesh"
 blockMesh > log.blockMesh 2>&1
+
+echo ">>> Decomposing for meshing"
 decomposePar > log.decomposePar 2>&1
+
+echo ">>> Running snappyHexMesh (parallel)"
 mpirun -np $SLURM_NTASKS snappyHexMesh -overwrite -noFunctionObjects -parallel > log.snappyHexMesh 2>&1
+
+echo ">>> Reconstructing mesh"
 reconstructParMesh -constant > log.reconstructParMesh 2>&1
 rm -rf processor*
+
+echo ">>> Checking mesh"
 checkMesh -allGeometry -allTopology -noFunctionObjects > log.checkMesh 2>&1
+
+echo ">>> Renumbering mesh"
 renumberMesh -overwrite -noFunctionObjects > log.renumberMesh 2>&1
 
-# Solve
+# ======================== SOLVE ========================
+echo ">>> Decomposing for solver"
 decomposePar > log.decomposePar.solver 2>&1
+
+echo ">>> Running potentialFoam"
 mpirun -np $SLURM_NTASKS potentialFoam -noFunctionObjects -parallel > log.potentialFoam 2>&1 || true
 
-# Start convergence monitor in background (auto-stops solver when converged)
+echo ">>> Starting convergence monitor"
 python3 ./convergence_monitor.py > log.convergenceMonitor 2>&1 &
 MONITOR_PID=$!
 
+echo ">>> Running simpleFoam"
 mpirun -np $SLURM_NTASKS simpleFoam -parallel > log.simpleFoam 2>&1 || true
 
-# Stop monitor if still running
+# Stop monitor
 kill $MONITOR_PID 2>/dev/null || true
 wait $MONITOR_PID 2>/dev/null || true
 
-# Always reconstruct
+echo ">>> Reconstructing results"
 reconstructPar > log.reconstructPar 2>&1
 rm -rf processor*
 
-echo "Done at $(date)"
+echo "=============================================="
+echo "Job finished at $(date)"
+echo "=============================================="
 """)

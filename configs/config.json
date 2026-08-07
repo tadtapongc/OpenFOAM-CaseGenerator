@@ -30,5 +30,15 @@
         "+y": "farField",
         "+z": "inlet",
         "-z": "outlet"
+    },
+
+    "_slurm": "Override SLURM settings for CU e-Science cluster here",
+    "slurm": {
+        "qos": "cu_long",
+        "partition": "cpu",
+        "time": "06:00:00",
+        "mem_per_cpu": "3G",
+        "openfoam_module": null,
+        "openfoam_source": "$HOME/OpenFOAM/OpenFOAM-v2606/etc/bashrc"
     }
 }
