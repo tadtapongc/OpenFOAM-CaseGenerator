@@ -349,8 +349,10 @@ echo "=============================================="
 module purge
 {openfoam_load}
 
-# Extra safety
-source ${{FOAM_INST_DIR:?}}/etc/bashrc 2>/dev/null || true
+# Extra safety (if a module defines FOAM_INST_DIR but doesn't source bashrc)
+if [ -n "${{FOAM_INST_DIR:-}}" ]; then
+    source ${{FOAM_INST_DIR}}/etc/bashrc 2>/dev/null || true
+fi
 
 set -e
 
