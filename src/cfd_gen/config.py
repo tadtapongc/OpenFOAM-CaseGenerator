@@ -73,8 +73,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
     # SLURM
     "slurm": {
-        "qos": "cu_long",
+        "qos": "cu_hpc",
         "partition": "cpu",
+        "nodes": 1,
         "time": "04:00:00",
         "mem_per_cpu": "3G",
         "cpus_per_task": 1,

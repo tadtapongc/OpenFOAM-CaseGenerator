@@ -32,10 +32,16 @@
         "-z": "outlet"
     },
 
+    "_parallel": "Number of cores (processes) to use",
+    "parallel": {
+        "n_procs": 10
+    },
+
     "_slurm": "Override SLURM settings for CU e-Science cluster here",
     "slurm": {
-        "qos": "cu_long",
+        "qos": "cu_hpc",
         "partition": "cpu",
+        "nodes": 1,
         "time": "06:00:00",
         "mem_per_cpu": "3G",
         "openfoam_module": ["GCC/11.3.0", "OpenMPI/4.1.4-GCC-11.3.0"],
