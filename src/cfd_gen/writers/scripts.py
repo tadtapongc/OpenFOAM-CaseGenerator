@@ -313,11 +313,17 @@ fi
 """)
 
     # ---- run.sh (SLURM) - Full improved version ----
-    openfoam_load = (
-        f"module load {openfoam_module}"
-        if openfoam_module
-        else f"source {openfoam_source}"
-    )
+    load_lines = []
+    if openfoam_module:
+        if isinstance(openfoam_module, list):
+            for mod in openfoam_module:
+                load_lines.append(f"module load {mod}")
+        else:
+            load_lines.append(f"module load {openfoam_module}")
+    if openfoam_source:
+        load_lines.append(f"source {openfoam_source}")
+    
+    openfoam_load = "\n".join(load_lines) if load_lines else ""
 
     _write_script(case_dir / "run.sh", f"""\
 #!/bin/bash

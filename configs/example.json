@@ -55,7 +55,7 @@
         "partition": "cpu",
         "time": "06:00:00",
         "mem_per_cpu": "3G",
-        "openfoam_module": null,
+        "openfoam_module": ["GCC/11.3.0", "OpenMPI/4.1.4-GCC-11.3.0"],
         "openfoam_source": "$HOME/OpenFOAM/OpenFOAM-v2606/etc/bashrc"
     }
 }
