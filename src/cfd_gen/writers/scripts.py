@@ -358,11 +358,16 @@ fi
 set -e
 
 ORIG_DIR=$PWD
-RAM_DIR=/dev/shm/$USER/$SLURM_JOB_ID
 
-echo ">>> Setting up local node RAM disk execution"
+# Robustly create a temporary directory in RAM (/dev/shm) or fallback to /tmp
+if [ -d "/dev/shm" ] && [ -w "/dev/shm" ]; then
+    RAM_DIR=$(mktemp -d -p /dev/shm cfd_${SLURM_JOB_ID:-local}_XXXXXX)
+else
+    RAM_DIR=$(mktemp -d -t cfd_${SLURM_JOB_ID:-local}_XXXXXX)
+fi
+
+echo ">>> Setting up local execution in $RAM_DIR"
 echo ">>> Copying case to $RAM_DIR"
-mkdir -p $RAM_DIR
 rsync -a $ORIG_DIR/ $RAM_DIR/
 cd $RAM_DIR
 
