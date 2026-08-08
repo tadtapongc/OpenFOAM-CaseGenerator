@@ -359,8 +359,10 @@ set -e
 
 ORIG_DIR=$PWD
 
-# Robustly create a temporary directory in RAM (/dev/shm) or fallback to /tmp
-if [ -d "/dev/shm" ] && [ -w "/dev/shm" ]; then
+# Robustly create a temporary directory prioritizing $TMPDIR (Cluster scratch space), then /dev/shm, then /tmp
+if [ -n "$TMPDIR" ] && [ -w "$TMPDIR" ]; then
+    RAM_DIR=$(mktemp -d -p "$TMPDIR" cfd_${{SLURM_JOB_ID:-local}}_XXXXXX)
+elif [ -d "/dev/shm" ] && [ -w "/dev/shm" ]; then
     RAM_DIR=$(mktemp -d -p /dev/shm cfd_${{SLURM_JOB_ID:-local}}_XXXXXX)
 else
     RAM_DIR=$(mktemp -d -t cfd_${{SLURM_JOB_ID:-local}}_XXXXXX)
