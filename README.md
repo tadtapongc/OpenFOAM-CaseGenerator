@@ -12,7 +12,7 @@ Built for FSAE/Formula Student aero part development, but works with any externa
 - **Three fidelity presets** — `fast` (5–10 min), `standard` (30–60 min), `fine` (2–4 hours)
 - **Minimal config** — only geometry file, flow speed, and domain box required
 - **Full pipeline** — from STL to force coefficients in one command
-- **Post-processing CLI** — convergence plots, live monitoring, multi-case comparison
+- **Post-processing CLI** — convergence plots, live monitoring (with auto-stop on convergence), multi-case comparison
 - **HPC ready** — generates SLURM scripts alongside local parallel scripts
 
 ---
@@ -75,7 +75,7 @@ cfd-setup configs/my_config.json -n
 
 ## Configuration
 
-Only 4 fields are required — everything else uses universal defaults optimized for external aerodynamics.
+Only 5 fields are required (`case_name`, `stl_files`, `flow`, `outputs`, and `domain_box`) — everything else uses universal defaults optimized for external aerodynamics.
 
 ### Minimal Config
 
@@ -314,6 +314,8 @@ Forces are considered converged when the standard deviation / mean < 0.5% over t
 | Serial | `./Allrun` | Debugging / small cases |
 | Clean & re-run | `./Allclean && ./Allrun.parallel` | Reset and restart |
 
+*Note: The SLURM script (`run.sh`) runs inside a fast RAM disk (`$TMPDIR` or `/dev/shm`) to minimize I/O bottleneck on the cluster. It safely catches job timeouts to reconstruct the mesh and sync results back without exhausting network storage.*
+
 ---
 
 ## Design Decisions
@@ -346,6 +348,14 @@ Forces are considered converged when the standard deviation / mean < 0.5% over t
 - **STL format**: Only ASCII STL is supported. Convert binary STL in your CAD tool (e.g., SolidWorks: Save As → STL → ASCII).
 - **STL and CASES directories** are gitignored. Place your geometry in `STL/` and generated cases appear in `CASES/`.
 - **Convergence safety**: The solver uses `writeAtEnd true` to always save the final state, even if interrupted.
+
+---
+
+## Roadmap (Planned Features)
+
+- **Auto-Reporting `y+`**: Post-processing parser to report boundary layer health.
+- **Angle of Attack & Yaw**: Native configuration support to auto-rotate flow velocity vectors.
+- **Auto VTK Slices**: OpenFOAM function objects to generate lightweight 2D slices of the flow field during the run.
 
 ---
 

@@ -242,7 +242,7 @@ def write_snappy_hex_mesh_dict(cfg: dict[str, Any], case_dir: Path) -> None:
     loc[up_idx] = box["max"][up_idx] - extent[up_idx] * 0.05
 
     # Lateral axis: away from symmetry plane (toward far wall)
-    domain_faces = cfg.get("domain_faces", {})
+    domain_faces = _get_face_assignments(cfg)
     sym_dir = None
     for face_dir, patch_name in domain_faces.items():
         if "symmetry" in patch_name.lower():

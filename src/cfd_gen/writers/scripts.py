@@ -375,6 +375,12 @@ cd $RAM_DIR
 
 # Ensure results are copied back when script exits or is interrupted
 cleanup() {{
+    echo ">>> Job exiting. Syncing results..."
+    if ls -d processor* > /dev/null 2>&1; then
+        echo ">>> Interrupted! Attempting to reconstruct latest time..."
+        reconstructPar -latestTime > log.reconstructPar_cleanup 2>&1 || true
+        rm -rf processor*
+    fi
     echo ">>> Copying results back to network filesystem"
     rsync -a $RAM_DIR/ $ORIG_DIR/
     echo ">>> Cleaning up RAM disk"
