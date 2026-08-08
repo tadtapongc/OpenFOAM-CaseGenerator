@@ -76,13 +76,13 @@ def _do_init(project_dir: Path) -> None:
     out_path = cfg_dir / "example.json"
     out_path.write_text(json.dumps(example, indent=4) + "\n")
 
-    (project_dir / "STL").mkdir(exist_ok=True)
-    (project_dir / "CASES").mkdir(exist_ok=True)
+    (project_dir / "stl").mkdir(exist_ok=True)
+    (project_dir / "cases").mkdir(exist_ok=True)
 
     print(f"\n  ✓ Created: {out_path}")
-    print(f"  ✓ Created: STL/ and CASES/")
+    print(f"  ✓ Created: stl/ and cases/")
     print(f"\n  Next steps:")
-    print(f"    1. Place STL files in STL/")
+    print(f"    1. Place STL files in stl/")
     print(f"    2. Edit configs/example.json")
     print(f"    3. cfd-setup configs/example.json")
 
@@ -224,7 +224,7 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
 
     # Dry run — stop here
     if dry_run:
-        print(f"\n  DRY RUN — would generate: CASES/{cfg['case_name']}/")
+        print(f"\n  DRY RUN — would generate: cases/{cfg['case_name']}/")
         print(f"    Velocity:   {cfg['flow']['velocity']:.2f} m/s  U={vec_str(vel)}")
         print(f"    k={k:.5g}  ω={omega:.5g}  νt={nut:.5g}")
         print(f"    Surfaces:   {', '.join(stl_names)}")
@@ -232,9 +232,9 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
         return
 
     # Generate case
-    case_dir = project_dir / "CASES" / cfg["case_name"]
+    case_dir = project_dir / "cases" / cfg["case_name"]
     print(f"\n{'='*60}")
-    print(f"  Generating: CASES/{cfg['case_name']}/")
+    print(f"  Generating: cases/{cfg['case_name']}/")
     print(f"  Velocity: {cfg['flow']['velocity']:.2f} m/s | Cell: {mesh['base_cell_size']} m")
     print(f"  Surfaces: {', '.join(stl_names)}")
     print(f"  Pipeline: potentialFoam → simpleFoam ({end_time} iters, linearUpwind)")
@@ -291,8 +291,8 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
     # Save config snapshot (for post-processing)
     (case_dir / "case_config.json").write_text(json.dumps(cfg, indent=2) + "\n")
 
-    print(f"\n  ✓ Case: CASES/{cfg['case_name']}/")
-    print(f"    cd CASES/{cfg['case_name']} && ./Allrun.parallel")
+    print(f"\n  ✓ Case: cases/{cfg['case_name']}/")
+    print(f"    cd cases/{cfg['case_name']} && ./Allrun.parallel")
     print()
 
 

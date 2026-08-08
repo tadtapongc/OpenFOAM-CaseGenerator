@@ -15,21 +15,21 @@ from cfd_gen.postproc.forces import (
 
 
 def compare_cases(cases_dir: Path | None = None) -> None:
-    """Compare forces across all cases in CASES/ directory."""
+    """Compare forces across all cases in cases/ directory."""
     if cases_dir is None:
         # Try script parent, then cwd
-        candidates = [Path.cwd() / "CASES", Path(__file__).resolve().parent.parent.parent.parent / "CASES"]
+        candidates = [Path.cwd() / "cases", Path(__file__).resolve().parent.parent.parent.parent / "cases"]
         cases_dir = next((d for d in candidates if d.exists()), None)
 
     if not cases_dir or not cases_dir.exists():
-        sys.exit("ERROR: CASES/ directory not found")
+        sys.exit("ERROR: cases/ directory not found")
 
     case_dirs = sorted(
         [d for d in cases_dir.iterdir() if d.is_dir() and (d / "case_config.json").exists()],
         key=lambda d: d.name,
     )
     if not case_dirs:
-        sys.exit("ERROR: No cases found in CASES/")
+        sys.exit("ERROR: No cases found in cases/")
 
     results = []
     for d in case_dirs:

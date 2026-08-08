@@ -3,12 +3,12 @@
 # ============================================================
 
 # All generated cases (ignore contents, keep folder)
-CASES/*
-!CASES/.gitkeep
+cases/*
+!cases/.gitkeep
 
 # All STL geometry files (ignore contents, keep folder)
-STL/*
-!STL/.gitkeep
+stl/*
+!stl/.gitkeep
 *.stl
 *.STL
 

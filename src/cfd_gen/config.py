@@ -21,7 +21,8 @@ log = logging.getLogger(__name__)
 DEFAULT_CONFIG: dict[str, Any] = {
     "case_name": "my_case",
     "stl_files": [],
-    "stl_dir": "STL",
+    "stl_dir": "stl",
+    "case_dir": "cases",
 
     # Flow conditions
     "flow": {

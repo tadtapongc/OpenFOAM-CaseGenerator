@@ -44,8 +44,8 @@ python3 setup_case.py <config.json>
 # 1. Initialize project structure
 cfd-setup --init
 
-# 2. Place your STL geometry in STL/
-cp my_wing.STL STL/
+# 2. Place your STL geometry in stl/
+cp my_wing.STL stl/
 
 # 3. Edit the config
 vim configs/example.json
@@ -54,7 +54,7 @@ vim configs/example.json
 cfd-setup configs/my_config.json
 
 # 5. Run the simulation
-cd CASES/my_case
+cd cases/my_case
 ./Allrun.parallel          # Local parallel (default: 10 cores)
 # OR
 sbatch run.sh              # SLURM cluster submission
@@ -164,8 +164,8 @@ cfd-gen/
 ├── pyproject.toml         # Package definition
 ├── configs/
 │   └── example.json       # Config template
-├── STL/                   # Place your geometry here (gitignored)
-├── CASES/                 # Generated cases go here (gitignored)
+├── stl/                   # Place your geometry here (gitignored)
+├── cases/                 # Generated cases go here (gitignored)
 └── src/cfd_gen/
     ├── cli.py             # CLI entry points
     ├── config.py          # Config loading, defaults, validation
@@ -188,7 +188,7 @@ cfd-gen/
 ### Generated Case Layout
 
 ```
-CASES/<case_name>/
+cases/<case_name>/
 ├── 0/                     # Boundary conditions (U, p, k, omega, nut, Phi)
 ├── 0.orig/                # Backup of initial conditions
 ├── constant/
@@ -277,7 +277,7 @@ The ground patch uses a moving wall at freestream velocity to simulate road-rela
 | `cfd-forces --plot` | Convergence history plot |
 | `cfd-forces --plot --save` | Save plot as PNG |
 | `cfd-forces --live` | Real-time force monitor (updates every 3s) |
-| `cfd-forces --compare` | Compare all cases in CASES/ directory |
+| `cfd-forces --compare` | Compare all cases in cases/ directory |
 | `cfd-forces --check` | Exit code 0 if converged, 1 if not |
 
 ### Example Output
@@ -346,7 +346,7 @@ Forces are considered converged when the standard deviation / mean < 0.5% over t
 
 - **Half-model**: Uses a symmetry plane. Multiply reported forces by 2 for full-vehicle values.
 - **STL format**: Only ASCII STL is supported. Convert binary STL in your CAD tool (e.g., SolidWorks: Save As → STL → ASCII).
-- **STL and CASES directories** are gitignored. Place your geometry in `STL/` and generated cases appear in `CASES/`.
+- **stl and cases directories** are gitignored. Place your geometry in `stl/` and generated cases appear in `cases/`.
 - **Convergence safety**: The solver uses `writeAtEnd true` to always save the final state, even if interrupted.
 
 ---
