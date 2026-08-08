@@ -276,10 +276,10 @@ def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str,
     preset = FIDELITY_PRESETS.get(fidelity, FIDELITY_PRESETS["fast"])
 
     # Base cell: fixed per fidelity (background mesh, far from geometry)
-    # Can be overridden manually
-    base_cell = cfg.get("mesh_override", {}).get(
-        "base_cell_size", preset["base_cell_size"]
-    )
+    # Respect user's explicit base_cell_size if provided
+    base_cell = cfg.get("mesh_params", {}).get("base_cell_size")
+    if not base_cell:
+        base_cell = preset["base_cell_size"]
 
     # Surface and edge levels: fixed per fidelity (predictable, no surprises)
     surface_level = preset["surface_level"]
@@ -330,15 +330,3 @@ def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str,
     }
 
 
-def compute_iterations(cfg: dict[str, Any]) -> int:
-    """Compute max iteration count from fidelity preset.
-
-    Fast: 800, Standard: 1500, Fine: 3000
-    """
-    override = cfg.get("solver_override", {}).get("end_time")
-    if override:
-        return int(override)
-
-    fidelity = cfg.get("fidelity", "fast")
-    preset = FIDELITY_PRESETS.get(fidelity, FIDELITY_PRESETS["fast"])
-    return preset["end_time"]

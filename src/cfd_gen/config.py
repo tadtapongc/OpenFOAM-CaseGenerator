@@ -76,7 +76,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "qos": "cu_hpc",
         "partition": "cpu",
         "nodes": 1,
-        "time": "04:00:00",
+        "time": "auto",
         "mem_per_cpu": "3G",
         "cpus_per_task": 1,
         "openfoam_module": None,

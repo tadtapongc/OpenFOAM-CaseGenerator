@@ -91,7 +91,6 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
     """Generate a complete OpenFOAM case."""
     from cfd_gen.config import find_stl, load_config, validate
     from cfd_gen.geometry import (
-        compute_iterations,
         compute_mesh_params,
         turbulence_values,
         vec_str,
@@ -104,6 +103,18 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
 
     # Load and validate config
     cfg = load_config(cfg_path)
+    
+    # Load raw config to correctly handle user overrides
+    with open(cfg_path) as f:
+        raw_user = json.load(f)
+    raw_overrides = raw_user.get("overrides", {})
+    
+    def _is_set(section: str, key: str) -> bool:
+        """Check if user explicitly set a value in their config."""
+        if section in raw_overrides and key in raw_overrides[section]: return True
+        if section in raw_user and key in raw_user[section]: return True
+        return False
+
     print(f"  Config: {cfg_path}")
 
     errors, warnings = validate(cfg, project_dir)
@@ -160,21 +171,33 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
     # Derive mesh parameters from geometry
     cfg["domain_box"] = cfg["domain_box"]  # required in config
     cfg["mesh_params"] = compute_mesh_params(cfg, combined_bounds)
-    cfg["solver"]["end_time"] = compute_iterations(cfg)
-
-    # Apply fidelity preset to layers and write_interval
+    # Apply fidelity presets conditionally
     from cfd_gen.geometry import FIDELITY_PRESETS
     fidelity = cfg.get("fidelity", "fast")
     preset = FIDELITY_PRESETS.get(fidelity, FIDELITY_PRESETS["fast"])
-    cfg["layers"]["n_layers"] = preset["n_layers"]
-    cfg["layers"]["expansion_ratio"] = preset["expansion_ratio"]
-    cfg["layers"]["first_layer_thickness"] = preset["first_layer_thickness"]
-    cfg["layers"]["nLayerIter"] = preset.get("nLayerIter", 50)
-    cfg["layers"]["nRelaxIter"] = preset.get("nRelaxIter_layers", 10)
-    cfg["solver"]["write_interval"] = preset["write_interval"]
-    cfg["snap"]["nSolveIter"] = preset.get("nSolveIter", 200)
-    cfg["snap"]["nFeatureSnapIter"] = preset.get("nFeatureSnapIter", 15)
-    cfg["slurm"]["time"] = preset.get("slurm_time", cfg["slurm"]["time"])
+    
+    if not _is_set("solver", "end_time"):
+        cfg["solver"]["end_time"] = preset["end_time"]
+    if not _is_set("layers", "n_layers"):
+        cfg["layers"]["n_layers"] = preset["n_layers"]
+    if not _is_set("layers", "expansion_ratio"):
+        cfg["layers"]["expansion_ratio"] = preset["expansion_ratio"]
+    if not _is_set("layers", "first_layer_thickness"):
+        cfg["layers"]["first_layer_thickness"] = preset["first_layer_thickness"]
+    if not _is_set("layers", "nLayerIter"):
+        cfg["layers"]["nLayerIter"] = preset.get("nLayerIter", 50)
+    if not _is_set("layers", "nRelaxIter"):
+        cfg["layers"]["nRelaxIter"] = preset.get("nRelaxIter_layers", 10)
+    if not _is_set("solver", "write_interval"):
+        cfg["solver"]["write_interval"] = preset["write_interval"]
+    if not _is_set("snap", "nSolveIter"):
+        cfg["snap"]["nSolveIter"] = preset.get("nSolveIter", 200)
+    if not _is_set("snap", "nFeatureSnapIter"):
+        cfg["snap"]["nFeatureSnapIter"] = preset.get("nFeatureSnapIter", 15)
+        
+    # Only apply preset SLURM time if user left it as default 'auto'
+    if cfg["slurm"]["time"] in ("auto", "04:00:00"):
+        cfg["slurm"]["time"] = preset.get("slurm_time", "04:00:00")
 
     # Derived values for display
     k, omega, nut = turbulence_values(cfg)
