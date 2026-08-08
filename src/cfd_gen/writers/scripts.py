@@ -357,6 +357,28 @@ fi
 
 set -e
 
+ORIG_DIR=$PWD
+RAM_DIR=/dev/shm/$USER/$SLURM_JOB_ID
+
+echo ">>> Setting up local node RAM disk execution"
+echo ">>> Copying case to $RAM_DIR"
+mkdir -p $RAM_DIR
+rsync -a $ORIG_DIR/ $RAM_DIR/
+cd $RAM_DIR
+
+# Ensure results are copied back when script exits or is interrupted
+cleanup() {{
+    echo ">>> Copying results back to network filesystem"
+    rsync -a $RAM_DIR/ $ORIG_DIR/
+    echo ">>> Cleaning up RAM disk"
+    cd $ORIG_DIR
+    rm -rf $RAM_DIR
+    echo "=============================================="
+    echo "Job finished at $(date)"
+    echo "=============================================="
+}}
+trap cleanup EXIT
+
 # Restore stopAt (in case previous run was stopped by monitor)
 if [ -f system/controlDict ]; then
     sed -i 's/stopAt.*writeNow/stopAt          endTime/' system/controlDict
@@ -406,8 +428,4 @@ wait $MONITOR_PID 2>/dev/null || true
 echo ">>> Reconstructing results"
 reconstructPar > log.reconstructPar 2>&1
 rm -rf processor*
-
-echo "=============================================="
-echo "Job finished at $(date)"
-echo "=============================================="
 """)

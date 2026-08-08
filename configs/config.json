@@ -1,14 +1,14 @@
 {
     "_": "fidelity: fast | standard | fine",
 
-    "case_name": "RW-ICEV7",
-    "stl_files": ["RW_ICE.STL"],
+    "case_name": "EV",
+    "stl_files": ["EV_assem.STL"],
     "fidelity": "standard",
 
     "flow": {
         "velocity": 16.67,
         "direction": "-z",
-        "ground": false
+        "ground": true
     },
 
     "outputs": {
@@ -18,8 +18,8 @@
 
     "_domain": "bounding box [x, y, z] in meters",
     "domain_box": {
-        "min": [0.0, -3.0, -7.5],
-        "max": [3.0, 3.5, 3.0]
+        "min": [0.0, 0.0, -7.5],
+        "max": [3.0, 3.5, 3.5]
     },
 
     "_faces": "available: inlet, outlet, ground, farField, symmetry",
@@ -34,7 +34,7 @@
 
     "_parallel": "Number of cores (processes) to use",
     "parallel": {
-        "n_procs": 10
+        "n_procs": 32
     },
 
     "_slurm": "Override SLURM settings for CU e-Science cluster here",
@@ -42,7 +42,7 @@
         "qos": "cu_hpc",
         "partition": "cpu",
         "nodes": 1,
-        "time": "06:00:00",
+        "time": "12:00:00",
         "mem_per_cpu": "3G",
         "openfoam_module": ["GCC/11.3.0", "OpenMPI/4.1.4-GCC-11.3.0"],
         "openfoam_source": "$HOME/OpenFOAM/OpenFOAM-v2606/etc/bashrc"
