@@ -12,7 +12,7 @@ Built for FSAE/Formula Student aero part development, but works with any externa
 - **Three fidelity presets** — `fast` (5–10 min), `standard` (30–60 min), `fine` (2–4 hours)
 - **Minimal config** — only geometry file, flow speed, and domain box required
 - **Full pipeline** — from STL to force coefficients in one command
-- **Post-processing CLI** — convergence plots, live monitoring (with auto-stop on convergence), multi-case comparison
+- **Post-processing CLI** — convergence plots, live monitoring (with auto-stop on convergence), multi-case comparison, structured JSON results
 - **HPC ready** — generates SLURM scripts alongside local parallel scripts
 
 ---
@@ -63,6 +63,7 @@ sbatch run.sh              # SLURM cluster submission
 cfd-forces                 # Force summary
 cfd-forces --plot          # Convergence plot
 cfd-forces --live          # Real-time monitoring during solve
+cfd-result cases/my_case   # Structured result (human-readable or JSON)
 ```
 
 ### Dry Run (Preview Without Generating)
@@ -166,6 +167,7 @@ cfd-gen/
 │   └── example.json       # Config template
 ├── stl/                   # Place your geometry here (gitignored)
 ├── cases/                 # Generated cases go here (gitignored)
+├── tests/                 # Test suite (pytest)
 └── src/cfd_gen/
     ├── cli.py             # CLI entry points
     ├── config.py          # Config loading, defaults, validation
@@ -182,7 +184,9 @@ cfd-gen/
         ├── forces.py      # Force reading, convergence check
         ├── compare.py     # Multi-case comparison
         ├── plotting.py    # Matplotlib plots
-        └── residuals.py   # Residual monitoring
+        ├── residuals.py   # Residual monitoring
+        ├── convergence_monitor.py  # Auto-stop solver on convergence
+        └── result.py      # Structured result aggregation + JSON export
 ```
 
 ### Generated Case Layout
@@ -279,6 +283,66 @@ The ground patch uses a moving wall at freestream velocity to simulate road-rela
 | `cfd-forces --live` | Real-time force monitor (updates every 3s) |
 | `cfd-forces --compare` | Compare all cases in cases/ directory |
 | `cfd-forces --check` | Exit code 0 if converged, 1 if not |
+| `cfd-result <case>` | Structured result — human-readable or JSON (see below) |
+
+### Structured Results (`cfd-result`)
+
+Aggregates a case's config snapshot and post-processing output into a single
+stable, machine-readable result. This output is intended for **automation,
+dashboards, and external integrations**: the JSON schema is deterministic
+(fixed keys, no timestamps), and values that cannot be derived reliably from
+the case stay `null` — nothing is invented.
+
+```bash
+cfd-result cases/my_case                  # Human-readable summary
+cfd-result cases/my_case --json           # Valid JSON to stdout
+cfd-result cases/my_case -o result.json   # Write JSON to file
+```
+
+Run from inside the case directory (no argument) or pass the case path.
+Partially completed simulations are handled gracefully — missing force data
+or too few iterations simply leave the affected fields `null`.
+
+Example JSON output:
+
+```json
+{
+  "schema_version": "1.0",
+  "case": "rearwing_v12",
+  "status": "completed",
+  "conditions": {
+    "velocity_ms": 16.67,
+    "yaw_deg": null,
+    "aoa_deg": null
+  },
+  "forces": {
+    "drag_N": 12.34,
+    "downforce_N": 45.677,
+    "lift_N": -45.677
+  },
+  "coefficients": {
+    "Cd": 0.0725,
+    "Cl": -0.2684,
+    "L_over_D": 3.7015
+  },
+  "convergence": {
+    "converged": true,
+    "force_variation_percent": 0.078
+  }
+}
+```
+
+| Field | Source |
+|-------|--------|
+| `status` | `completed` (converged), `incomplete` (force data present but not converged, or < 20 iterations), `no_data` (no force data found) |
+| `conditions.velocity_ms` | `flow.velocity` from `case_config.json` |
+| `conditions.yaw_deg`, `conditions.aoa_deg` | Not part of the current config schema — always `null` |
+| `forces.drag_N`, `forces.downforce_N` | Averaged over the last 200 iterations (same criterion as `cfd-forces --check`) |
+| `forces.lift_N` | The +y force — derived as the sign flip of downforce when the downforce axis is `-y`; `null` otherwise |
+| `coefficients.Cd`, `coefficients.Cl` | Force / (½·ρ·U²·Aref) using `fluid.rho`, `flow.velocity`, `force_refs.Aref` from the case config |
+| `coefficients.L_over_D` | \|downforce / drag\| (same convention as `cfd-forces`) |
+| `convergence.converged` | ±0.5% variation over the last 200 iterations |
+| `convergence.force_variation_percent` | Max of drag/downforce variation over the last 200 iterations |
 
 ### Example Output
 

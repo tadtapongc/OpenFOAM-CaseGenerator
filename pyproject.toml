@@ -11,11 +11,13 @@ dependencies = []
 
 [project.optional-dependencies]
 plot = ["matplotlib>=3.5"]
+test = ["pytest>=7.0"]
 
 [project.scripts]
 cfd-setup = "cfd_gen.cli:setup_main"
 cfd-forces = "cfd_gen.cli:forces_main"
 cfd-monitor = "cfd_gen.postproc.convergence_monitor:main"
+cfd-result = "cfd_gen.cli:result_main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/cfd_gen"]

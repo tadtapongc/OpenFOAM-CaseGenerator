@@ -360,3 +360,76 @@ def forces_main() -> None:
     # Plot
     if args.plot or args.save:
         plot_forces(times, drags, downforces, drag_axis, df_axis, save=args.save)
+
+
+# ============================================================
+# RESULT CLI
+# ============================================================
+
+def _print_result(result: Any) -> None:
+    """Concise human-readable summary of a CaseResult."""
+    c, f, k, v = result.conditions, result.forces, result.coefficients, result.convergence
+
+    def _f(x: Any, nd: int = 3) -> str:
+        return "—" if x is None else f"{x:.{nd}f}"
+
+    print(f"  Case:        {result.case}")
+    print(f"  Status:      {result.status}")
+    print(f"  Velocity:    {_f(c.velocity_ms, 2)} m/s")
+    print(f"  Drag:        {_f(f.drag_N)} N   Cd: {_f(k.Cd, 4)}")
+    print(f"  Downforce:   {_f(f.downforce_N)} N")
+    if f.lift_N is not None:
+        print(f"  Lift:        {_f(f.lift_N)} N")
+    print(f"  L/D:         {_f(k.L_over_D)}")
+
+    if v.converged is None:
+        conv = "no force data"
+    else:
+        conv = "converged" if v.converged else "not converged"
+        if v.force_variation_percent is not None:
+            conv += f" (±{_f(v.force_variation_percent, 3)}% over last 200 iters)"
+    print(f"  Convergence: {conv}")
+
+
+def result_main() -> None:
+    """Entry point for cfd-result command."""
+    parser = argparse.ArgumentParser(
+        description="Structured case result — machine-readable summary.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""\
+Examples:
+    cfd-result cases/my_case                 Human-readable summary
+    cfd-result cases/my_case --json          Print JSON to stdout
+    cfd-result cases/my_case -o result.json  Write JSON to file
+""",
+    )
+    parser.add_argument("case", nargs="?", default=".",
+                        help="Case directory (default: current directory)")
+    parser.add_argument("--json", action="store_true",
+                        help="Print result as JSON to stdout")
+    parser.add_argument("--output", "-o", default=None,
+                        help="Write JSON result to file")
+    args = parser.parse_args()
+
+    from cfd_gen.postproc.result import build_result
+
+    case_dir = Path(args.case)
+    if not case_dir.is_dir():
+        sys.exit(f"ERROR: case directory not found: {case_dir}")
+
+    result = build_result(case_dir)
+
+    if args.output:
+        out_path = Path(args.output)
+        try:
+            if str(out_path.parent) not in ("", "."):
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(result.to_json())
+        except OSError as e:
+            sys.exit(f"ERROR: cannot write {out_path}: {e}")
+        print(f"  ✓ Result written: {out_path}", file=sys.stderr)
+
+    if args.json:
+        print(result.to_json(), end="")
+    else:
+        _print_result(result)
