@@ -1,8 +1,8 @@
 {
     "_": "fidelity: fast | standard | fine",
 
-    "case_name": "EV",
-    "stl_files": ["EV_assem.STL"],
+    "case_name": "RP14_2",
+    "stl_files": ["RP14.STL"],
     "fidelity": "standard",
 
     "flow": {
@@ -18,8 +18,8 @@
 
     "_domain": "bounding box [x, y, z] in meters",
     "domain_box": {
-        "min": [0.0, 0.0, -7.5],
-        "max": [3.0, 3.5, 3.5]
+        "min": [-0.1185, -0.310, -15.0],
+        "max": [3.5, 4.5, 6.5]
     },
 
     "_faces": "available: inlet, outlet, ground, farField, symmetry",
@@ -34,7 +34,7 @@
 
     "_parallel": "Number of cores (processes) to use",
     "parallel": {
-        "n_procs": 32
+        "n_procs": 64
     },
 
     "_slurm": "Override SLURM settings for CU e-Science cluster here",
@@ -42,9 +42,32 @@
         "qos": "cu_hpc",
         "partition": "cpu",
         "nodes": 1,
-        "time": "12:00:00",
+        "time": "24:00:00",
         "mem_per_cpu": "3G",
         "openfoam_module": ["GCC/11.3.0", "OpenMPI/4.1.4-GCC-11.3.0"],
         "openfoam_source": "$HOME/OpenFOAM/OpenFOAM-v2606/etc/bashrc"
+    },
+
+    "overrides": {
+        "mesh_params": {
+            "base_cell_size": 0.10,
+            "surface_level": [3, 7],
+            "edge_level": 8,
+            "resolveFeatureAngle": 15,
+            "distance_levels": [
+                [0.004, 6],
+                [0.015, 4],
+                [0.040, 2]
+            ]
+        },
+        "layers": {
+            "n_layers": 5,
+            "expansion_ratio": 1.2,
+            "first_layer_thickness": 0.3,
+            "featureAngle": 150
+        },
+        "feature_extract": {
+            "includedAngle": 150
+        }
     }
 }

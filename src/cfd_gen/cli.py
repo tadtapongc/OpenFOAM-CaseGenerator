@@ -15,6 +15,11 @@ log = logging.getLogger(__name__)
 
 def setup_main() -> None:
     """Entry point for cfd-setup command."""
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     parser = argparse.ArgumentParser(
         description="Generate OpenFOAM case from STL + JSON config.",
         formatter_class=argparse.RawDescriptionHelpFormatter,

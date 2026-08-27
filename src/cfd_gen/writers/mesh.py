@@ -230,34 +230,36 @@ def write_snappy_hex_mesh_dict(cfg: dict[str, Any], case_dir: Path) -> None:
     lateral_idx = next(i for i in range(3) if i != flow_idx and i != up_idx)
     extent = [box["max"][i] - box["min"][i] for i in range(3)]
 
-    loc = [0.0, 0.0, 0.0]
+    loc = mesh.get("location_in_mesh", mesh.get("locationInMesh"))
+    if not loc:
+        loc = [0.0, 0.0, 0.0]
 
-    # Flow axis: near inlet (upstream side)
-    if flow_sign > 0:
-        loc[flow_idx] = box["min"][flow_idx] + extent[flow_idx] * 0.05
-    else:
-        loc[flow_idx] = box["max"][flow_idx] - extent[flow_idx] * 0.05
-
-    # Up axis: near ceiling (top of domain, far from ground)
-    loc[up_idx] = box["max"][up_idx] - extent[up_idx] * 0.05
-
-    # Lateral axis: away from symmetry plane (toward far wall)
-    domain_faces = _get_face_assignments(cfg)
-    sym_dir = None
-    for face_dir, patch_name in domain_faces.items():
-        if "symmetry" in patch_name.lower():
-            sym_dir = face_dir
-            break
-
-    if sym_dir and sym_dir.endswith("xyz"[lateral_idx]):
-        # Symmetry is on the lateral axis — move to the opposite side
-        if sym_dir.startswith("-"):
-            loc[lateral_idx] = box["max"][lateral_idx] - extent[lateral_idx] * 0.05
+        # Flow axis: near inlet (upstream side)
+        if flow_sign > 0:
+            loc[flow_idx] = box["min"][flow_idx] + extent[flow_idx] * 0.05
         else:
-            loc[lateral_idx] = box["min"][lateral_idx] + extent[lateral_idx] * 0.05
-    else:
-        # No symmetry on lateral axis — center is safe
-        loc[lateral_idx] = (box["min"][lateral_idx] + box["max"][lateral_idx]) / 2
+            loc[flow_idx] = box["max"][flow_idx] - extent[flow_idx] * 0.05
+
+        # Up axis: near ceiling (top of domain, far from ground)
+        loc[up_idx] = box["max"][up_idx] - extent[up_idx] * 0.05
+
+        # Lateral axis: away from symmetry plane (toward far wall)
+        domain_faces = _get_face_assignments(cfg)
+        sym_dir = None
+        for face_dir, patch_name in domain_faces.items():
+            if "symmetry" in patch_name.lower():
+                sym_dir = face_dir
+                break
+
+        if sym_dir and sym_dir.endswith("xyz"[lateral_idx]):
+            # Symmetry is on the lateral axis — move to the opposite side
+            if sym_dir.startswith("-"):
+                loc[lateral_idx] = box["max"][lateral_idx] - extent[lateral_idx] * 0.05
+            else:
+                loc[lateral_idx] = box["min"][lateral_idx] + extent[lateral_idx] * 0.05
+        else:
+            # No symmetry on lateral axis — center is safe
+            loc[lateral_idx] = (box["min"][lateral_idx] + box["max"][lateral_idx]) / 2
 
     content = f"""\
 castellatedMesh true;
@@ -274,7 +276,7 @@ castellatedMeshControls
     maxLocalCells       {mesh.get("maxLocalCells", 2000000)};
     maxGlobalCells      {mesh.get("maxGlobalCells", 30000000)};
     minRefinementCells  {mesh.get("minRefinementCells", 10)};
-    maxLoadUnbalance    0.10;
+    maxLoadUnbalance    {mesh.get("maxLoadUnbalance", 0.10)};
     nCellsBetweenLevels {mesh.get("nCellsBetweenLevels", 3)};
 
     features

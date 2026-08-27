@@ -275,19 +275,21 @@ def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str,
     fidelity = cfg.get("fidelity", "fast")
     preset = FIDELITY_PRESETS.get(fidelity, FIDELITY_PRESETS["fast"])
 
-    # Base cell: fixed per fidelity (background mesh, far from geometry)
-    # Respect user's explicit base_cell_size if provided
-    base_cell = cfg.get("mesh_params", {}).get("base_cell_size")
-    if not base_cell:
-        base_cell = preset["base_cell_size"]
+    user_mesh = cfg.get("mesh_params", {})
 
-    # Surface and edge levels: fixed per fidelity (predictable, no surprises)
-    surface_level = preset["surface_level"]
-    edge_level = preset["edge_level"]
+    # Base cell: respect user override or use fidelity preset
+    base_cell = user_mesh.get("base_cell_size", preset["base_cell_size"])
 
-    # Distance-based refinement shells (replaces nearBody box)
-    # Each tuple is (distance_from_surface_m, refinement_level)
-    distance_levels = preset["distance_levels"]
+    # Surface and edge levels: respect user override or use fidelity preset
+    surface_level = user_mesh.get("surface_level", preset["surface_level"])
+    edge_level = user_mesh.get("edge_level", preset["edge_level"])
+
+    # Distance-based refinement shells
+    distance_levels = user_mesh.get("distance_levels", preset["distance_levels"])
+    if distance_levels and isinstance(distance_levels[0], list):
+        distance_levels = [tuple(x) for x in distance_levels]
+
+    resolve_feature_angle = user_mesh.get("resolveFeatureAngle", preset.get("resolveFeatureAngle", 20))
 
     # Wake box (kept as box-based — distance mode can't reach far wake)
     wake_level = max(1, surface_level[1] - 3)
@@ -310,10 +312,10 @@ def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str,
         wake_max[flow_idx] = smin[flow_idx]
         wake_min[flow_idx] = smin[flow_idx] - wake_length
 
-    refinement_regions = [
+    refinement_regions = user_mesh.get("refinement_regions", [
         {"name": "wakeBox", "min": [round(v, 3) for v in wake_min],
          "max": [round(v, 3) for v in wake_max], "level": wake_level},
-    ]
+    ])
 
     return {
         "base_cell_size": round(base_cell, 4),
@@ -321,12 +323,12 @@ def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str,
         "edge_level": edge_level,
         "distance_levels": distance_levels,
         "refinement_regions": refinement_regions,
-        "nCellsBetweenLevels": preset.get("nCellsBetweenLevels", 3),
-        "maxGlobalCells": preset.get("maxGlobalCells", 20_000_000),
-        "maxLocalCells": 2_000_000,
-        "minRefinementCells": 10,
-        "resolveFeatureAngle": preset.get("resolveFeatureAngle", 20),
-        "allowFreeStandingZoneFaces": True,
+        "nCellsBetweenLevels": user_mesh.get("nCellsBetweenLevels", preset.get("nCellsBetweenLevels", 3)),
+        "maxGlobalCells": user_mesh.get("maxGlobalCells", preset.get("maxGlobalCells", 20_000_000)),
+        "maxLocalCells": user_mesh.get("maxLocalCells", 2_000_000),
+        "minRefinementCells": user_mesh.get("minRefinementCells", 10),
+        "resolveFeatureAngle": resolve_feature_angle,
+        "allowFreeStandingZoneFaces": user_mesh.get("allowFreeStandingZoneFaces", True),
     }
 
 
