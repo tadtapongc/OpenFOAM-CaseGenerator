@@ -1,33 +1,35 @@
 {
-    "_": "fidelity: fast | standard | fine",
+    "_README": "=== OpenFOAM External Aero Case Configuration ===",
+
+    "_case_name": "Folder name created under cases/<case_name>/",
     "case_name": "RP14_2",
-    "stl_files": [
-        "RP14.STL"
-    ],
+
+    "_stl_files": "ASCII STL geometry files located in stl/ directory",
+    "stl_files": ["RP14.STL"],
+
+    "_fidelity": "Preset: 'fast' (coarse mesh), 'standard' (balanced), 'fine' (high-res)",
     "fidelity": "standard",
+
     "flow": {
+        "_comment": "Flow conditions: velocity in m/s (16.67 m/s is approx 60 km/h); ground=true enables moving road",
         "velocity": 16.67,
         "direction": "-z",
         "ground": true
     },
+
     "outputs": {
+        "_comment": "Axis projection: drag along flow (-z) and downforce towards ground (-y)",
         "drag_axis": "-z",
         "downforce_axis": "-y"
     },
-    "_domain": "bounding box [x, y, z] in meters",
+
+    "_domain_box": "Wind tunnel bounds [x, y, z] in meters (min and max corners)",
     "domain_box": {
-        "min": [
-            -0.1185,
-            -0.310,
-            -15.0
-        ],
-        "max": [
-            3.5,
-            4.5,
-            6.5
-        ]
+        "min": [-0.1185, -0.310, -15.0],
+        "max": [ 3.5000,  4.500,   6.5]
     },
-    "_faces": "available: inlet, outlet, ground, farField, symmetry",
+
+    "_domain_faces": "Boundary types for the 6 outer box faces: inlet, outlet, ground, farField, symmetry",
     "domain_faces": {
         "-x": "symmetry",
         "+x": "farField",
@@ -36,12 +38,14 @@
         "+z": "inlet",
         "-z": "outlet"
     },
-    "_parallel": "Number of cores (processes) to use",
+
     "parallel": {
+        "_comment": "Number of CPU cores for MPI decomposition, meshing, and solving",
         "n_procs": 32
     },
-    "_slurm": "Override SLURM settings for CU e-Science cluster here",
+
     "slurm": {
+        "_comment": "SLURM cluster configuration for CU e-Science cluster",
         "qos": "cu_hpc",
         "partition": "cpu",
         "nodes": 1,
@@ -52,40 +56,53 @@
             "OpenMPI/4.1.4-GCC-11.3.0"
         ],
         "openfoam_source": "$HOME/OpenFOAM/OpenFOAM-v2606/etc/bashrc",
+        "_use_tmpdir": "true = run in fast node scratch ($TMPDIR) with live sync; false = run in-place in case dir",
         "use_tmpdir": true,
         "sync_interval": 15
     },
+
     "overrides": {
+        "_comment": "Optional expert overrides for snappyHexMesh and boundary layers",
+
         "mesh_params": {
+            "_base_cell_size": "Base blockMesh cell size in meters (0.10 m = 10 cm)",
             "base_cell_size": 0.10,
-            "surface_level": [
-                4,
-                6
-            ],
+
+            "_surface_level": "[min, max] surface refinement: cell = base / (2^level) -> L4=6.25mm, L6=1.56mm",
+            "surface_level": [4, 6],
+
+            "_edge_level": "Refinement on extracted sharp feature edges -> L6 = 1.56mm",
             "edge_level": 6,
+
+            "_resolveFeatureAngle": "Curvature threshold angle: regions sharper than this get max surface level (deg)",
             "resolveFeatureAngle": 25,
+
+            "_distance_levels": "Conforming refinement shells around STL: [[distance_in_meters, level], ...]",
             "distance_levels": [
-                [
-                    0.010,
-                    5
-                ],
-                [
-                    0.040,
-                    4
-                ],
-                [
-                    0.150,
-                    3
-                ]
+                [0.010, 5],
+                [0.040, 4],
+                [0.150, 3]
             ]
         },
+
         "layers": {
+            "_comment": "Boundary layer inflation prism cells for near-wall viscous resolution",
+
+            "_n_layers": "Number of inflated prism layers grown off the wall",
             "n_layers": 5,
+
+            "_expansion_ratio": "Geometric growth ratio from one layer to the next (outer / inner)",
             "expansion_ratio": 1.2,
+
+            "_first_layer_thickness": "Thickness of the first cell at the wall (relative to surface cell size)",
             "first_layer_thickness": 0.3,
+
+            "_featureAngle": "Corner angle threshold beyond which prism layers will not extrude around corners",
             "featureAngle": 130
         },
+
         "feature_extract": {
+            "_includedAngle": "Angle threshold for surfaceFeatureExtract to detect sharp edges from STL (deg)",
             "includedAngle": 150
         }
     }
