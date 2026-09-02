@@ -56,6 +56,9 @@
         "time": "06:00:00",
         "mem_per_cpu": "3G",
         "openfoam_module": ["GCC/11.3.0", "OpenMPI/4.1.4-GCC-11.3.0"],
-        "openfoam_source": "$HOME/OpenFOAM/OpenFOAM-v2606/etc/bashrc"
+        "openfoam_source": "$HOME/OpenFOAM/OpenFOAM-v2606/etc/bashrc",
+        "_use_tmpdir": "true = run in fast node RAM/scratch with live sync to case dir; false = run in-place in case dir",
+        "use_tmpdir": true,
+        "sync_interval": 15
     }
 }

@@ -135,6 +135,8 @@ Only 5 fields are required (`case_name`, `stl_files`, `flow`, `outputs`, and `do
 | `slurm` | `cpus_per_task` | 1 | CPUs allocated per task |
 | `slurm` | `openfoam_module` | `null` | Module to load (overrides source if set) |
 | `slurm` | `openfoam_source` | `$HOME/.../bashrc` | Script to source for OpenFOAM |
+| `slurm` | `use_tmpdir` | `true` | Run in fast node RAM/scratch (`$TMPDIR`) with live sync |
+| `slurm` | `sync_interval` | `15` | Seconds between syncing logs and forces to case dir |
 
 ---
 
@@ -314,7 +316,7 @@ Forces are considered converged when the standard deviation / mean < 0.5% over t
 | Serial | `./Allrun` | Debugging / small cases |
 | Clean & re-run | `./Allclean && ./Allrun.parallel` | Reset and restart |
 
-*Note: The SLURM script (`run.sh`) runs inside a fast RAM disk (`$TMPDIR` or `/dev/shm`) to minimize I/O bottleneck on the cluster. It safely catches job timeouts to reconstruct the mesh and sync results back without exhausting network storage.*
+*Note: By default, the SLURM script (`run.sh`) runs inside a fast RAM disk (`$TMPDIR` or `/dev/shm`) to minimize I/O bottleneck on the cluster while continuously syncing forces and logs back to the case directory in real-time every 15s (so `cfd-forces` works during the run). It safely catches job timeouts to reconstruct the mesh and sync results back. Set `"use_tmpdir": false` in config to run directly in-place.*
 
 ---
 

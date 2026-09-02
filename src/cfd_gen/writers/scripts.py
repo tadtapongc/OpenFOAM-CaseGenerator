@@ -14,7 +14,7 @@ from cfd_gen.geometry import parse_axis
 def _write_script(path: Path, content: str) -> None:
     """Write script file with executable permission."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
+    path.write_text(content, encoding="utf-8")
     path.chmod(0o755)
 
 
@@ -212,6 +212,8 @@ def write_scripts(cfg: dict[str, Any], case_dir: Path) -> None:
         "openfoam_source",
         "$HOME/OpenFOAM/OpenFOAM-v2606/etc/bashrc"
     )
+    use_tmpdir = slurm.get("use_tmpdir", True)
+    sync_interval = slurm.get("sync_interval", 15)
 
     # ---- convergence_monitor.py (self-contained) ----
     _write_script(
@@ -326,6 +328,82 @@ fi
     
     openfoam_load = "\n".join(load_lines) if load_lines else ""
 
+    if use_tmpdir:
+        dir_setup_and_cleanup = f"""\
+ORIG_DIR=$PWD
+
+# Robustly create a temporary directory prioritizing $TMPDIR (Cluster scratch space), then /dev/shm, then /tmp
+if [ -n "$TMPDIR" ] && [ -w "$TMPDIR" ]; then
+    RAM_DIR=$(mktemp -d -p "$TMPDIR" cfd_${{SLURM_JOB_ID:-local}}_XXXXXX)
+elif [ -d "/dev/shm" ] && [ -w "/dev/shm" ]; then
+    RAM_DIR=$(mktemp -d -p /dev/shm cfd_${{SLURM_JOB_ID:-local}}_XXXXXX)
+else
+    RAM_DIR=$(mktemp -d -t cfd_${{SLURM_JOB_ID:-local}}_XXXXXX)
+fi
+
+echo ">>> Setting up local execution in $RAM_DIR"
+echo "$RAM_DIR on $(hostname)" > "$ORIG_DIR/.running_location"
+echo ">>> Copying case to $RAM_DIR"
+rsync -a "$ORIG_DIR/" "$RAM_DIR/"
+cd "$RAM_DIR"
+
+# Background sync loop to keep ORIG_DIR updated with forces, residuals, and logs in real-time
+sync_progress() {{
+    while true; do
+        sleep {sync_interval}
+        rsync -a --include="*/" \\
+                 --include="postProcessing/**" \\
+                 --include="processor*/postProcessing/**" \\
+                 --include="log.*" \\
+                 --exclude="*" \\
+                 "$RAM_DIR/" "$ORIG_DIR/" 2>/dev/null || true
+    done
+}}
+sync_progress &
+SYNC_PID=$!
+
+# Ensure results are copied back when script exits or is interrupted
+cleanup() {{
+    echo ">>> Job exiting. Syncing results..."
+    if [ -n "${{SYNC_PID:-}}" ]; then
+        kill $SYNC_PID 2>/dev/null || true
+        wait $SYNC_PID 2>/dev/null || true
+    fi
+    if ls -d processor* > /dev/null 2>&1; then
+        echo ">>> Interrupted! Attempting to reconstruct latest time..."
+        reconstructPar -latestTime > log.reconstructPar_cleanup 2>&1 || true
+        rm -rf processor*
+    fi
+    echo ">>> Copying results back to network filesystem"
+    rsync -a "$RAM_DIR/" "$ORIG_DIR/"
+    echo ">>> Cleaning up RAM disk"
+    cd "$ORIG_DIR"
+    rm -rf "$RAM_DIR"
+    rm -f "$ORIG_DIR/.running_location"
+    echo "=============================================="
+    echo "Job finished at $(date)"
+    echo "=============================================="
+}}
+trap cleanup EXIT"""
+    else:
+        dir_setup_and_cleanup = """\
+ORIG_DIR=$PWD
+cd "$ORIG_DIR"
+
+# Ensure interrupted parallel runs attempt reconstruction
+cleanup() {
+    echo ">>> Job exiting..."
+    if ls -d processor* > /dev/null 2>&1; then
+        echo ">>> Interrupted! Attempting to reconstruct latest time..."
+        reconstructPar -latestTime > log.reconstructPar_cleanup 2>&1 || true
+        rm -rf processor*
+    fi
+    echo "=============================================="
+    echo "Job finished at $(date)"
+    echo "=============================================="
+}
+trap cleanup EXIT"""
+
     _write_script(case_dir / "run.sh", f"""\
 #!/bin/bash
 #SBATCH --job-name={case_name}
@@ -357,40 +435,7 @@ fi
 
 set -e
 
-ORIG_DIR=$PWD
-
-# Robustly create a temporary directory prioritizing $TMPDIR (Cluster scratch space), then /dev/shm, then /tmp
-if [ -n "$TMPDIR" ] && [ -w "$TMPDIR" ]; then
-    RAM_DIR=$(mktemp -d -p "$TMPDIR" cfd_${{SLURM_JOB_ID:-local}}_XXXXXX)
-elif [ -d "/dev/shm" ] && [ -w "/dev/shm" ]; then
-    RAM_DIR=$(mktemp -d -p /dev/shm cfd_${{SLURM_JOB_ID:-local}}_XXXXXX)
-else
-    RAM_DIR=$(mktemp -d -t cfd_${{SLURM_JOB_ID:-local}}_XXXXXX)
-fi
-
-echo ">>> Setting up local execution in $RAM_DIR"
-echo ">>> Copying case to $RAM_DIR"
-rsync -a $ORIG_DIR/ $RAM_DIR/
-cd $RAM_DIR
-
-# Ensure results are copied back when script exits or is interrupted
-cleanup() {{
-    echo ">>> Job exiting. Syncing results..."
-    if ls -d processor* > /dev/null 2>&1; then
-        echo ">>> Interrupted! Attempting to reconstruct latest time..."
-        reconstructPar -latestTime > log.reconstructPar_cleanup 2>&1 || true
-        rm -rf processor*
-    fi
-    echo ">>> Copying results back to network filesystem"
-    rsync -a $RAM_DIR/ $ORIG_DIR/
-    echo ">>> Cleaning up RAM disk"
-    cd $ORIG_DIR
-    rm -rf $RAM_DIR
-    echo "=============================================="
-    echo "Job finished at $(date)"
-    echo "=============================================="
-}}
-trap cleanup EXIT
+{dir_setup_and_cleanup}
 
 # Restore stopAt (in case previous run was stopped by monitor)
 if [ -f system/controlDict ]; then

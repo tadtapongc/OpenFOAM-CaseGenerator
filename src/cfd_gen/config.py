@@ -82,6 +82,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "cpus_per_task": 1,
         "openfoam_module": None,
         "openfoam_source": "$HOME/OpenFOAM/OpenFOAM-v2606/etc/bashrc",
+        "use_tmpdir": True,
+        "sync_interval": 15,
     },
 
     # Solver settings (conservative, never-diverge)

@@ -60,7 +60,11 @@ def plot_forces(
         plt.show()
 
 
-def live_monitor(config_path: str | None, interval: float = 3) -> None:
+def live_monitor(
+    config_path: str | None,
+    interval: float = 3,
+    case_dir: str | Path | None = None,
+) -> None:
     """Real-time animated force/residual monitor with stats overlay."""
     try:
         import matplotlib.animation as animation
@@ -78,7 +82,9 @@ def live_monitor(config_path: str | None, interval: float = 3) -> None:
     )
     from cfd_gen.postproc.residuals import find_residual_files, read_residuals
 
-    drag_idx, drag_sign, df_idx, df_sign, drag_axis, df_axis = load_axis_config(config_path)
+    drag_idx, drag_sign, df_idx, df_sign, drag_axis, df_axis = load_axis_config(
+        config_path, case_dir=case_dir
+    )
 
     pages = ["Residuals", "Drag", "Downforce", "Summary"]
     state = {"page": 0}
@@ -131,7 +137,7 @@ def live_monitor(config_path: str | None, interval: float = 3) -> None:
         p = state["page"]
 
         if p == 0:  # Residuals
-            res_files = find_residual_files()
+            res_files = find_residual_files(case_dir)
             if not res_files:
                 ax.text(0.5, 0.5, "Waiting for residual data...",
                         ha="center", va="center", transform=ax.transAxes)
@@ -161,7 +167,7 @@ def live_monitor(config_path: str | None, interval: float = 3) -> None:
             ax.set_title(f"Residuals | {len(t)} iters", fontweight="bold", fontsize=14)
 
         elif p == 1:  # Drag
-            files = find_force_files()
+            files = find_force_files(case_dir)
             if not files:
                 ax.text(0.5, 0.5, "Waiting...", ha="center", va="center",
                         transform=ax.transAxes)
@@ -199,7 +205,7 @@ def live_monitor(config_path: str | None, interval: float = 3) -> None:
             )
 
         elif p == 2:  # Downforce
-            files = find_force_files()
+            files = find_force_files(case_dir)
             if not files:
                 ax.text(0.5, 0.5, "Waiting...", ha="center", va="center",
                         transform=ax.transAxes)
@@ -240,7 +246,7 @@ def live_monitor(config_path: str | None, interval: float = 3) -> None:
             )
 
         elif p == 3:  # Summary
-            files = find_force_files()
+            files = find_force_files(case_dir)
             if not files:
                 ax.text(0.5, 0.5, "Waiting...", ha="center", va="center",
                         transform=ax.transAxes)

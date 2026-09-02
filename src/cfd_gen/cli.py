@@ -307,9 +307,20 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
 
 def forces_main() -> None:
     """Entry point for cfd-forces command."""
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     parser = argparse.ArgumentParser(
         description="OpenFOAM force post-processing.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "case",
+        nargs="?",
+        default=None,
+        help="Case directory or name (default: current directory, or auto-detect from cases/)",
     )
     parser.add_argument("--config", "-c", default=None, help="Config JSON for axis info")
     parser.add_argument("--plot", "-p", action="store_true", help="Convergence plot")
@@ -335,17 +346,50 @@ def forces_main() -> None:
         compare_cases()
         return
 
+    # Resolve target case directory
+    case_dir: Path
+    if args.case:
+        p = Path(args.case)
+        if p.is_dir():
+            case_dir = p
+        elif (Path("cases") / args.case).is_dir():
+            case_dir = Path("cases") / args.case
+        else:
+            sys.exit(f"ERROR: Case directory '{args.case}' not found.")
+    else:
+        cwd = Path.cwd()
+        if (
+            (cwd / "postProcessing").exists()
+            or (cwd / "case_config.json").exists()
+            or (cwd / "system" / "controlDict").exists()
+        ):
+            case_dir = cwd
+        elif (cwd / "cases").is_dir():
+            candidates = sorted(
+                [d for d in (cwd / "cases").iterdir() if d.is_dir() and not d.name.startswith(".")],
+                key=lambda d: d.stat().st_mtime,
+                reverse=True,
+            )
+            if candidates:
+                case_dir = candidates[0]
+            else:
+                case_dir = cwd
+        else:
+            case_dir = cwd
+
     # Live mode
     if args.live:
-        live_monitor(args.config, args.interval)
+        live_monitor(args.config, args.interval, case_dir=case_dir)
         return
 
     # Standard modes
-    drag_idx, drag_sign, df_idx, df_sign, drag_axis, df_axis = load_axis_config(args.config)
+    drag_idx, drag_sign, df_idx, df_sign, drag_axis, df_axis = load_axis_config(
+        args.config, case_dir=case_dir
+    )
 
-    files = find_force_files()
+    files = find_force_files(case_dir)
     if not files:
-        sys.exit("ERROR: No force.dat found. Run from inside the case directory.")
+        sys.exit(f"ERROR: No force.dat found in {case_dir}. Run from inside the case directory or specify case path.")
 
     times, drags, downforces = read_forces(files, drag_idx, drag_sign, df_idx, df_sign)
 

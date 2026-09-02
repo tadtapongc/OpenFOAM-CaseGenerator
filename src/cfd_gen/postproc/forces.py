@@ -27,15 +27,22 @@ def axis_index_sign(axis_str: str) -> tuple[int, int]:
     return 0, 1
 
 
-def load_axis_config(config_path: str | None = None) -> tuple[int, int, int, int, str, str]:
+def load_axis_config(
+    config_path: str | None = None,
+    case_dir: str | Path | None = None,
+) -> tuple[int, int, int, int, str, str]:
     """Load drag/downforce axis from config or case_config.json.
 
     Returns:
         (drag_idx, drag_sign, df_idx, df_sign, drag_axis_str, df_axis_str)
     """
     cfg = None
+    base = Path(case_dir) if case_dir else Path(".")
     if config_path and Path(config_path).exists():
         with open(config_path) as f:
+            cfg = json.load(f)
+    elif (base / "case_config.json").exists():
+        with open(base / "case_config.json") as f:
             cfg = json.load(f)
     elif Path("case_config.json").exists():
         with open("case_config.json") as f:
