@@ -1,6 +1,6 @@
 """Boundary condition field writers (0/ directory).
 
-Generates: U, p, k, omega, nut, Phi
+Generates: U, p, k, omega, nut
 """
 
 from __future__ import annotations
@@ -71,7 +71,9 @@ boundaryField
     }}
     {patches["outlet"]}
     {{
-        type            zeroGradient;
+        type            inletOutlet;
+        inletValue      uniform (0 0 0);
+        value           uniform (0 0 0);
     }}
     "{wing_re}"
     {{
@@ -246,44 +248,3 @@ boundaryField
 
 """ + FOOTER)
 
-    # ---- Phi (for potentialFoam) ----
-    (zero_dir / "Phi").write_text(foam_header("Phi") + f"""\
-dimensions      [0 2 -1 0 0 0 0];
-
-internalField   uniform 0;
-
-boundaryField
-{{
-    {patches["inlet"]}
-    {{
-        type            fixedValue;
-        value           uniform 0;
-    }}
-    {patches["outlet"]}
-    {{
-        type            fixedValue;
-        value           uniform 0;
-    }}
-    "{wing_re}"
-    {{
-        type            fixedValue;
-        value           uniform 0;
-    }}
-    {patches["ground"]}
-    {{
-        type            fixedValue;
-        value           uniform 0;
-    }}
-    {patches["walls"]}
-    {{
-        type            fixedValue;
-        value           uniform 0;
-    }}
-    {patches["symmetry"]}
-    {{
-        type            symmetry;
-        value           uniform 0;
-    }}
-}}
-
-""" + FOOTER)

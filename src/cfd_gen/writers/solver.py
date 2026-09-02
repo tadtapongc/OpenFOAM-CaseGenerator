@@ -2,7 +2,7 @@
 
 Generates: controlDict, fvSchemes, fvSolution, decomposeParDict
 
-Single-stage pipeline: linearUpwind from start with tight p relTol
+Single-stage pipeline: robust bounded schemes with tight p relTol
 and conservative relaxation. No scheme switching needed.
 """
 
@@ -141,7 +141,7 @@ functions
 # ============================================================
 
 def write_fv_schemes(cfg: dict[str, Any], case_dir: Path) -> None:
-    """Generate fvSchemes — linearUpwind from start, bounded, cell-limited."""
+    """Generate fvSchemes — bounded TVD/upwind schemes, cell-limited."""
     s = cfg["schemes"]
 
     content = f"""\
@@ -241,12 +241,6 @@ relaxationFactors
 {{
     equations {{ {eq_str} }}
     fields    {{ {field_str} }}
-}}
-
-boundedFields
-{{
-    k       {{ min 1e-6; }}
-    omega   {{ min 1e-4; }}
 }}
 
 """

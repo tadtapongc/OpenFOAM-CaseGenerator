@@ -158,18 +158,30 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
 
     combined_bounds = (tuple(all_min), tuple(all_max))
 
-    # Warn if STL is too close to domain boundary
+    # Check STL clearance relative to domain boundaries
     box = cfg["domain_box"]
+    domain_faces = cfg.get("domain_faces", {})
     axis_labels = ["x", "y", "z"]
     for i in range(3):
         clearance_min = all_min[i] - box["min"][i]
         clearance_max = box["max"][i] - all_max[i]
         stl_extent = all_max[i] - all_min[i]
         min_clearance = max(0.1, stl_extent * 0.1)  # at least 10% of geometry size
-        if clearance_min < min_clearance:
+
+        min_face_type = domain_faces.get(f"-{axis_labels[i]}", "").lower()
+        max_face_type = domain_faces.get(f"+{axis_labels[i]}", "").lower()
+
+        if clearance_min < -1e-4:
+            print(f"  ⚠  STL penetrates outside domain: "
+                  f"{axis_labels[i]}_min ({clearance_min:.3f} m)")
+        elif clearance_min < min_clearance and min_face_type not in ("symmetry", "ground"):
             print(f"  ⚠  STL very close to domain boundary: "
                   f"{axis_labels[i]}_min (clearance: {clearance_min:.3f} m)")
-        if clearance_max < min_clearance:
+
+        if clearance_max < -1e-4:
+            print(f"  ⚠  STL penetrates outside domain: "
+                  f"{axis_labels[i]}_max ({clearance_max:.3f} m)")
+        elif clearance_max < min_clearance and max_face_type not in ("symmetry", "ground"):
             print(f"  ⚠  STL very close to domain boundary: "
                   f"{axis_labels[i]}_max (clearance: {clearance_max:.3f} m)")
 
@@ -227,13 +239,15 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
         print(f"    Distance shells: {shells}")
     print(f"    Wake regions:   {len(mesh['refinement_regions'])}")
 
+    div_u_scheme = cfg.get("schemes", {}).get("div_U", "bounded Gauss limitedLinear 1")
+
     # Dry run — stop here
     if dry_run:
         print(f"\n  DRY RUN — would generate: cases/{cfg['case_name']}/")
         print(f"    Velocity:   {cfg['flow']['velocity']:.2f} m/s  U={vec_str(vel)}")
         print(f"    k={k:.5g}  ω={omega:.5g}  νt={nut:.5g}")
         print(f"    Surfaces:   {', '.join(stl_names)}")
-        print(f"    Pipeline:   potentialFoam → simpleFoam ({end_time} iters, linearUpwind)")
+        print(f"    Pipeline:   potentialFoam → simpleFoam ({end_time} iters, {div_u_scheme})")
         return
 
     # Generate case
@@ -242,7 +256,7 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
     print(f"  Generating: cases/{cfg['case_name']}/")
     print(f"  Velocity: {cfg['flow']['velocity']:.2f} m/s | Cell: {mesh['base_cell_size']} m")
     print(f"  Surfaces: {', '.join(stl_names)}")
-    print(f"  Pipeline: potentialFoam → simpleFoam ({end_time} iters, linearUpwind)")
+    print(f"  Pipeline: potentialFoam → simpleFoam ({end_time} iters, {div_u_scheme})")
     print(f"{'='*60}")
 
     # Create directories

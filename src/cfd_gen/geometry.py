@@ -299,10 +299,13 @@ def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str,
 
     pad = [max(0.05, d * 0.2) for d in extents]
 
-    # Wake box starts at geometry trailing edge, extends downstream
     wake_min = [smin[i] - pad[i] for i in range(3)]
     wake_max = [smax[i] + pad[i] for i in range(3)]
-    wake_min[up_idx] = -0.01  # extend to ground
+    # Extend wake box down to ground level (with 10mm margin to guarantee boundary overlap)
+    if "domain_box" in cfg and "min" in cfg["domain_box"] and len(cfg["domain_box"]["min"]) > up_idx:
+        wake_min[up_idx] = cfg["domain_box"]["min"][up_idx] - 0.01
+    else:
+        wake_min[up_idx] = min(0.0, smin[up_idx]) - 0.01
     wake_length = max(2.0, extents[flow_idx] * 4.0)
 
     if flow_sign > 0:
