@@ -51,7 +51,7 @@
         "partition": "cpu",
         "nodes": 1,
         "time": "08:00:00",
-        "mem_per_cpu": "4G",
+        "mem_per_cpu": "2G",
         "openfoam_module": [
             "GCC/11.3.0",
             "OpenMPI/4.1.4-GCC-11.3.0"
