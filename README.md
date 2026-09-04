@@ -1,19 +1,18 @@
-# cfd-gen — OpenFOAM Case Generator for External Aerodynamics
+# OpenFOAM Case Generator for External Aerodynamics
 
-A geometry-agnostic OpenFOAM case generator for external aerodynamics simulations. Give it an STL file and a minimal JSON config — it produces a complete, ready-to-run OpenFOAM case with meshing, solving, and post-processing.
-
-Built for FSAE/Formula Student aero part development, but works with any external aero geometry.
+An automated OpenFOAM case generator designed for external aerodynamics and Formula Student / FSAE vehicle development. Give it an STL file and a minimal JSON config — it automatically generates a complete, ready-to-run OpenFOAM case with geometry-adaptive meshing, robust solver settings, boundary layer inflation, and force post-processing.
 
 ---
 
-## Features
+## Key Features
 
-- **Zero manual tuning** — mesh sizing, domain padding, turbulence values, and refinement regions are all derived from the STL bounding box
-- **Three fidelity presets** — `fast` (5–10 min), `standard` (30–60 min), `fine` (2–4 hours)
-- **Minimal config** — only geometry file, flow speed, and domain box required
-- **Full pipeline** — from STL to force coefficients in one command
-- **Post-processing CLI** — convergence plots, live monitoring (with auto-stop on convergence), multi-case comparison
-- **HPC ready** — generates SLURM scripts alongside local parallel scripts
+- **Optimized for FSAE Aerodynamics** — Mesh architecture tuned specifically for vehicle aerodynamics, delivering the optimal simulation sweet spot (~6–9 million cells on standard fidelity).
+- **Two-Stage Wake Architecture** — Replaces massive uniform wake boxes with a high-resolution `nearWakeBox` (capturing rear wing vortices and diffuser separation) and an efficient `farWakeBox` (downstream transport without cell bloat).
+- **Zero-Tweak Model Switching** — Automatic domain sizing (`"domain_box": "auto"`) fits the virtual wind tunnel to any CAD geometry, automatically aligning the road ground plane and vehicle centerline.
+- **Non-Zero Centerline / Symmetry Plane Support** — Native support for CAD models exported with offsets (`"symmetry_plane": -0.1185` or `0.0`), automatically trimming half-car models cleanly.
+- **Robust Incompressible Solver Setup** — `potentialFoam` initialization $\rightarrow$ `simpleFoam` (SIMPLEC) with cell-limited bounded TVD schemes and Spalding continuous wall functions ($k$-$\omega$ SST).
+- **Auto-Stop Convergence Monitor** — Real-time monitor tracks forces and cleanly stops `simpleFoam` when variations drop below 0.5%, saving valuable cluster node hours.
+- **HPC & SLURM Ready** — Pre-configured for cluster execution with fast node RAM/scratch (`$TMPDIR`) live synchronization, alongside local parallel execution scripts.
 
 ---
 
@@ -21,68 +20,33 @@ Built for FSAE/Formula Student aero part development, but works with any externa
 
 ### Prerequisites
 
-- [OpenFOAM v2512](https://www.openfoam.com/download) (ESI/OpenCFD distribution)
-- Python ≥ 3.9
+- [OpenFOAM v2512 / v2606](https://www.openfoam.com/download) (ESI/OpenCFD distribution)
+- Python ≥ 3.9 (standard library only for case generation)
+- (Optional) `matplotlib` for generating convergence history plots
 
-### Installation
+### Setup
 
 ```bash
 git clone https://github.com/tadtapongc/OpenFOAM-CaseGenerator
 cd OpenFOAM-CaseGenerator
-pip install -e .
-```
-
-Or use without installing:
-
-```bash
-python3 setup_case.py <config.json>
-```
-
-### Usage
-
-```bash
-# 1. Initialize project structure
-cfd-setup --init
-
-# 2. Place your STL geometry in stl/
-cp my_wing.STL stl/
-
-# 3. Edit the config
-vim configs/example.json
-
-# 4. Generate the OpenFOAM case
-cfd-setup configs/my_config.json
-
-# 5. Run the simulation
-cd cases/my_case
-./Allrun.parallel          # Local parallel (default: 10 cores)
-# OR
-sbatch run.sh              # SLURM cluster submission
-
-# 6. Check results
-cfd-forces                 # Force summary
-cfd-forces --plot          # Convergence plot
-cfd-forces --live          # Real-time monitoring during solve
-```
-
-### Dry Run (Preview Without Generating)
-
-```bash
-cfd-setup configs/my_config.json -n
 ```
 
 ---
 
-## Configuration
+## Usage Workflow
 
-Only 5 fields are required (`case_name`, `stl_files`, `flow`, `outputs`, and `domain_box`) — everything else uses universal defaults optimized for external aerodynamics.
+### 1. Place STL Geometry
+Place your ASCII STL geometry file into the `stl/` folder:
+```bash
+cp my_car.STL stl/
+```
 
-### Minimal Config
-
+### 2. Configure Case (`configs/config.json`)
+Edit `configs/config.json` to specify your case name and STL file:
 ```json
 {
-    "case_name": "my_wing",
-    "stl_files": ["my_geometry.STL"],
+    "case_name": "RP14_FSAE",
+    "stl_files": ["RP14.STL"],
     "fidelity": "standard",
 
     "flow": {
@@ -96,10 +60,8 @@ Only 5 fields are required (`case_name`, `stl_files`, `flow`, `outputs`, and `do
         "downforce_axis": "-y"
     },
 
-    "domain_box": {
-        "min": [0.0, 0.0, -7.5],
-        "max": [2.5, 2.5, 2.0]
-    },
+    "domain_box": "auto",
+    "symmetry_plane": -0.1185,
 
     "domain_faces": {
         "-x": "symmetry",
@@ -108,259 +70,163 @@ Only 5 fields are required (`case_name`, `stl_files`, `flow`, `outputs`, and `do
         "+y": "farField",
         "+z": "inlet",
         "-z": "outlet"
+    },
+
+    "parallel": {
+        "n_procs": 32
     }
 }
 ```
 
-### Optional Overrides
+### 3. Preview Case (Dry Run)
+Check geometry bounds, auto-domain dimensions, and mesh parameters before generating:
+```bash
+python setup_case.py configs/config.json --dry-run
+```
 
-| Section | Key | Default | Description |
-|---------|-----|---------|-------------|
-| `fluid` | `nu` | 1.516e-5 | Kinematic viscosity (m²/s) — air at 20°C |
-| `fluid` | `rho` | 1.225 | Density (kg/m³) |
-| `turbulence` | `model` | `kOmegaSST` | Turbulence model |
-| `turbulence` | `intensity` | 0.005 | Turbulence intensity (0.5%) |
-| `turbulence` | `nut_ratio` | 10 | νt/ν ratio |
-| `parallel` | `n_procs` | 10 | Number of MPI processes |
-| `parallel` | `method` | `scotch` | Decomposition method |
-| `solver` | `end_time` | auto | Max iterations (from fidelity) |
-| `solver` | `write_interval` | auto | Write frequency (from fidelity) |
-| `solver` | `purge_write` | 2 | Keep only N latest time directories |
-| `force_refs` | `lRef` | 1.0 | Reference length for coefficients |
-| `force_refs` | `Aref` | 1.0 | Reference area for coefficients |
-| `slurm` | `time` | auto | Wall time (from fidelity) |
-| `slurm` | `qos` | `cu_long` | Job Quality of Service |
-| `slurm` | `partition` | `cpu` | SLURM partition |
-| `slurm` | `mem_per_cpu` | `3G` | Memory requested per CPU |
-| `slurm` | `cpus_per_task` | 1 | CPUs allocated per task |
-| `slurm` | `openfoam_module` | `null` | Module to load (overrides source if set) |
-| `slurm` | `openfoam_source` | `$HOME/.../bashrc` | Script to source for OpenFOAM |
-| `slurm` | `use_tmpdir` | `true` | Run in fast node RAM/scratch (`$TMPDIR`) with live sync |
-| `slurm` | `sync_interval` | `15` | Seconds between syncing logs and forces to case dir |
+### 4. Generate Case Files
+Generate the complete OpenFOAM directory structure under `cases/<case_name>/`:
+```bash
+python setup_case.py configs/config.json
+```
+
+### 5. Run Simulation
+Navigate into the generated case directory:
+```bash
+cd cases/RP14_FSAE
+
+# Option A: Run locally in parallel (e.g. 32 cores)
+./Allrun.parallel
+
+# Option B: Submit to SLURM cluster
+sbatch run.sh
+
+# Option C: Clean / reset case
+./Allclean
+```
+
+### 6. Post-Processing & Force Analysis
+Analyze convergence and aerodynamic forces using `read_forces.py`:
+```bash
+# Print force summary (Drag, Downforce, L/D, convergence status)
+python read_forces.py
+
+# Plot force convergence history (requires matplotlib)
+python read_forces.py --plot
+
+# Live monitoring during simulation solve (refreshes automatically)
+python read_forces.py --live
+
+# Compare forces across all generated cases
+python read_forces.py --compare
+```
 
 ---
 
-## Fidelity Levels
+## Configuration Reference
 
-| Parameter | Fast | Standard | Fine |
-|-----------|------|----------|------|
-| Base cell size | 0.15 m | 0.10 m | 0.06 m |
-| Surface refinement | levels 3–4 | levels 4–5 | levels 5–6 |
-| Edge refinement | level 5 | level 6 | level 7 |
-| Min surface cell | ~9.4 mm | ~3.1 mm | ~0.9 mm |
-| Boundary layers | 3 | 5 | 8 |
-| Expansion ratio | 1.3 | 1.2 | 1.15 |
-| Max iterations | 800 | 1500 | 3000 |
-| Max global cells | 8M | 20M | 40M |
-| Typical runtime (10 cores) | 5–10 min | 30–60 min | 2–4 hours |
-| Use case | Iterative design | Balanced accuracy | Final report |
+### Essential Parameters
+
+| Parameter | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `case_name` | string | *required* | Output directory created under `cases/<case_name>/` |
+| `stl_files` | list | *required* | List of STL filenames in `stl/` |
+| `fidelity` | string | `"standard"` | Quality preset: `"fast"`, `"standard"`, or `"fine"` |
+| `flow.velocity` | float | `16.67` | Freestream velocity in m/s (16.67 m/s ≈ 60 km/h) |
+| `flow.direction` | string | `"-z"` | Freestream flow direction (`"-z"`, `"+z"`, `"-x"`, etc.) |
+| `flow.ground` | boolean | `true` | `true` enables moving ground wall at freestream velocity |
+| `domain_box` | string / dict | `"auto"` | `"auto"` derives wind tunnel bounds from STL; or supply `{"min": [...], "max": [...]}` |
+| `symmetry_plane` | float | *optional* | Centerline coordinate if vehicle symmetry is not at 0.0 (e.g. `-0.1185`) |
+| `parallel.n_procs` | integer | `32` | Number of CPU cores for MPI decomposition |
+
+### Fluid & Ambient Properties (Optional)
+
+```json
+"fluid": {
+    "rho": 1.225,       // Air density in kg/m³ (Standard air: 1.225; hot 35°C track: ~1.145)
+    "nu": 1.516e-5      // Kinematic viscosity in m²/s (Standard air: 1.516e-5; 35°C: ~1.66e-5)
+}
+```
+
+---
+
+## Fidelity Presets (FSAE Optimized)
+
+| Parameter | Fast | Standard (FSAE Default) | Fine |
+| :--- | :--- | :--- | :--- |
+| **Base cell size** | 0.15 m (150 mm) | 0.10 m (100 mm) | 0.08 m (80 mm) |
+| **Surface refinement** | Level [3, 4] (18.8–9.4 mm) | Level [4, 5] (6.25–3.12 mm) | Level [5, 6] (2.5–1.25 mm) |
+| **Edge refinement** | Level 5 (4.7 mm) | Level 6 (1.56 mm) | Level 7 (0.62 mm) |
+| **Near Wake Box** | Level 2 (37.5 mm) | Level 3 (12.5 mm) | Level 4 (5.0 mm) |
+| **Far Wake Box** | Level 1 (75.0 mm) | Level 1 (50.0 mm) | Level 2 (20.0 mm) |
+| **Boundary layers** | 3 layers | 5 layers | 6 layers |
+| **Expansion ratio** | 1.30 | 1.20 | 1.15 |
+| **nCellsBetweenLevels** | 2 | 2 | 2 |
+| **resolveFeatureAngle** | 35° | 35° | 30° |
+| **Approximate Cell Count** | **~2–4 Million** | **~6–9 Million** | **~12–16 Million** |
+| **Solving Time (32 cores)** | ~10–15 min | ~30–60 min | ~2–4 hours |
+| **Primary Use Case** | Rapid concept iteration | Standard FSAE aerodynamic design | Final aerodynamic report validation |
+
+---
+
+## Simulation Architecture
+
+### Mesh Pipeline
+1. `surfaceFeatureExtract` — Extracts sharp aerodynamic edges (wing trailing edges, endplate perimeters, gurneys) with `includedAngle = 140°`.
+2. `blockMesh` — Hex background mesh sized to domain box with ground alignment.
+3. `snappyHexMesh`:
+   - **Castellated mesh**: Distance shells (`25mm→L4`, `80mm→L3`) + Two-stage wake (`nearWakeBox` L3 + `farWakeBox` L1).
+   - **Snap phase**: Surface snapping with implicit/explicit feature edge capture.
+   - **Layer phase**: 5 prism layers inflated from wall faces with Spalding wall function sizing.
+4. `checkMesh` — Topology and non-orthogonality quality validation.
+5. `renumberMesh` — Bandwidth reduction for maximum linear solver throughput.
+
+### Solver & Numerical Schemes
+- **Solver**: `simpleFoam` (Steady-state incompressible RANS).
+- **Initialization**: `potentialFoam` computes an initial divergence-free velocity field before `simpleFoam` starts.
+- **Algorithm**: **SIMPLEC** (`consistent true`), enabling robust velocity relaxation ($U = 0.6, p = 0.5$).
+- **Turbulence Model**: $k$-$\omega$ SST (Menter's Shear Stress Transport) with continuous `nutUSpaldingWallFunction`.
+- **Convection Schemes**:
+  - Velocity: `bounded Gauss limitedLinear 1` (2nd-order TVD with Sweby limiter).
+  - Turbulence ($k, \omega$): `bounded Gauss upwind` (1st-order bounded, preventing negative $k$).
+- **Linear Solvers**:
+  - Pressure: `GAMG` (Geometric-Algebraic Multigrid) with `DICGaussSeidel`.
+  - Velocity & Turbulence: `PBiCGStab` with `DILU` preconditioner.
 
 ---
 
 ## Project Structure
 
 ```
-cfd-gen/
-├── setup_case.py          # Run without installing
-├── read_forces.py         # Run without installing
-├── pyproject.toml         # Package definition
+OpenFOAM-CaseGenerator/
+├── setup_case.py              # CLI entry point for case generation
+├── read_forces.py             # CLI entry point for force analysis
 ├── configs/
-│   └── example.json       # Config template
-├── stl/                   # Place your geometry here (gitignored)
-├── cases/                 # Generated cases go here (gitignored)
+│   ├── config.json            # Main user configuration
+│   └── example.json           # Minimal template
+├── stl/                       # Place geometry STL files here (gitignored)
+├── cases/                     # Generated OpenFOAM cases appear here (gitignored)
 └── src/cfd_gen/
-    ├── cli.py             # CLI entry points
-    ├── config.py          # Config loading, defaults, validation
-    ├── geometry.py        # Domain sizing, mesh parameter derivation
-    ├── stl_utils.py       # ASCII STL reader/writer
-    ├── writers/
-    │   ├── base.py        # OpenFOAM header templates
-    │   ├── constants.py   # transportProperties, turbulenceProperties
-    │   ├── fields.py      # Boundary condition files (0/)
-    │   ├── mesh.py        # blockMeshDict, snappyHexMeshDict
-    │   ├── scripts.py     # Allrun, Allclean, SLURM scripts
-    │   └── solver.py      # controlDict, fvSchemes, fvSolution
-    └── postproc/
-        ├── forces.py      # Force reading, convergence check
-        ├── compare.py     # Multi-case comparison
-        ├── plotting.py    # Matplotlib plots
-        └── residuals.py   # Residual monitoring
-```
-
-### Generated Case Layout
-
-```
-cases/<case_name>/
-├── 0/                     # Boundary conditions (U, p, k, omega, nut, Phi)
-├── 0.orig/                # Backup of initial conditions
-├── constant/
-│   ├── transportProperties
-│   ├── turbulenceProperties
-│   └── triSurface/        # STL geometry (copied & renamed)
-├── system/
-│   ├── blockMeshDict
-│   ├── snappyHexMeshDict
-│   ├── surfaceFeatureExtractDict
-│   ├── controlDict
-│   ├── fvSchemes
-│   ├── fvSolution
-│   └── decomposeParDict
-├── Allrun                 # Serial execution
-├── Allrun.parallel        # Parallel execution (recommended)
-├── Allclean               # Reset case
-├── run.sh                 # SLURM submission script
-└── case_config.json       # Full resolved config (for reproducibility)
+    ├── cli.py                 # Core CLI handling and orchestration
+    ├── config.py              # Configuration loading, validation, and defaults
+    ├── geometry.py            # Domain sizing, presets, and wake derivation
+    ├── stl_utils.py           # STL ASCII reader/writer and bounding box math
+    ├── writers/               # OpenFOAM dictionary generators
+    │   ├── constants.py       # transportProperties, turbulenceProperties
+    │   ├── fields.py          # Boundary conditions in 0/
+    │   ├── mesh.py            # blockMeshDict, snappyHexMeshDict, surfaceFeatureExtractDict
+    │   ├── scripts.py         # Allrun, Allclean, and SLURM submission scripts
+    │   └── solver.py          # controlDict, fvSchemes, fvSolution, decomposeParDict
+    └── postproc/              # Force parsing, plotting, and convergence monitoring
 ```
 
 ---
 
-## Simulation Setup
+## Notes & Best Practices
 
-### Solver & Turbulence
-
-| Property | Value |
-|----------|-------|
-| Solver | `simpleFoam` (steady-state, incompressible RANS) |
-| Algorithm | SIMPLEC (consistent SIMPLE) |
-| Turbulence | k-ω SST |
-| Wall treatment | Spalding wall function (all y+ compatible) |
-| Initialization | potentialFoam → simpleFoam |
-
-### Mesh Pipeline
-
-1. `surfaceFeatureExtract` — Sharp edge extraction (includedAngle = 150°)
-2. `blockMesh` — Uniform background hex mesh
-3. `snappyHexMesh` — Castellated mesh + snap + boundary layers
-4. `checkMesh` — Quality validation
-5. `renumberMesh` — Cell ordering optimization
-
-Auto-computed refinement regions:
-- **nearBody** — Tight box around geometry
-- **wakeBox** — Extended downstream region
-
-### Boundary Conditions
-
-| Patch | U | p | Turbulence |
-|-------|---|---|------------|
-| **inlet** | fixedValue | zeroGradient | fixedValue |
-| **outlet** | zeroGradient | fixedValue 0 | zeroGradient |
-| **geometry** | noSlip | zeroGradient | wall functions |
-| **ground** | moving wall | zeroGradient | wall functions |
-| **farField** | slip | zeroGradient | zeroGradient |
-| **symmetry** | symmetry | symmetry | symmetry |
-
-The ground patch uses a moving wall at freestream velocity to simulate road-relative motion — critical for ground-effect aerodynamics.
-
-### Numerical Schemes
-
-- **Velocity divergence**: bounded Gauss limitedLinear 1 (second-order, bounded)
-- **Turbulence divergence**: bounded Gauss upwind (first-order, stable)
-- **Gradient**: cellLimited Gauss linear 1
-- **Laplacian**: Gauss linear limited corrected 0.5
-
-### Relaxation
-
-| Field | Factor |
-|-------|--------|
-| p | 0.5 |
-| U | 0.6 |
-| k | 0.5 |
-| ω | 0.5 |
-
----
-
-## Post-Processing
-
-### CLI Commands
-
-| Command | Description |
-|---------|-------------|
-| `cfd-forces` | Print force summary (drag, downforce, L/D) |
-| `cfd-forces --plot` | Convergence history plot |
-| `cfd-forces --plot --save` | Save plot as PNG |
-| `cfd-forces --live` | Real-time force monitor (updates every 3s) |
-| `cfd-forces --compare` | Compare all cases in cases/ directory |
-| `cfd-forces --check` | Exit code 0 if converged, 1 if not |
-
-### Example Output
-
-```
-=======================================================
-  FORCE RESULTS (1500 iterations)
-=======================================================
-  Drag (-z):        12.345 N
-  Downforce (-y):   45.678 N
-  L/D:               3.700
--------------------------------------------------------
-  Averaged (last 100):
-    Drag:        12.340 N  (±0.123%)
-    Downforce:   45.670 N  (±0.089%)
-    L/D:          3.700
-  Status: ✓ CONVERGED
-=======================================================
-  Note: If half-model (symmetry), multiply by 2.
-```
-
-### Convergence Criterion
-
-Forces are considered converged when the standard deviation / mean < 0.5% over the last 200 iterations.
-
----
-
-## Execution Options
-
-| Method | Command | Use Case |
-|--------|---------|----------|
-| Local parallel | `./Allrun.parallel` | Development (10 cores) |
-| SLURM | `sbatch run.sh` | HPC cluster |
-| Serial | `./Allrun` | Debugging / small cases |
-| Clean & re-run | `./Allclean && ./Allrun.parallel` | Reset and restart |
-
-*Note: By default, the SLURM script (`run.sh`) runs inside a fast RAM disk (`$TMPDIR` or `/dev/shm`) to minimize I/O bottleneck on the cluster while continuously syncing forces and logs back to the case directory in real-time every 15s (so `cfd-forces` works during the run). It safely catches job timeouts to reconstruct the mesh and sync results back. Set `"use_tmpdir": false` in config to run directly in-place.*
-
----
-
-## Design Decisions
-
-1. **Geometry-agnostic** — No hardcoded dimensions. Mesh parameters scale from STL bounding box.
-2. **Minimal user input** — Only case_name, stl_files, flow conditions, and domain_box required.
-3. **Universal defaults** — Wall functions, schemes, and relaxation that work for any external aero geometry without divergence.
-4. **Reproducibility** — Each case saves its full resolved config as `case_config.json`.
-5. **Spalding wall function** — Works across the entire y+ range, no strict mesh requirements at the wall.
-
----
-
-## Dependencies
-
-### Required
-
-- [OpenFOAM v2512](https://www.openfoam.com/download) (ESI/OpenCFD distribution)
-- Python ≥ 3.9 (standard library only for case generation)
-
-### Optional
-
-- [matplotlib](https://matplotlib.org/) ≥ 3.5 — for convergence plots (`pip install -e ".[plot]"`)
-- SLURM — for HPC job submission
-
----
-
-## Notes
-
-- **Half-model**: Uses a symmetry plane. Multiply reported forces by 2 for full-vehicle values.
-- **STL format**: Only ASCII STL is supported. Convert binary STL in your CAD tool (e.g., SolidWorks: Save As → STL → ASCII).
-- **stl and cases directories** are gitignored. Place your geometry in `stl/` and generated cases appear in `cases/`.
-- **Convergence safety**: The solver uses `writeAtEnd true` to always save the final state, even if interrupted.
-
----
-
-## Roadmap (Planned Features)
-
-- **Auto-Reporting `y+`**: Post-processing parser to report boundary layer health.
-- **Angle of Attack & Yaw**: Native configuration support to auto-rotate flow velocity vectors.
-- **Auto VTK Slices**: OpenFOAM function objects to generate lightweight 2D slices of the flow field during the run.
-
----
-
-## License
-
-This project is provided as-is for educational and research purposes.
+- **Symmetry (Half Car)**:
+  - When using symmetry, the reported forces in `read_forces.py` and OpenFOAM `forces` are for the **modeled half**. Multiply by 2 to obtain the full-vehicle aerodynamic forces.
+- **ASCII STL Format**:
+  - OpenFOAM `surfaceFeatureExtract` and `snappyHexMesh` require ASCII STL format. If your CAD exports binary STL, save or export as ASCII (e.g. in SolidWorks: *Save As $\rightarrow$ STL $\rightarrow$ Options $\rightarrow$ ASCII*).
+- **Cluster Scratch Directory (`$TMPDIR`)**:
+  - The generated `run.sh` runs inside node local scratch (`$TMPDIR`) on HPC clusters, syncing forces and logs back to the case folder every 15 seconds. This eliminates network filesystem (NFS/Lustre) bottlenecks. Set `"use_tmpdir": false` in `config.json` if running directly in-place.
