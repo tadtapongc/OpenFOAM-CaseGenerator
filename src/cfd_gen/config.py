@@ -183,10 +183,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "nRelaxedIter": 20,
     },
 
-    # Feature extraction
+    # Feature extraction (140° captures real aero edges without cosmetic CAD seams)
     "feature_extract": {
         "extractionMethod": "extractFromSurface",
-        "includedAngle": 150,
+        "includedAngle": 140,
     },
 
     # Mesh quality controls (relaxed — works with any geometry)
@@ -325,16 +325,17 @@ def validate(cfg: dict[str, Any], project_dir: Path) -> tuple[list[str], list[st
     if missing:
         errors.append(f"Missing patch keys: {missing}")
 
-    # Domain box (required)
+    # Domain box (can be "auto" or {"min": [x,y,z], "max": [x,y,z]})
     box = cfg.get("domain_box")
-    if not box:
-        errors.append("'domain_box' is required: {\"min\": [x,y,z], \"max\": [x,y,z]}")
-    elif "min" not in box or "max" not in box:
-        errors.append("domain_box must have 'min' and 'max' keys")
-    else:
-        for i in range(3):
-            if box["min"][i] >= box["max"][i]:
-                errors.append(f"domain_box min[{i}] >= max[{i}]")
+    if box not in ("auto", None) and not isinstance(box, dict):
+        errors.append("'domain_box' must be 'auto' or a dict: {\"min\": [x,y,z], \"max\": [x,y,z]}")
+    elif isinstance(box, dict):
+        if "min" not in box or "max" not in box:
+            errors.append("domain_box must have 'min' and 'max' keys")
+        else:
+            for i in range(3):
+                if box["min"][i] >= box["max"][i]:
+                    errors.append(f"domain_box min[{i}] >= max[{i}]")
 
     return errors, warnings
 

@@ -96,11 +96,11 @@ def compute_domain_box(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str, 
     """Compute domain bounding box from STL bounds.
 
     Uses generous padding to avoid blockage effects:
-      - Upstream: 5× geometry length
-      - Downstream: 10× geometry length
-      - Lateral/top: 5× geometry height
-      - Ground at 0 (for ground vehicles)
-      - Symmetry at lateral=0
+      - Upstream: 4× geometry length
+      - Downstream: 8× geometry length
+      - Lateral/top: 4× geometry height
+      - Ground at smin[up_idx] (for ground vehicles)
+      - Symmetry at lateral=smin[lateral_idx] if symmetry face, else padded
 
     Returns:
         {"min": [x,y,z], "max": [x,y,z]}
@@ -113,7 +113,7 @@ def compute_domain_box(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str, 
     lateral_idx = next(i for i in range(3) if i != flow_idx and i != up_idx)
 
     # Padding factors (reduced for fast fidelity)
-    fidelity = cfg.get("fidelity", "fast")
+    fidelity = cfg.get("fidelity", "standard")
     if fidelity == "fast":
         default_up, default_down, default_lat, default_top = 3, 6, 3, 3
     elif fidelity == "fine":
@@ -138,33 +138,55 @@ def compute_domain_box(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str, 
         dmin[flow_idx] = smin[flow_idx] - flow_extent * downstream
         dmax[flow_idx] = smax[flow_idx] + flow_extent * upstream
 
-    # Up axis (ground at 0, top padded)
+    # Up axis (ground aligns with bottom of car/tires, or explicit ground_plane)
     up_extent = max(extents[up_idx], 0.1)
-    dmin[up_idx] = 0.0  # ground plane
+    ground_coord = cfg.get("ground_plane")
+    if ground_coord is not None:
+        dmin[up_idx] = float(ground_coord)
+    else:
+        dmin[up_idx] = smin[up_idx]  # ground plane
     dmax[up_idx] = smax[up_idx] + up_extent * top
 
-    # Lateral axis (symmetry at 0, far side padded)
+    # Lateral axis
     lat_extent = max(extents[lateral_idx], 0.1)
-    dmin[lateral_idx] = 0.0  # symmetry plane
-    dmax[lateral_idx] = smax[lateral_idx] + lat_extent * lateral
+    domain_faces = cfg.get("domain_faces", {})
+    lateral_min_key = f"-{'xyz'[lateral_idx]}"
+    is_symmetry = "symmetry" in domain_faces.get(lateral_min_key, "").lower()
+
+    # Centerline / symmetry plane coordinate (supports planes not at 0)
+    sym_coord = cfg.get("symmetry_plane", cfg.get("centerline"))
+
+    if is_symmetry:
+        if sym_coord is not None:
+            dmin[lateral_idx] = float(sym_coord)
+            car_half_width = max(0.1, smax[lateral_idx] - float(sym_coord))
+            dmax[lateral_idx] = smax[lateral_idx] + car_half_width * lateral
+        elif abs(smin[lateral_idx]) < 0.05:
+            dmin[lateral_idx] = 0.0
+            dmax[lateral_idx] = smax[lateral_idx] + lat_extent * lateral
+        else:
+            dmin[lateral_idx] = smin[lateral_idx]
+            dmax[lateral_idx] = smax[lateral_idx] + lat_extent * lateral
+    else:
+        dmin[lateral_idx] = smin[lateral_idx] - lat_extent * lateral
+        dmax[lateral_idx] = smax[lateral_idx] + lat_extent * lateral
 
     return {
-        "min": [round(v, 3) for v in dmin],
-        "max": [round(v, 3) for v in dmax],
+        "min": [round(v, 4) for v in dmin],
+        "max": [round(v, 4) for v in dmax],
     }
 
 
 # ============================================================
-# FIDELITY PRESETS
+# FIDELITY PRESETS — Optimized for Formula Student / FSAE Aerodynamics
 # ============================================================
 
 FIDELITY_PRESETS: dict[str, dict[str, Any]] = {
     "fast": {
-        # Quick turnaround for iterative design (~5-10 min on 10 cores)
-        # Coarse background, moderate surface, minimal layers
+        # Quick turnaround for iterative design (~5-10 min on 16-32 cores, ~2-4M cells)
         "base_cell_size": 0.15,        # m — coarse background
-        "surface_level": [3, 4],       # 0.15/2^4 = 9.4mm surface cells
-        "edge_level": 5,               # 0.15/2^5 = 4.7mm at edges
+        "surface_level": [3, 4],       # 18.75mm - 9.38mm surface cells
+        "edge_level": 5,               # 4.69mm at edges
         "n_layers": 3,
         "expansion_ratio": 1.3,
         "first_layer_thickness": 0.4,
@@ -172,69 +194,71 @@ FIDELITY_PRESETS: dict[str, dict[str, Any]] = {
         "write_interval": 400,
         "maxGlobalCells": 8_000_000,
         "nCellsBetweenLevels": 2,
-        "resolveFeatureAngle": 25,
+        "resolveFeatureAngle": 35,
         "nSolveIter": 100,             # snap iterations
         "nFeatureSnapIter": 10,
         "nLayerIter": 30,
         "nRelaxIter_layers": 5,
         "slurm_time": "04:00:00",
-        # Distance-based refinement shells (distance, level)
-        # Shells conform to geometry shape — replaces nearBody box
+        # Distance-based refinement shells
         "distance_levels": [
-            (0.015, 4),   # 15mm → level 4
-            (0.060, 3),   # 60mm → level 3
-            (0.200, 2),   # 200mm → level 2
+            (0.040, 3),   # 40mm → level 3
+            (0.120, 2),   # 120mm → level 2
         ],
+        "near_wake_level": 2,          # 37.5mm near wake
+        "far_wake_level": 1,           # 75mm far wake
     },
     "standard": {
-        # Balanced — good accuracy, reasonable time (~30-60 min)
-        "base_cell_size": 0.10,
-        "surface_level": [4, 5],       # 0.10/2^5 = 3.1mm surface cells
-        "edge_level": 6,               # 0.10/2^6 = 1.6mm at edges
+        # Balanced — optimal for FSAE aero (~30-60 min on 32 cores, sweet spot: ~6-9M cells)
+        "base_cell_size": 0.10,        # 100mm background
+        "surface_level": [4, 5],       # 6.25mm bodywork, 3.125mm fine features
+        "edge_level": 6,               # 1.56mm at sharp aero edges (wings/gurneys)
         "n_layers": 5,
         "expansion_ratio": 1.2,
         "first_layer_thickness": 0.3,
         "end_time": 1500,
         "write_interval": 500,
-        "maxGlobalCells": 20_000_000,
-        "nCellsBetweenLevels": 3,
-        "resolveFeatureAngle": 20,
+        "maxGlobalCells": 18_000_000,
+        "nCellsBetweenLevels": 2,      # 2 buffer cells (avoids massive 3D transition bloat)
+        "resolveFeatureAngle": 35,     # Prevents general body curvature from ballooning to max level
         "nSolveIter": 200,
         "nFeatureSnapIter": 15,
         "nLayerIter": 50,
         "nRelaxIter_layers": 10,
         "slurm_time": "08:00:00",
-        # Distance-based refinement shells
+        # Conforming distance shells (lean transition around bodywork)
         "distance_levels": [
-            (0.010, 5),   # 10mm → level 5
-            (0.040, 4),   # 40mm → level 4
-            (0.150, 3),   # 150mm → level 3
+            (0.025, 4),   # 25mm → level 4 (6.25mm)
+            (0.080, 3),   # 80mm → level 3 (12.5mm)
         ],
+        "near_wake_level": 3,          # 12.5mm for rear wing vortex / diffuser
+        "far_wake_level": 1,           # 50mm for downstream transport (saves ~8M cells)
     },
     "fine": {
-        # Final report quality — accurate numbers (~2-4 hours)
-        "base_cell_size": 0.06,
-        "surface_level": [5, 6],       # 0.06/2^6 = 0.9mm surface cells
-        "edge_level": 7,               # 0.06/2^7 = 0.5mm at edges
-        "n_layers": 8,
+        # High resolution validation (~2-4 hours, ~12-16M cells)
+        "base_cell_size": 0.08,        # 80mm background
+        "surface_level": [5, 6],       # 2.5mm - 1.25mm surface cells
+        "edge_level": 7,               # 0.625mm at edges
+        "n_layers": 6,
         "expansion_ratio": 1.15,
         "first_layer_thickness": 0.2,
         "end_time": 3000,
         "write_interval": 500,
-        "maxGlobalCells": 40_000_000,
-        "nCellsBetweenLevels": 3,
-        "resolveFeatureAngle": 15,
+        "maxGlobalCells": 30_000_000,
+        "nCellsBetweenLevels": 2,
+        "resolveFeatureAngle": 30,
         "nSolveIter": 300,
         "nFeatureSnapIter": 20,
         "nLayerIter": 50,
         "nRelaxIter_layers": 10,
         "slurm_time": "12:00:00",
-        # Distance-based refinement shells
         "distance_levels": [
-            (0.005, 6),   # 5mm → level 6
             (0.020, 5),   # 20mm → level 5
-            (0.080, 4),   # 80mm → level 4
+            (0.060, 4),   # 60mm → level 4
+            (0.150, 3),   # 150mm → level 3
         ],
+        "near_wake_level": 4,          # 5mm near wake
+        "far_wake_level": 2,           # 20mm far wake
     },
 }
 
@@ -250,19 +274,23 @@ def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str,
     The mesh adapts to whatever geometry you throw at it.
 
     Refinement strategy:
-        - Distance-based shells around the STL surface (replaces nearBody box).
+        - Distance-based shells around the STL surface.
           Cells are refined based on proximity to the geometry, giving smooth
           transitions that conform to the actual shape.
-        - Box-based wake region downstream (distance mode can't reach the far wake).
+        - Two-stage wake region:
+          1. nearWakeBox: High resolution immediately behind vehicle (diffuser,
+             rear wing vortices, tire separation). Length ~ 1.2x vehicle length.
+          2. farWakeBox: Low-cost downstream transport to outlet without numerical
+             diffusion, avoiding millions of wasted cells far downstream.
 
     Fidelity levels:
-        "fast"     — iterative design, quick turnaround
-        "standard" — balanced accuracy/speed (default)
-        "fine"     — final report quality
+        "fast"     — iterative design, quick turnaround (~2-4M cells)
+        "standard" — balanced accuracy/speed for FSAE (~6-9M cells)
+        "fine"     — final report quality (~12-16M cells)
 
     Returns dict with:
         base_cell_size, surface_level, edge_level, distance_levels,
-        refinement_regions (wake only), n_layers, etc.
+        refinement_regions (nearWakeBox + farWakeBox), n_layers, etc.
     """
     smin, smax = combined_bounds
     extents = [smax[i] - smin[i] for i in range(3)]
@@ -272,8 +300,8 @@ def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str,
         raise ValueError("STL has zero extent — check your geometry")
 
     # Get fidelity preset
-    fidelity = cfg.get("fidelity", "fast")
-    preset = FIDELITY_PRESETS.get(fidelity, FIDELITY_PRESETS["fast"])
+    fidelity = cfg.get("fidelity", "standard")
+    preset = FIDELITY_PRESETS.get(fidelity, FIDELITY_PRESETS["standard"])
 
     user_mesh = cfg.get("mesh_params", {})
 
@@ -289,36 +317,95 @@ def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str,
     if distance_levels and isinstance(distance_levels[0], list):
         distance_levels = [tuple(x) for x in distance_levels]
 
-    resolve_feature_angle = user_mesh.get("resolveFeatureAngle", preset.get("resolveFeatureAngle", 20))
+    resolve_feature_angle = user_mesh.get("resolveFeatureAngle", preset.get("resolveFeatureAngle", 35))
 
-    # Wake box (kept as box-based — distance mode can't reach far wake)
-    wake_level = max(1, surface_level[1] - 3)
+    # Wake levels (uncoupled from surface level to prevent wake bloat)
+    near_wake_level = user_mesh.get("near_wake_level", preset.get("near_wake_level", 3))
+    far_wake_level = user_mesh.get("far_wake_level", preset.get("far_wake_level", 1))
+
+    # Support legacy single wake_level override if user explicitly set it
+    if "wake_level" in user_mesh:
+        near_wake_level = user_mesh["wake_level"]
 
     flow_idx, flow_sign = flow_axis_index_sign(cfg)
     up_idx = up_axis_index(cfg)
+    lateral_idx = next(i for i in range(3) if i != flow_idx and i != up_idx)
 
-    pad = [max(0.05, d * 0.2) for d in extents]
+    # Domain ground coordinate
+    ground_z = min(0.0, smin[up_idx]) - 0.01
+    if "ground_plane" in cfg:
+        ground_z = float(cfg["ground_plane"]) - 0.01
+    elif "domain_box" in cfg and isinstance(cfg["domain_box"], dict) and "min" in cfg["domain_box"]:
+        ground_z = cfg["domain_box"]["min"][up_idx] - 0.01
 
-    wake_min = [smin[i] - pad[i] for i in range(3)]
-    wake_max = [smax[i] + pad[i] for i in range(3)]
-    # Extend wake box down to ground level (with 10mm margin to guarantee boundary overlap)
-    if "domain_box" in cfg and "min" in cfg["domain_box"] and len(cfg["domain_box"]["min"]) > up_idx:
-        wake_min[up_idx] = cfg["domain_box"]["min"][up_idx] - 0.01
+    # Centerline / symmetry coordinate
+    domain_faces = cfg.get("domain_faces", {})
+    lateral_min_key = f"-{'xyz'[lateral_idx]}"
+    is_symmetry = "symmetry" in domain_faces.get(lateral_min_key, "").lower()
+
+    sym_coord = cfg.get("symmetry_plane", cfg.get("centerline"))
+    if sym_coord is not None:
+        sym_x = float(sym_coord)
+    elif "domain_box" in cfg and isinstance(cfg["domain_box"], dict) and "min" in cfg["domain_box"]:
+        sym_x = cfg["domain_box"]["min"][lateral_idx]
+    elif abs(smin[lateral_idx]) < 0.05:
+        sym_x = 0.0
     else:
-        wake_min[up_idx] = min(0.0, smin[up_idx]) - 0.01
-    wake_length = max(2.0, extents[flow_idx] * 4.0)
+        sym_x = smin[lateral_idx]
+
+    # --- 1. Near Wake Box (High-resolution: rear wing, diffuser, tire separation) ---
+    near_pad_lat = max(0.10, extents[lateral_idx] * 0.15)
+    near_pad_top = max(0.15, extents[up_idx] * 0.25)
+    near_length = max(2.0, extents[flow_idx] * 1.2)
+
+    near_min = list(smin)
+    near_max = list(smax)
+    near_min[up_idx] = ground_z
+    near_max[up_idx] = smax[up_idx] + near_pad_top
+    near_min[lateral_idx] = smin[lateral_idx] - near_pad_lat
+    near_max[lateral_idx] = smax[lateral_idx] + near_pad_lat
+
+    # If lateral min is symmetry plane, clip cleanly to symmetry plane
+    if is_symmetry:
+        near_min[lateral_idx] = sym_x
 
     if flow_sign > 0:
-        wake_min[flow_idx] = smax[flow_idx]
-        wake_max[flow_idx] = smax[flow_idx] + wake_length
+        near_min[flow_idx] = smin[flow_idx] + extents[flow_idx] * 0.6
+        near_max[flow_idx] = smax[flow_idx] + near_length
     else:
-        wake_max[flow_idx] = smin[flow_idx]
-        wake_min[flow_idx] = smin[flow_idx] - wake_length
+        near_min[flow_idx] = smin[flow_idx] - near_length
+        near_max[flow_idx] = smin[flow_idx] + extents[flow_idx] * 0.4
 
-    refinement_regions = user_mesh.get("refinement_regions", [
-        {"name": "wakeBox", "min": [round(v, 3) for v in wake_min],
-         "max": [round(v, 3) for v in wake_max], "level": wake_level},
-    ])
+    # --- 2. Far Wake Box (Lower resolution: downstream transport to outlet) ---
+    far_pad_lat = max(0.20, extents[lateral_idx] * 0.30)
+    far_pad_top = max(0.25, extents[up_idx] * 0.40)
+    far_length = max(4.0, extents[flow_idx] * 3.5)
+
+    far_min = list(smin)
+    far_max = list(smax)
+    far_min[up_idx] = ground_z
+    far_max[up_idx] = smax[up_idx] + far_pad_top
+    far_min[lateral_idx] = smin[lateral_idx] - far_pad_lat
+    far_max[lateral_idx] = smax[lateral_idx] + far_pad_lat
+
+    if is_symmetry:
+        far_min[lateral_idx] = sym_x
+
+    if flow_sign > 0:
+        far_min[flow_idx] = smax[flow_idx]
+        far_max[flow_idx] = smax[flow_idx] + far_length
+    else:
+        far_min[flow_idx] = smin[flow_idx] - far_length
+        far_max[flow_idx] = smin[flow_idx]
+
+    default_regions = [
+        {"name": "nearWakeBox", "min": [round(v, 4) for v in near_min],
+         "max": [round(v, 4) for v in near_max], "level": near_wake_level},
+        {"name": "farWakeBox", "min": [round(v, 4) for v in far_min],
+         "max": [round(v, 4) for v in far_max], "level": far_wake_level},
+    ]
+
+    refinement_regions = user_mesh.get("refinement_regions", default_regions)
 
     return {
         "base_cell_size": round(base_cell, 4),
@@ -326,8 +413,8 @@ def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str,
         "edge_level": edge_level,
         "distance_levels": distance_levels,
         "refinement_regions": refinement_regions,
-        "nCellsBetweenLevels": user_mesh.get("nCellsBetweenLevels", preset.get("nCellsBetweenLevels", 3)),
-        "maxGlobalCells": user_mesh.get("maxGlobalCells", preset.get("maxGlobalCells", 20_000_000)),
+        "nCellsBetweenLevels": user_mesh.get("nCellsBetweenLevels", preset.get("nCellsBetweenLevels", 2)),
+        "maxGlobalCells": user_mesh.get("maxGlobalCells", preset.get("maxGlobalCells", 18_000_000)),
         "maxLocalCells": user_mesh.get("maxLocalCells", 2_000_000),
         "minRefinementCells": user_mesh.get("minRefinementCells", 10),
         "resolveFeatureAngle": resolve_feature_angle,

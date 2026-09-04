@@ -94,8 +94,14 @@ def _do_init(project_dir: Path) -> None:
 
 def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> None:
     """Generate a complete OpenFOAM case."""
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     from cfd_gen.config import find_stl, load_config, validate
     from cfd_gen.geometry import (
+        compute_domain_box,
         compute_mesh_params,
         turbulence_values,
         vec_str,
@@ -158,6 +164,10 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
 
     combined_bounds = (tuple(all_min), tuple(all_max))
 
+    # Auto-compute domain box if requested or missing
+    if cfg.get("domain_box") in ("auto", None) or not isinstance(cfg.get("domain_box"), dict):
+        cfg["domain_box"] = compute_domain_box(cfg, combined_bounds)
+
     # Check STL clearance relative to domain boundaries
     box = cfg["domain_box"]
     domain_faces = cfg.get("domain_faces", {})
@@ -172,8 +182,12 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
         max_face_type = domain_faces.get(f"+{axis_labels[i]}", "").lower()
 
         if clearance_min < -1e-4:
-            print(f"  ⚠  STL penetrates outside domain: "
-                  f"{axis_labels[i]}_min ({clearance_min:.3f} m)")
+            if min_face_type == "symmetry":
+                print(f"  ℹ  STL crosses symmetry plane: {axis_labels[i]}_min "
+                      f"({clearance_min:.3f} m) — geometry will be cut at symmetry boundary")
+            else:
+                print(f"  ⚠  STL penetrates outside domain: "
+                      f"{axis_labels[i]}_min ({clearance_min:.3f} m)")
         elif clearance_min < min_clearance and min_face_type not in ("symmetry", "ground"):
             print(f"  ⚠  STL very close to domain boundary: "
                   f"{axis_labels[i]}_min (clearance: {clearance_min:.3f} m)")
@@ -186,12 +200,11 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
                   f"{axis_labels[i]}_max (clearance: {clearance_max:.3f} m)")
 
     # Derive mesh parameters from geometry
-    cfg["domain_box"] = cfg["domain_box"]  # required in config
     cfg["mesh_params"] = compute_mesh_params(cfg, combined_bounds)
     # Apply fidelity presets conditionally
     from cfd_gen.geometry import FIDELITY_PRESETS
-    fidelity = cfg.get("fidelity", "fast")
-    preset = FIDELITY_PRESETS.get(fidelity, FIDELITY_PRESETS["fast"])
+    fidelity = cfg.get("fidelity", "standard")
+    preset = FIDELITY_PRESETS.get(fidelity, FIDELITY_PRESETS["standard"])
     
     if not _is_set("solver", "end_time"):
         cfg["solver"]["end_time"] = preset["end_time"]
@@ -237,7 +250,8 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
     if dist_levels:
         shells = ", ".join(f"{d*1000:.0f}mm→L{l}" for d, l in dist_levels)
         print(f"    Distance shells: {shells}")
-    print(f"    Wake regions:   {len(mesh['refinement_regions'])}")
+    for r in mesh.get("refinement_regions", []):
+        print(f"    Region {r['name']}: Level {r['level']}")
 
     div_u_scheme = cfg.get("schemes", {}).get("div_U", "bounded Gauss limitedLinear 1")
 

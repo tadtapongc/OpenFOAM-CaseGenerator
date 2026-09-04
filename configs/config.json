@@ -1,17 +1,18 @@
 {
-    "_README": "=== OpenFOAM External Aero Case Configuration ===",
+    "_README": "=== OpenFOAM FSAE Aerodynamics Case Configuration ===",
+    "_README2": "Optimized for Formula Student / FSAE CFD. Change only case_name & stl_files when testing new models.",
 
     "_case_name": "Folder name created under cases/<case_name>/",
-    "case_name": "RP14_2",
+    "case_name": "RP14_FSAE",
 
     "_stl_files": "ASCII STL geometry files located in stl/ directory",
     "stl_files": ["RP14.STL"],
 
-    "_fidelity": "Preset: 'fast' (coarse mesh), 'standard' (balanced), 'fine' (high-res)",
+    "_fidelity": "Presets: 'fast' (~2-4M cells, 10 min), 'standard' (~6-9M cells, 45 min, RECOMMENDED for FSAE), 'fine' (~12-16M cells)",
     "fidelity": "standard",
 
     "flow": {
-        "_comment": "Flow conditions: velocity in m/s (16.67 m/s is approx 60 km/h); ground=true enables moving road",
+        "_comment": "Flow conditions: velocity in m/s (16.67 m/s ≈ 60 km/h); ground=true enables moving road",
         "velocity": 16.67,
         "direction": "-z",
         "ground": true
@@ -23,11 +24,11 @@
         "downforce_axis": "-y"
     },
 
-    "_domain_box": "Wind tunnel bounds [x, y, z] in meters (min and max corners)",
-    "domain_box": {
-        "min": [-0.1185, -0.310, -15.0],
-        "max": [ 3.5000,  4.500,   6.5]
-    },
+    "_domain_box_comment": "'auto' automatically fits wind tunnel around STL bounds and aligns ground/symmetry. Or provide explicit {'min': [...], 'max': [...]}.",
+    "domain_box": "auto",
+
+    "_symmetry_plane_comment": "Centerline coordinate if car symmetry plane is NOT at 0.0 (e.g. -0.1185 for RP14). Omit or set 0.0 if centered at 0.",
+    "symmetry_plane": -0.1185,
 
     "_domain_faces": "Boundary types for the 6 outer box faces: inlet, outlet, ground, farField, symmetry",
     "domain_faces": {
@@ -49,7 +50,7 @@
         "qos": "cu_hpc",
         "partition": "cpu",
         "nodes": 1,
-        "time": "24:00:00",
+        "time": "08:00:00",
         "mem_per_cpu": "4G",
         "openfoam_module": [
             "GCC/11.3.0",
@@ -61,49 +62,14 @@
         "sync_interval": 15
     },
 
-    "overrides": {
-        "_comment": "Optional expert overrides for snappyHexMesh and boundary layers",
-
+    "_comment_overrides": "Expert overrides — all fields below have built-in FSAE defaults in fidelity presets. Uncomment only if manual tuning is needed.",
+    "_optional_overrides_example": {
         "mesh_params": {
-            "_base_cell_size": "Base blockMesh cell size in meters (0.10 m = 10 cm)",
-            "base_cell_size": 0.10,
-
-            "_surface_level": "[min, max] surface refinement: cell = base / (2^level) -> L4=6.25mm, L6=1.56mm",
-            "surface_level": [4, 6],
-
-            "_edge_level": "Refinement on extracted sharp feature edges -> L6 = 1.56mm",
-            "edge_level": 6,
-
-            "_resolveFeatureAngle": "Curvature threshold angle: regions sharper than this get max surface level (deg)",
-            "resolveFeatureAngle": 25,
-
-            "_distance_levels": "Conforming refinement shells around STL: [[distance_in_meters, level], ...]",
-            "distance_levels": [
-                [0.010, 5],
-                [0.040, 4],
-                [0.150, 3]
-            ]
-        },
-
-        "layers": {
-            "_comment": "Boundary layer inflation prism cells for near-wall viscous resolution",
-
-            "_n_layers": "Number of inflated prism layers grown off the wall",
-            "n_layers": 5,
-
-            "_expansion_ratio": "Geometric growth ratio from one layer to the next (outer / inner)",
-            "expansion_ratio": 1.2,
-
-            "_first_layer_thickness": "Thickness of the first cell at the wall (relative to surface cell size)",
-            "first_layer_thickness": 0.3,
-
-            "_featureAngle": "Corner angle threshold beyond which prism layers will not extrude around corners",
-            "featureAngle": 130
-        },
-
-        "feature_extract": {
-            "_includedAngle": "Angle threshold for surfaceFeatureExtract to detect sharp edges from STL (deg)",
-            "includedAngle": 150
+            "_base_cell_size": 0.10,
+            "_surface_level": [4, 5],
+            "_edge_level": 6,
+            "_near_wake_level": 3,
+            "_far_wake_level": 1
         }
     }
 }

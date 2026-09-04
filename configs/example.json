@@ -30,12 +30,8 @@
         "downforce_axis": "-y"
     },
 
-    "_domain_box": "Wind tunnel bounding box [x, y, z] in meters. Must fully contain the STL with clearance.",
-    "_domain_box2": "Rule of thumb: 5x geometry upstream, 10x downstream, 5x lateral/top",
-    "domain_box": {
-        "min": [0.0, 0.0, -7.5],
-        "max": [2.5, 2.5, 2.0]
-    },
+    "_domain_box": "Wind tunnel bounds: 'auto' automatically fits around geometry, or specify explicit [min, max]",
+    "domain_box": "auto",
 
     "_domain_faces": "Assign each face of the domain box to a boundary type.",
     "_domain_faces2": "Available types: inlet, outlet, ground, farField, symmetry",
