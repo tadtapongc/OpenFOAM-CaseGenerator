@@ -121,6 +121,30 @@ python read_forces.py --live
 python read_forces.py --compare
 ```
 
+Example force report with automatic symmetry detection:
+```text
+=================================================================
+  FORCE RESULTS (1210 iterations)
+  ℹ  SYMMETRY DETECTED: Showing Half-Model and Full-Car (x2)
+=================================================================
+  [Half-Model Simulated]
+    Drag (-z):           123.229 N
+    Downforce (-y):       300.943 N
+    L/D:                     2.442
+
+  [Full-Car Projected (x2)]
+    Drag (-z):           246.459 N
+    Downforce (-y):       601.887 N
+    L/D:                     2.442
+-----------------------------------------------------------------
+  Averaged (last 200 iterations):
+    Half-Model:  Drag =   122.549 N (±0.23%) | DF =   298.384 N (±0.49%)
+    Full-Car:    Drag =   245.099 N (±0.23%) | DF =   596.769 N (±0.49%)
+    L/D:             2.435
+  Status: ✓ CONVERGED
+=================================================================
+```
+
 ---
 
 ## Configuration Reference
@@ -140,6 +164,43 @@ python read_forces.py --compare
 | `ground_clearance` | float | *optional* | Gap in meters below lowest STL point (e.g. `0.035` for 35 mm front wing ride height) |
 | `ground_plane` | float | *optional* | Fixed absolute coordinate of ground plane (e.g. `0.0` or `-0.050`) |
 | `parallel.n_procs` | integer | `32` | Number of CPU cores for MPI decomposition |
+
+### Ground Level & Ride Height Sweeps (Optional)
+
+Adjust the road position relative to the geometry for full-car simulations, front wing studies, or ride height sweeps:
+
+- **Style 1 — Relative Clearance (`ground_clearance`)**: Gap in meters below the lowest point of the STL. Ideal for front wing ride-height sensitivity studies ($h = 25\text{ mm}, 35\text{ mm}, 50\text{ mm}$):
+  ```json
+  "ground_clearance": 0.035   // 35 mm ride height below lowest wing feature
+  ```
+- **Style 2 — Absolute Coordinate (`ground_plane`)**: Fixed coordinate of the road in CAD space. Ideal when geometry is exported in full-vehicle assembly coordinates:
+  ```json
+  "ground_plane": 0.0         // Road plane fixed at y = 0.0
+  ```
+*(If omitted or set to `0.0`, the ground plane automatically snaps to the lowest point of the vehicle).*
+
+### Aircraft & Free-Flight Simulation (Optional)
+
+To simulate an airplane, UAV, or wing outside of ground effect in open air:
+```json
+"flow": {
+    "velocity": 30.0,
+    "direction": "-z",
+    "ground": false            // Disable moving road
+},
+"outputs": {
+    "drag_axis": "-z",
+    "downforce_axis": "+y"     // +y reports positive Lift (instead of downforce)
+},
+"domain_faces": {
+    "-x": "symmetry",          // or "farField" for full aircraft
+    "+x": "farField",
+    "-y": "farField",          // Open atmosphere below aircraft (auto-pads 4x height)
+    "+y": "farField",          // Open atmosphere above aircraft
+    "+z": "inlet",
+    "-z": "outlet"
+}
+```
 
 ### Fluid & Ambient Properties (Optional)
 
@@ -226,8 +287,9 @@ OpenFOAM-CaseGenerator/
 
 ## Notes & Best Practices
 
-- **Symmetry (Half Car)**:
-  - When using symmetry, the reported forces in `read_forces.py` and OpenFOAM `forces` are for the **modeled half**. Multiply by 2 to obtain the full-vehicle aerodynamic forces.
+- **Symmetry (Half-Car & Force Scaling)**:
+  - `snappyHexMesh` automatically trims away any CAD geometry crossing beyond the symmetry boundary.
+  - `read_forces.py` and `read_forces.py --compare` automatically detect symmetry cases and report both the **simulated half-model forces** and the **full-car projected forces ($\times 2$)** side-by-side, eliminating manual conversion.
 - **ASCII STL Format**:
   - OpenFOAM `surfaceFeatureExtract` and `snappyHexMesh` require ASCII STL format. If your CAD exports binary STL, save or export as ASCII (e.g. in SolidWorks: *Save As $\rightarrow$ STL $\rightarrow$ Options $\rightarrow$ ASCII*).
 - **Cluster Scratch Directory (`$TMPDIR`)**:
