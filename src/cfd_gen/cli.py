@@ -188,7 +188,10 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
             else:
                 print(f"  ⚠  STL penetrates outside domain: "
                       f"{axis_labels[i]}_min ({clearance_min:.3f} m)")
-        elif clearance_min < min_clearance and min_face_type not in ("symmetry", "ground"):
+        elif min_face_type == "ground":
+            print(f"  ℹ  Ground plane: {axis_labels[i]} = {box['min'][i]:.3f} m "
+                  f"(ground clearance: {clearance_min * 1000:.1f} mm)")
+        elif clearance_min < min_clearance and min_face_type != "symmetry":
             print(f"  ⚠  STL very close to domain boundary: "
                   f"{axis_labels[i]}_min (clearance: {clearance_min:.3f} m)")
 

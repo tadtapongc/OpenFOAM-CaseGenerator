@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run cfd-gen without installing. Usage: python3 run.py configs/example.json"""
+"""OpenFOAM Case Generator case setup. Usage: python setup_case.py configs/config.json"""
 
 import sys
 from pathlib import Path

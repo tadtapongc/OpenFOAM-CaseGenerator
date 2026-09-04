@@ -33,6 +33,11 @@
     "_domain_box": "Wind tunnel bounds: 'auto' automatically fits around geometry, or specify explicit [min, max]",
     "domain_box": "auto",
 
+    "_ground_style_1": "Style 1 (Relative clearance): Gap in meters below lowest STL point (e.g. 0.035 for 35mm ride height; 0.0 = full car touching ground)",
+    "ground_clearance": 0.0,
+    "_ground_style_2": "Style 2 (Absolute coordinate): Fixed coordinate of road (e.g. 0.0). Rename key to 'ground_plane' to use this instead of ground_clearance",
+    "_ground_plane_example": 0.0,
+
     "_domain_faces": "Assign each face of the domain box to a boundary type.",
     "_domain_faces2": "Available types: inlet, outlet, ground, farField, symmetry",
     "_domain_faces3": "Face keys: -x, +x, -y, +y, -z, +z (normal direction of each box face)",

@@ -216,7 +216,9 @@ def write_snappy_hex_mesh_dict(cfg: dict[str, Any], case_dir: Path) -> None:
     n_layers = layers["n_layers"]
     for name in stl_names:
         layer_lines.append(f'        "{name}" {{ nSurfaceLayers {n_layers}; }}')
-    if layers.get("ground_layers", False):
+    face_assignments = _get_face_assignments(cfg)
+    active_patches = set(face_assignments.values())
+    if layers.get("ground_layers", False) and patches["ground"] in active_patches:
         layer_lines.append(f'        "{patches["ground"]}" {{ nSurfaceLayers {n_layers}; }}')
 
     # Location in mesh — inlet-ceiling-farwall corner (always outside geometry)

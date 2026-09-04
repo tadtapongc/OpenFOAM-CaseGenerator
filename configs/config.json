@@ -30,6 +30,12 @@
     "_symmetry_plane_comment": "Centerline coordinate if car symmetry plane is NOT at 0.0 (e.g. -0.1185 for RP14). Omit or set 0.0 if centered at 0.",
     "symmetry_plane": -0.1185,
 
+    "_ground_settings_comment": "=== Ground Level Adjustment (Choose Style 1 or Style 2) ===",
+    "_ground_style_1": "Style 1 (Relative clearance): Gap in meters below lowest STL point (e.g. 0.035 for 35mm ride height; 0.0 = full car touching ground)",
+    "ground_clearance": 0.0,
+    "_ground_style_2": "Style 2 (Absolute coordinate): Fixed coordinate of road (e.g. 0.0). Rename key to 'ground_plane' to use this instead of ground_clearance",
+    "_ground_plane_example": 0.0,
+
     "_domain_faces": "Boundary types for the 6 outer box faces: inlet, outlet, ground, farField, symmetry",
     "domain_faces": {
         "-x": "symmetry",

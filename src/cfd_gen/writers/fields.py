@@ -53,10 +53,23 @@ def write_fields(cfg: dict[str, Any], case_dir: Path) -> None:
         ground_omega = "zeroGradient;"
         ground_nut = f"calculated;\n        value           uniform {nv};"
 
+    from cfd_gen.writers.mesh import _get_face_assignments
+    face_assignments = _get_face_assignments(cfg)
+    active_patches = set(face_assignments.values())
+    has_ground = patches["ground"] in active_patches
+    has_symmetry = patches["symmetry"] in active_patches
+
+    def _opt_patch(condition: bool, name: str, body: str) -> str:
+        if not condition:
+            return ""
+        return f"    {name}\n    {{\n{body}\n    }}\n"
+
     zero_dir = case_dir / "0"
     zero_dir.mkdir(parents=True, exist_ok=True)
 
     # ---- U ----
+    u_ground = _opt_patch(has_ground, patches["ground"], f"        type            {ground_U}")
+    u_sym = _opt_patch(has_symmetry, patches["symmetry"], "        type            symmetry;")
     (zero_dir / "U").write_text(foam_header("U") + f"""\
 dimensions      [0 1 -1 0 0 0 0];
 
@@ -79,23 +92,17 @@ boundaryField
     {{
         type            noSlip;
     }}
-    {patches["ground"]}
-    {{
-        type            {ground_U}
-    }}
-    {patches["walls"]}
+{u_ground}    {patches["walls"]}
     {{
         type            slip;
     }}
-    {patches["symmetry"]}
-    {{
-        type            symmetry;
-    }}
-}}
+{u_sym}}}
 
 """ + FOOTER)
 
     # ---- p ----
+    p_ground = _opt_patch(has_ground, patches["ground"], "        type            zeroGradient;")
+    p_sym = _opt_patch(has_symmetry, patches["symmetry"], "        type            symmetry;")
     (zero_dir / "p").write_text(foam_header("p") + f"""\
 dimensions      [0 2 -2 0 0 0 0];
 
@@ -116,23 +123,17 @@ boundaryField
     {{
         type            zeroGradient;
     }}
-    {patches["ground"]}
+{p_ground}    {patches["walls"]}
     {{
         type            zeroGradient;
     }}
-    {patches["walls"]}
-    {{
-        type            zeroGradient;
-    }}
-    {patches["symmetry"]}
-    {{
-        type            symmetry;
-    }}
-}}
+{p_sym}}}
 
 """ + FOOTER)
 
     # ---- k ----
+    k_ground = _opt_patch(has_ground, patches["ground"], f"        type            {ground_k}")
+    k_sym = _opt_patch(has_symmetry, patches["symmetry"], "        type            symmetry;")
     (zero_dir / "k").write_text(foam_header("k") + f"""\
 dimensions      [0 2 -2 0 0 0 0];
 
@@ -154,23 +155,17 @@ boundaryField
         type            {k_wf};
         value           uniform {kv};
     }}
-    {patches["ground"]}
-    {{
-        type            {ground_k}
-    }}
-    {patches["walls"]}
+{k_ground}    {patches["walls"]}
     {{
         type            zeroGradient;
     }}
-    {patches["symmetry"]}
-    {{
-        type            symmetry;
-    }}
-}}
+{k_sym}}}
 
 """ + FOOTER)
 
     # ---- omega ----
+    om_ground = _opt_patch(has_ground, patches["ground"], f"        type            {ground_omega}")
+    om_sym = _opt_patch(has_symmetry, patches["symmetry"], "        type            symmetry;")
     (zero_dir / "omega").write_text(foam_header("omega") + f"""\
 dimensions      [0 0 -1 0 0 0 0];
 
@@ -192,23 +187,17 @@ boundaryField
         type            {omega_wf};
         value           uniform {ov};
     }}
-    {patches["ground"]}
-    {{
-        type            {ground_omega}
-    }}
-    {patches["walls"]}
+{om_ground}    {patches["walls"]}
     {{
         type            zeroGradient;
     }}
-    {patches["symmetry"]}
-    {{
-        type            symmetry;
-    }}
-}}
+{om_sym}}}
 
 """ + FOOTER)
 
     # ---- nut ----
+    nut_ground = _opt_patch(has_ground, patches["ground"], f"        type            {ground_nut}")
+    nut_sym = _opt_patch(has_symmetry, patches["symmetry"], "        type            symmetry;")
     (zero_dir / "nut").write_text(foam_header("nut") + f"""\
 dimensions      [0 2 -1 0 0 0 0];
 
@@ -231,20 +220,12 @@ boundaryField
         type            {nut_wf};
         value           uniform 0;
     }}
-    {patches["ground"]}
-    {{
-        type            {ground_nut}
-    }}
-    {patches["walls"]}
+{nut_ground}    {patches["walls"]}
     {{
         type            calculated;
         value           uniform {nv};
     }}
-    {patches["symmetry"]}
-    {{
-        type            symmetry;
-    }}
-}}
+{nut_sym}}}
 
 """ + FOOTER)
 

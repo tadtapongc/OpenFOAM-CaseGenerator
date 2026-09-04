@@ -137,6 +137,8 @@ python read_forces.py --compare
 | `flow.ground` | boolean | `true` | `true` enables moving ground wall at freestream velocity |
 | `domain_box` | string / dict | `"auto"` | `"auto"` derives wind tunnel bounds from STL; or supply `{"min": [...], "max": [...]}` |
 | `symmetry_plane` | float | *optional* | Centerline coordinate if vehicle symmetry is not at 0.0 (e.g. `-0.1185`) |
+| `ground_clearance` | float | *optional* | Gap in meters below lowest STL point (e.g. `0.035` for 35 mm front wing ride height) |
+| `ground_plane` | float | *optional* | Fixed absolute coordinate of ground plane (e.g. `0.0` or `-0.050`) |
 | `parallel.n_procs` | integer | `32` | Number of CPU cores for MPI decomposition |
 
 ### Fluid & Ambient Properties (Optional)

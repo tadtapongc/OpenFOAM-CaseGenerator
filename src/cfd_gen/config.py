@@ -325,6 +325,13 @@ def validate(cfg: dict[str, Any], project_dir: Path) -> tuple[list[str], list[st
     if missing:
         errors.append(f"Missing patch keys: {missing}")
 
+    # Ground settings precedence warning
+    if cfg.get("ground_plane") is not None and cfg.get("ground_clearance") is not None:
+        warnings.append(
+            f"Both 'ground_plane' ({cfg['ground_plane']}) and 'ground_clearance' "
+            f"({cfg['ground_clearance']}) are defined; 'ground_plane' takes precedence."
+        )
+
     # Domain box (can be "auto" or {"min": [x,y,z], "max": [x,y,z]})
     box = cfg.get("domain_box")
     if box not in ("auto", None) and not isinstance(box, dict):

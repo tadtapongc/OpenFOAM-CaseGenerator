@@ -138,18 +138,28 @@ def compute_domain_box(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str, 
         dmin[flow_idx] = smin[flow_idx] - flow_extent * downstream
         dmax[flow_idx] = smax[flow_idx] + flow_extent * upstream
 
-    # Up axis (ground aligns with bottom of car/tires, or explicit ground_plane)
+    # Up axis: ground plane for vehicles, or open air padding for airplanes/free-flight
     up_extent = max(extents[up_idx], 0.1)
+    domain_faces = cfg.get("domain_faces", {})
+    up_min_key = f"-{'xyz'[up_idx]}"
+    is_ground = "ground" in domain_faces.get(up_min_key, "").lower()
+
     ground_coord = cfg.get("ground_plane")
     if ground_coord is not None:
         dmin[up_idx] = float(ground_coord)
+    elif "ground_clearance" in cfg and cfg["ground_clearance"] is not None and is_ground:
+        dmin[up_idx] = smin[up_idx] - float(cfg["ground_clearance"])
+    elif is_ground:
+        dmin[up_idx] = smin[up_idx]  # ground plane touches bottom of car
     else:
-        dmin[up_idx] = smin[up_idx]  # ground plane
+        # Airborne / airplane: open atmosphere below aircraft
+        bottom_factor = cfg.get("domain", {}).get("bottom_factor", top)
+        dmin[up_idx] = smin[up_idx] - up_extent * bottom_factor
+
     dmax[up_idx] = smax[up_idx] + up_extent * top
 
     # Lateral axis
     lat_extent = max(extents[lateral_idx], 0.1)
-    domain_faces = cfg.get("domain_faces", {})
     lateral_min_key = f"-{'xyz'[lateral_idx]}"
     is_symmetry = "symmetry" in domain_faces.get(lateral_min_key, "").lower()
 
@@ -331,15 +341,12 @@ def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str,
     up_idx = up_axis_index(cfg)
     lateral_idx = next(i for i in range(3) if i != flow_idx and i != up_idx)
 
-    # Domain ground coordinate
-    ground_z = min(0.0, smin[up_idx]) - 0.01
-    if "ground_plane" in cfg:
-        ground_z = float(cfg["ground_plane"]) - 0.01
-    elif "domain_box" in cfg and isinstance(cfg["domain_box"], dict) and "min" in cfg["domain_box"]:
-        ground_z = cfg["domain_box"]["min"][up_idx] - 0.01
+    # Vertical alignment (ground for vehicles, or symmetric padding for airplanes)
+    domain_faces = cfg.get("domain_faces", {})
+    up_min_key = f"-{'xyz'[up_idx]}"
+    is_ground = "ground" in domain_faces.get(up_min_key, "").lower()
 
     # Centerline / symmetry coordinate
-    domain_faces = cfg.get("domain_faces", {})
     lateral_min_key = f"-{'xyz'[lateral_idx]}"
     is_symmetry = "symmetry" in domain_faces.get(lateral_min_key, "").lower()
 
@@ -360,7 +367,19 @@ def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str,
 
     near_min = list(smin)
     near_max = list(smax)
-    near_min[up_idx] = ground_z
+    if is_ground:
+        if "ground_plane" in cfg and cfg["ground_plane"] is not None:
+            ground_z = float(cfg["ground_plane"]) - 0.01
+        elif "ground_clearance" in cfg and cfg["ground_clearance"] is not None:
+            ground_z = smin[up_idx] - float(cfg["ground_clearance"]) - 0.01
+        elif "domain_box" in cfg and isinstance(cfg["domain_box"], dict) and "min" in cfg["domain_box"]:
+            ground_z = cfg["domain_box"]["min"][up_idx] - 0.01
+        else:
+            ground_z = smin[up_idx] - 0.01
+        near_min[up_idx] = ground_z
+    else:
+        near_min[up_idx] = smin[up_idx] - near_pad_top
+
     near_max[up_idx] = smax[up_idx] + near_pad_top
     near_min[lateral_idx] = smin[lateral_idx] - near_pad_lat
     near_max[lateral_idx] = smax[lateral_idx] + near_pad_lat
@@ -383,7 +402,11 @@ def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str,
 
     far_min = list(smin)
     far_max = list(smax)
-    far_min[up_idx] = ground_z
+    if is_ground:
+        far_min[up_idx] = ground_z
+    else:
+        far_min[up_idx] = smin[up_idx] - far_pad_top
+
     far_max[up_idx] = smax[up_idx] + far_pad_top
     far_min[lateral_idx] = smin[lateral_idx] - far_pad_lat
     far_max[lateral_idx] = smax[lateral_idx] + far_pad_lat
