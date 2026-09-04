@@ -100,10 +100,7 @@ def read_forces(files):
                     if t_key in seen:
                         continue
                     seen.add(t_key)
-                    pressure = [float(parts[i]) for i in (1, 2, 3)]
-                    viscous = [float(parts[i]) for i in (4, 5, 6)]
-                    porous = [float(parts[i]) for i in (7, 8, 9)]
-                    total = [pressure[j] + viscous[j] + porous[j] for j in range(3)]
+                    total = [float(parts[1]), float(parts[2]), float(parts[3])]
                     times.append(t)
                     drags.append(total[DRAG_IDX] * DRAG_SIGN)
                     downforces.append(total[DF_IDX] * DF_SIGN)

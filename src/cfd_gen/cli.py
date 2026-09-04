@@ -366,6 +366,7 @@ def forces_main() -> None:
     from cfd_gen.postproc.forces import (
         check_convergence,
         find_force_files,
+        is_symmetry_case,
         load_axis_config,
         print_summary,
         read_forces,
@@ -435,7 +436,8 @@ def forces_main() -> None:
             sys.exit(1)
 
     # Summary
-    print_summary(times, drags, downforces, drag_axis, df_axis)
+    is_sym = is_symmetry_case(args.config, case_dir=case_dir)
+    print_summary(times, drags, downforces, drag_axis, df_axis, is_symmetry=is_sym)
 
     # Plot
     if args.plot or args.save:

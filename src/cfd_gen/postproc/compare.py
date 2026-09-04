@@ -62,10 +62,17 @@ def compare_cases(cases_dir: Path | None = None) -> None:
         conv, dp, fp, da, fa = check_convergence(drags, dfs)
         ld = abs(fa / da) if da != 0 else 0
 
+        from cfd_gen.postproc.forces import is_symmetry_case
+        is_sym = is_symmetry_case(case_dir=d)
+        mult = 2.0 if is_sym else 1.0
+
         results.append({
-            "name": cfg.get("case_name", d.name),
-            "drag": da, "df": fa, "ld": ld,
+            "name": cfg.get("case_name", d.name) + (" (x2)" if is_sym else ""),
+            "drag": (da * mult) if da is not None else None,
+            "df": (fa * mult) if fa is not None else None,
+            "ld": ld,
             "iters": len(times), "conv": conv, "dp": dp, "fp": fp,
+            "is_sym": is_sym,
         })
 
     # Print table

@@ -62,6 +62,38 @@ def load_axis_config(
     return drag_idx, drag_sign, df_idx, df_sign, drag_axis, df_axis
 
 
+def is_symmetry_case(config_path: str | None = None, case_dir: str | Path | None = None) -> bool:
+    """Check if case is configured with a symmetry boundary."""
+    cfg = None
+    base = Path(case_dir) if case_dir else Path(".")
+    if config_path and Path(config_path).exists():
+        with open(config_path) as f:
+            cfg = json.load(f)
+    elif (base / "case_config.json").exists():
+        with open(base / "case_config.json") as f:
+            cfg = json.load(f)
+    elif Path("case_config.json").exists():
+        with open("case_config.json") as f:
+            cfg = json.load(f)
+
+    if cfg:
+        faces = cfg.get("domain_faces", {})
+        if any("symmetry" in str(v).lower() for v in faces.values()):
+            return True
+
+    # Fallback: check constant/polyMesh/boundary
+    boundary_file = base / "constant" / "polyMesh" / "boundary"
+    if boundary_file.exists():
+        try:
+            content = boundary_file.read_text(errors="replace")
+            if "type            symmetry;" in content or "type symmetry;" in content:
+                return True
+        except Exception:
+            pass
+
+    return False
+
+
 # ============================================================
 # FILE DISCOVERY
 # ============================================================
@@ -136,10 +168,7 @@ def read_forces(
                     if t_key in seen:
                         continue
                     seen.add(t_key)
-                    pressure = [float(parts[i]) for i in (1, 2, 3)]
-                    viscous = [float(parts[i]) for i in (4, 5, 6)]
-                    porous = [float(parts[i]) for i in (7, 8, 9)]
-                    total = [pressure[j] + viscous[j] + porous[j] for j in range(3)]
+                    total = [float(parts[1]), float(parts[2]), float(parts[3])]
                     times.append(t)
                     drags.append(total[drag_idx] * drag_sign)
                     downforces.append(total[df_idx] * df_sign)
@@ -200,6 +229,7 @@ def print_summary(
     downforces: list[float],
     drag_axis: str,
     df_axis: str,
+    is_symmetry: bool = False,
 ) -> bool:
     """Print force summary with convergence info. Returns True if converged."""
     if not times:
@@ -209,20 +239,40 @@ def print_summary(
     converged, d_pct, f_pct, d_avg, f_avg = check_convergence(drags, downforces)
     ld = abs(f_avg / d_avg) if d_avg != 0 else 0
 
-    print(f"\n{'='*55}")
+    print(f"\n{'='*65}")
     print(f"  FORCE RESULTS ({len(times)} iterations)")
-    print(f"{'='*55}")
-    print(f"  Drag ({drag_axis}):      {drags[-1]:>10.3f} N")
-    print(f"  Downforce ({df_axis}):  {downforces[-1]:>10.3f} N")
-    if drags[-1] != 0:
-        print(f"  L/D:              {abs(downforces[-1]/drags[-1]):>10.3f}")
-    print(f"{'-'*55}")
-    print(f"  Averaged (last 200):")
-    print(f"    Drag:       {d_avg:>10.3f} N  (±{d_pct:.3f}%)")
-    print(f"    Downforce:  {f_avg:>10.3f} N  (±{f_pct:.3f}%)")
-    print(f"    L/D:        {ld:>10.3f}")
+    if is_symmetry:
+        print(f"  ℹ  SYMMETRY DETECTED: Showing Half-Model and Full-Car (x2)")
+    print(f"{'='*65}")
+
+    if is_symmetry:
+        print(f"  [Half-Model Simulated]")
+        print(f"    Drag ({drag_axis}):        {drags[-1]:>10.3f} N")
+        print(f"    Downforce ({df_axis}):    {downforces[-1]:>10.3f} N")
+        if drags[-1] != 0:
+            print(f"    L/D:                {abs(downforces[-1]/drags[-1]):>10.3f}")
+        print(f"\n  [Full-Car Projected (x2)]")
+        print(f"    Drag ({drag_axis}):        {drags[-1] * 2:>10.3f} N")
+        print(f"    Downforce ({df_axis}):    {downforces[-1] * 2:>10.3f} N")
+        if drags[-1] != 0:
+            print(f"    L/D:                {abs(downforces[-1]/drags[-1]):>10.3f}")
+        print(f"{'-'*65}")
+        print(f"  Averaged (last 200 iterations):")
+        print(f"    Half-Model:  Drag = {d_avg:>9.3f} N (±{d_pct:.2f}%) | DF = {f_avg:>9.3f} N (±{f_pct:.2f}%)")
+        print(f"    Full-Car:    Drag = {d_avg * 2:>9.3f} N (±{d_pct:.2f}%) | DF = {f_avg * 2:>9.3f} N (±{f_pct:.2f}%)")
+        print(f"    L/D:         {ld:>9.3f}")
+    else:
+        print(f"  Drag ({drag_axis}):        {drags[-1]:>10.3f} N")
+        print(f"  Downforce ({df_axis}):    {downforces[-1]:>10.3f} N")
+        if drags[-1] != 0:
+            print(f"  L/D:                {abs(downforces[-1]/drags[-1]):>10.3f}")
+        print(f"{'-'*65}")
+        print(f"  Averaged (last 200 iterations):")
+        print(f"    Drag:         {d_avg:>10.3f} N  (±{d_pct:.3f}%)")
+        print(f"    Downforce:    {f_avg:>10.3f} N  (±{f_pct:.3f}%)")
+        print(f"    L/D:          {ld:>10.3f}")
+
     print(f"  Status: {'✓ CONVERGED' if converged else '✗ NOT CONVERGED'}")
-    print(f"{'='*55}")
-    print(f"  Note: If half-model (symmetry), multiply by 2.\n")
+    print(f"{'='*65}\n")
 
     return converged
