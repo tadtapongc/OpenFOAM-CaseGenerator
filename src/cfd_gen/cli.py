@@ -25,9 +25,9 @@ def setup_main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 Examples:
-    cfd-setup --init                    Create starter project structure
-    cfd-setup configs/example.json      Generate case
-    cfd-setup configs/example.json -n   Preview only (dry run)
+    python setup_case.py --init                    Create starter project structure
+    python setup_case.py configs/example.json      Generate case
+    python setup_case.py configs/example.json -n   Preview only (dry run)
 """,
     )
     parser.add_argument("config", nargs="?", help="JSON config file")
@@ -92,7 +92,7 @@ def _do_init(project_dir: Path) -> None:
     print(f"\n  Next steps:")
     print(f"    1. Place STL files in stl/")
     print(f"    2. Edit configs/example.json")
-    print(f"    3. cfd-setup configs/example.json")
+    print(f"    3. python setup_case.py configs/example.json")
 
 
 def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> None:

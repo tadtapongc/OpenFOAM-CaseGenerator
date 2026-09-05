@@ -237,33 +237,29 @@ python setup_case.py configs/config.json --dry-run
 
 Output:
 ```text
-============================================================
-  CFD CASE CONFIGURATION PREVIEW (DRY RUN)
-============================================================
-  Case name:       RP14_FSAE
-  Fidelity:        standard
-  STL files:       RP14.STL
-  Flow velocity:   16.67 m/s (dir: -z, moving ground: True)
-  Output axes:     drag: -z, downforce: -y
-  Parallel:        32 procs (scotch)
+  Config: configs/config.json
+  ℹ  STL crosses symmetry plane: x_min (-0.118 m) — geometry will be cut at symmetry boundary
+  ℹ  Ground plane: y = 0.000 m (ground clearance: 35.0 mm)
 
-  Geometry Bounds:
-    X: [  -0.1185,    0.7200]  (width:  0.838 m)
-    Y: [   0.0350,    1.1800]  (height: 1.145 m)
-    Z: [  -1.4500,    1.5500]  (length: 3.000 m)
+  Geometry bounds:
+    min: (-0.118, 0.035, -1.450)
+    max: (0.720, 1.180, 1.550)
+  Domain box:
+    min: (-0.118, 0.000, -25.450)
+    max: (4.076, 5.760, 13.550)
+  Mesh:
+    Base cell:      0.1 m
+    Surface level:  [4, 5]
+    Edge level:     6
+    Distance shells: 25mm→L4, 80mm→L3
+    Region nearWakeBox: Level 3
+    Region farWakeBox: Level 1
 
-  Derived Domain Bounds:
-    X: [  -0.1185,    4.0755]  (width:  4.194 m)
-    Y: [   0.0000,    5.7600]  (height: 5.760 m)
-    Z: [ -25.4500,   13.5500]  (length: 39.000 m)
-
-  Mesh Parameters (standard):
-    Base cell:     0.1000 m (100 mm)
-    Surface level: [4, 5] (6.25 - 3.12 mm)
-    Edge level:    6 (1.56 mm)
-    Wake regions:  nearWakeBox (level 3), farWakeBox (level 1)
-    Boundary layers: 5 layers (ratio: 1.20)
-============================================================
+  DRY RUN — would generate: cases/RP14_FSAE
+    Velocity:   16.67 m/s  U=(0 0 -16.67)
+    k=0.01042  ω=68.733  νt=0.0001516
+    Surfaces:   RP14
+    Pipeline:   potentialFoam → simpleFoam (1500 iters, bounded Gauss limitedLinear 1)
 ```
 
 ### Step 4: Generate OpenFOAM Case
@@ -274,10 +270,7 @@ Generate the complete OpenFOAM case directory structure under `cases/<case_name>
 python setup_case.py configs/config.json
 ```
 
-Use `--force` if you want to overwrite an existing case folder:
-```bash
-python setup_case.py configs/config.json --force
-```
+*(Re-running this command safely refreshes all case dictionaries and `0/` boundary conditions while preserving your previous run history.)*
 
 ### Step 5: Run Simulation (Standard OpenFOAM Commands)
 
@@ -315,12 +308,13 @@ mpirun -np 32 checkMesh -allGeometry -allTopology -noFunctionObjects -parallel
 
 # 6. Reconstruct the volume mesh from processor* directories back to constant/polyMesh
 reconstructParMesh -constant
+rm -rf processor*
 
 # 7. Renumber cell labels using Cuthill-McKee algorithm to minimize sparse matrix bandwidth
 renumberMesh -overwrite
 
 # 8. Re-decompose fields with the finalized volume mesh ready for solving
-decomposePar -force
+decomposePar
 
 # 9. Solve Laplace potential equation (∇²Φ = 0) to compute a divergence-free initial velocity
 mpirun -np 32 potentialFoam -parallel -writephi
@@ -521,7 +515,7 @@ Three carefully calibrated fidelity presets are provided:
 | **Base Cell Size ($h_0$)** | 0.15 m (150 mm) | 0.10 m (100 mm) | 0.08 m (80 mm) |
 | **Surface Level** | Level [3, 4] (18.8 – 9.4 mm) | Level [4, 5] (6.25 – 3.12 mm) | Level [5, 6] (2.50 – 1.25 mm) |
 | **Edge Level** | Level 5 (4.69 mm) | Level 6 (1.56 mm) | Level 7 (0.62 mm) |
-| **Distance Refinement** | 40mm $\rightarrow$ L3, 120mm $\rightarrow$ L2 | 25mm $\rightarrow$ L4, 80mm $\rightarrow$ L3 | 20mm $\rightarrow$ L5, 60mm $\rightarrow$ L4 |
+| **Distance Refinement** | 40mm $\rightarrow$ L3, 120mm $\rightarrow$ L2 | 25mm $\rightarrow$ L4, 80mm $\rightarrow$ L3 | 20mm $\rightarrow$ L5, 60mm $\rightarrow$ L4, 150mm $\rightarrow$ L3 |
 | **Near Wake Box** | Level 2 (37.5 mm) | Level 3 (12.5 mm) | Level 4 (5.0 mm) |
 | **Far Wake Box** | Level 1 (75.0 mm) | Level 1 (50.0 mm) | Level 2 (20.0 mm) |
 | **Boundary Layers** | 3 layers ($ER = 1.30$) | 5 layers ($ER = 1.20$) | 6 layers ($ER = 1.15$) |
@@ -568,7 +562,7 @@ In real-world racing, the track moves beneath the vehicle at vehicle speed, elim
 
 - When `"ground": true`:
   - Patch type: `wall`.
-  - Velocity ($U$): `movingWallVelocity` or `fixedValue uniform (0 0 -16.67)` matching freestream speed.
+  - Velocity ($U$): `fixedValue uniform (x y z)` matching the freestream velocity vector.
   - Turbulence ($k, \omega, \nu_t$): Continuous wall functions applied to moving road.
 - When `"ground": false` (static slip road or high altitude aircraft):
   - Patch type: `patch` with `slip` velocity and `zeroGradient` pressure.
@@ -832,9 +826,11 @@ This allows instant isolation of component downforce contributions and aerodynam
 
 ### Automated Convergence Monitor & Clean Auto-Stop
 
-The convergence monitor evaluates stability over a rolling window of 200 iterations:
+The convergence monitor evaluates stability over a rolling window of 200 iterations using the coefficient of variation (relative standard deviation):
 
-$$\Delta F = \frac{\max(F) - \min(F)}{\text{mean}(F)} \le 0.5\%$$
+$$\text{Variation} = \frac{\sigma_F}{|\mu_F|} \times 100\% \le 0.5\%$$
+
+where $\sigma_F$ is the standard deviation and $\mu_F$ is the mean of force $F$ over the last 200 iterations.
 
 When both Drag and Downforce vary by less than **0.5%** over the last 200 iterations (after a minimum of 300 iterations):
 1. The monitor dynamically rewrites `system/controlDict`:
