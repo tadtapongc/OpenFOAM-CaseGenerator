@@ -194,35 +194,35 @@ Edit `configs/config.json` with standard JSON:
 
 ```json
 {
-    "case_name": "RP14_FSAE",
-    "stl_files": ["RP14.STL"],
-    "fidelity": "standard",
+    "case_name": "RP14_FSAE",            // Case output folder created under cases/<case_name>/
+    "stl_files": ["RP14.STL"],           // ASCII STL geometry filename(s) in stl/ directory
+    "fidelity": "standard",              // Quality preset: "fast" (~2-4M cells), "standard" (~6-9M, FSAE sweet spot), "fine" (~12-16M)
 
     "flow": {
-        "velocity": 16.67,
-        "direction": "-z",
-        "ground": true
+        "velocity": 16.67,               // Freestream air velocity in m/s (16.67 m/s ≈ 60 km/h)
+        "direction": "-z",               // Freestream flow direction vector (air travels from +z toward -z)
+        "ground": true                   // true = moving road wall at freestream velocity; false = slip wall
     },
 
     "outputs": {
-        "drag_axis": "-z",
-        "downforce_axis": "-y"
+        "drag_axis": "-z",               // Axis along which aerodynamic drag is reported
+        "downforce_axis": "-y"           // Axis along which downforce (-lift) is reported (-y = toward ground)
     },
 
-    "domain_box": "auto",
-    "symmetry_plane": -0.1185,
+    "domain_box": "auto",                // "auto" derives 4L upstream, 8L downstream, 4H top virtual wind tunnel
+    "symmetry_plane": -0.1185,           // Lateral centerline coordinate if car is offset from origin (omit or 0.0 if centered)
 
     "domain_faces": {
-        "-x": "symmetry",
-        "+x": "farField",
-        "-y": "ground",
-        "+y": "farField",
-        "+z": "inlet",
-        "-z": "outlet"
+        "-x": "symmetry",                // Inner car centerline: symmetry boundary condition
+        "+x": "farField",                // Outer lateral side wall: slip wall boundary (no boundary layer)
+        "-y": "ground",                  // Road floor: movingWallVelocity matching freestream speed
+        "+y": "farField",                // Wind tunnel ceiling: slip wall boundary
+        "+z": "inlet",                   // Virtual wind tunnel air intake: uniform fixed velocity
+        "-z": "outlet"                   // Downstream exhaust: uniform 0 gauge pressure (p = 0)
     },
 
     "parallel": {
-        "n_procs": 32
+        "n_procs": 32                    // Number of CPU cores for MPI decomposition, meshing, and solving
     }
 }
 ```
@@ -298,37 +298,37 @@ You can run the simulation using **Method A (Automated Script)**, **Method B (Di
 If you prefer executing standard OpenFOAM commands manually in your terminal:
 
 ```bash
-# 1. Extract sharp feature edges (140° angle) into .eMesh format
+# 1. Extract sharp feature edges (140° threshold) into constant/triSurface/*.eMesh
 surfaceFeatureExtract
 
-# 2. Create the outer background hexahedral grid
+# 2. Build the outer background hexahedral grid sized to the virtual wind tunnel
 blockMesh
 
-# 3. Decompose domain into subdomains for parallel execution
+# 3. Decompose domain across 32 MPI cores using Scotch graph partitioning
 decomposePar
 
-# 4. Generate parallel volume mesh with castellated refinement, snapping, and layers
+# 4. Generate parallel volume mesh (distance shells, wake boxes, snapping, and boundary layers)
 mpirun -np 32 snappyHexMesh -parallel -overwrite
 
-# 5. Verify mesh quality (non-orthogonality, skewness, topology) across all MPI ranks
+# 5. Verify parallel mesh quality metrics (non-orthogonality < 70°, skewness < 4) across all MPI ranks
 mpirun -np 32 checkMesh -allGeometry -allTopology -noFunctionObjects -parallel
 
-# 6. Reconstruct the volume mesh back into constant/polyMesh
+# 6. Reconstruct the volume mesh from processor* directories back to constant/polyMesh
 reconstructParMesh -constant
 
-# 7. Renumber cell labels to minimize sparse matrix bandwidth
+# 7. Renumber cell labels using Cuthill-McKee algorithm to minimize sparse matrix bandwidth
 renumberMesh -overwrite
 
-# 8. Re-decompose fields for the CFD solver
+# 8. Re-decompose fields with the finalized volume mesh ready for solving
 decomposePar -force
 
-# 9. Compute divergence-free initial velocity field
+# 9. Solve Laplace potential equation (∇²Φ = 0) to compute a divergence-free initial velocity
 mpirun -np 32 potentialFoam -parallel -writephi
 
-# 10. Run steady-state incompressible RANS solver (SIMPLEC)
+# 10. Run steady-state incompressible RANS solver using SIMPLEC pressure-velocity coupling
 mpirun -np 32 simpleFoam -parallel
 
-# 11. Reconstruct solution time steps for ParaView / post-processing
+# 11. Reconstruct parallel time-step solution fields into serial format for ParaView visualization
 reconstructPar -latestTime
 ```
 
@@ -403,14 +403,14 @@ Adjust ground positioning relative to the CAD geometry:
 Simulating a symmetric half-car cuts cell count and compute time in half:
 
 ```json
-"symmetry_plane": 0.0,
+"symmetry_plane": 0.0,                   // Lateral coordinate of the vehicle centerline (e.g. 0.0 or -0.1185)
 "domain_faces": {
-    "-x": "symmetry",
-    "+x": "farField",
-    "-y": "ground",
-    "+y": "farField",
-    "+z": "inlet",
-    "-z": "outlet"
+    "-x": "symmetry",                    // Inner symmetry cut plane (mirrored in force analysis)
+    "+x": "farField",                    // Outer side boundary: slip wall padded 4x vehicle width
+    "-y": "ground",                      // Road surface: moving road boundary condition
+    "+y": "farField",                    // Wind tunnel ceiling: slip wall padded 4x vehicle height
+    "+z": "inlet",                       // Virtual wind tunnel air intake: uniform fixed velocity
+    "-z": "outlet"                       // Downstream exhaust: static pressure outlet (p = 0)
 }
 ```
 
@@ -423,21 +423,21 @@ To simulate an aircraft, drone, or hydrofoil outside of ground effect:
 
 ```json
 "flow": {
-    "velocity": 45.0,
-    "direction": "-z",
-    "ground": false
+    "velocity": 45.0,                    // Flight airspeed in m/s (45.0 m/s ≈ 162 km/h)
+    "direction": "-z",                   // Flight direction vector (air flows from +z to -z)
+    "ground": false                      // false = disable moving ground (open atmosphere all around)
 },
 "outputs": {
-    "drag_axis": "-z",
-    "downforce_axis": "+y"     // +y reports positive Lift instead of Downforce
+    "drag_axis": "-z",                   // Streamwise direction for aerodynamic drag
+    "downforce_axis": "+y"               // +y reports positive aerodynamic Lift (upward direction)
 },
 "domain_faces": {
-    "-x": "symmetry",          // or "farField" for full aircraft
-    "+x": "farField",
-    "-y": "farField",          // Open atmosphere below aircraft (auto-padded 4x)
-    "+y": "farField",          // Open atmosphere above aircraft (auto-padded 4x)
-    "+z": "inlet",
-    "-z": "outlet"
+    "-x": "symmetry",                    // Inner symmetry plane (or "farField" for full aircraft)
+    "+x": "farField",                    // Outer wingtip boundary: slip wall padded 4x span
+    "-y": "farField",                    // Atmosphere below aircraft: slip wall padded 4x height
+    "+y": "farField",                    // Atmosphere above aircraft: slip wall padded 4x height
+    "+z": "inlet",                       // Upstream air entry: fixed velocity inlet
+    "-z": "outlet"                       // Downstream exhaust: static pressure outlet (p = 0)
 }
 ```
 
@@ -445,8 +445,8 @@ To simulate an aircraft, drone, or hydrofoil outside of ground effect:
 
 ```json
 "fluid": {
-    "rho": 1.225,       // Air density [kg/m³] (Sea level 20°C: 1.225; hot 35°C track: ~1.145)
-    "nu": 1.516e-5      // Kinematic viscosity [m²/s] (Sea level 20°C: 1.516e-5; 35°C: ~1.66e-5)
+    "rho": 1.225,                        // Air density in kg/m³ (Standard air at 20°C: 1.225; hot 35°C track: ~1.145)
+    "nu": 1.516e-5                       // Kinematic viscosity in m²/s (Standard air at 20°C: 1.516e-5; 35°C: ~1.66e-5)
 }
 ```
 
@@ -454,9 +454,9 @@ To simulate an aircraft, drone, or hydrofoil outside of ground effect:
 
 ```json
 "turbulence": {
-    "model": "kOmegaSST",   // Standard choice for external aerodynamics
-    "intensity": 0.005,      // 0.5% freestream turbulence intensity (wind tunnel condition)
-    "nut_ratio": 10          // Turbulent viscosity ratio (nut / nu = 10)
+    "model": "kOmegaSST",                // Menter's Shear Stress Transport (industry standard for external aero)
+    "intensity": 0.005,                  // Freestream turbulence intensity: 0.5% (wind tunnel freestream)
+    "nut_ratio": 10                      // Ratio of turbulent to laminar viscosity (nut / nu = 10)
 }
 ```
 
@@ -467,22 +467,22 @@ $$k = \frac{3}{2} (U_\infty \cdot I)^2, \quad \omega = \frac{k}{(\nu_t / \nu) \c
 
 ```json
 "parallel": {
-    "n_procs": 32,
-    "method": "scotch"      // Automatic graph-partitioning decomposition
+    "n_procs": 32,                       // Total number of MPI ranks / CPU cores
+    "method": "scotch"                   // Decomposition method: "scotch" (automatic graph partitioning)
 },
 "slurm": {
-    "qos": "cu_hpc",
-    "partition": "cpu",
-    "nodes": 1,
-    "time": "08:00:00",
-    "mem_per_cpu": "2G",
-    "openfoam_module": [
+    "qos": "cu_hpc",                     // Quality of Service queue name on SLURM cluster
+    "partition": "cpu",                  // Cluster hardware partition (e.g. cpu, compute, standard)
+    "nodes": 1,                          // Node count (1 node minimizes MPI cross-switch latency)
+    "time": "08:00:00",                  // Maximum walltime allocation (hh:mm:ss)
+    "mem_per_cpu": "2G",                 // RAM requested per core (2GB * 32 cores = 64GB total)
+    "openfoam_module": [                 // Cluster module environment packages to load
         "GCC/11.3.0",
         "OpenMPI/4.1.4-GCC-11.3.0"
     ],
-    "openfoam_source": "$HOME/OpenFOAM/OpenFOAM-v2606/etc/bashrc",
-    "use_tmpdir": true,      // true = run in fast node RAM/scratch ($TMPDIR)
-    "sync_interval": 15      // Sync force logs to submit dir every 15 seconds
+    "openfoam_source": "$HOME/OpenFOAM/OpenFOAM-v2606/etc/bashrc",  // OpenFOAM environment activation script
+    "use_tmpdir": true,                  // true = run inside fast node RAM/NVMe scratch ($TMPDIR)
+    "sync_interval": 15                  // Periodic sync interval in seconds for forces and logs
 }
 ```
 
@@ -493,13 +493,19 @@ Every default can be overridden by adding an `"overrides"` block or direct param
 ```json
 "overrides": {
     "relaxation": {
-        "fields": { "p": 0.7 },
-        "equations": { "U": 0.7, "k": 0.5, "omega": 0.5 }
+        "fields": {
+            "p": 0.7                     // SIMPLEC pressure under-relaxation factor (0.7 enables fast convergence)
+        },
+        "equations": {
+            "U": 0.7,                    // Velocity momentum equation relaxation factor
+            "k": 0.5,                    // Turbulent kinetic energy equation relaxation factor
+            "omega": 0.5                 // Specific dissipation rate equation relaxation factor
+        }
     },
     "mesh_params": {
-        "base_cell_size": 0.08,
-        "surface_level": [4, 6],
-        "edge_level": 7
+        "base_cell_size": 0.08,          // Custom background hexahedral cell dimension in meters
+        "surface_level": [4, 6],         // Min and max surface refinement levels on vehicle STL
+        "edge_level": 7                  // Feature edge refinement level on wing trailing edges / flaps
     }
 }
 ```
@@ -678,14 +684,26 @@ In standard SIMPLE, the velocity correction neglects neighbor velocity correctio
 
 SIMPLEC includes the dominant neighbor velocity terms, enabling significantly more aggressive relaxation without numerical instability:
 
-```text
-Relaxation Factors:
-  Fields:
-    p:      0.7   (Standard SIMPLE requires 0.3)
-  Equations:
-    U:      0.7   (Standard SIMPLE requires 0.5-0.7)
-    k:      0.5
-    omega:  0.5
+```openfoam
+SIMPLE
+{
+    nNonOrthogonalCorrectors 2;                          // 2 corrector loops for non-orthogonal mesh faces (up to 70°)
+    consistent               true;                       // Enables SIMPLE-Consistent (SIMPLEC) coupling
+}
+
+relaxationFactors
+{
+    fields
+    {
+        p           0.7;                                 // Kinematic pressure relaxation (SIMPLEC enables 0.7 vs standard 0.3)
+    }
+    equations
+    {
+        U           0.7;                                 // Momentum equation relaxation factor (accelerates convergence)
+        k           0.5;                                 // Turbulent kinetic energy relaxation factor
+        omega       0.5;                                 // Specific dissipation rate relaxation factor
+    }
+}
 ```
 
 **Result**: SIMPLEC achieves convergence in **20–30% fewer iterations** (~300–500 iterations faster), saving substantial compute time on large clusters.
@@ -694,30 +712,58 @@ Relaxation Factors:
 
 Numerical schemes are chosen to guarantee second-order spatial accuracy while strictly preventing unphysical oscillations:
 
-- **Momentum Convection (`div(phi,U)`)**:
-  `bounded Gauss limitedLinear 1`
-  A second-order TVD (Total Variation Diminishing) scheme with Sweby flux limiter. Prevents numerical diffusion in wing wakes without causing pressure spikes.
-- **Turbulence Convection (`div(phi,k)`, `div(phi,omega)`)**:
-  `bounded Gauss upwind`
-  First-order bounded scheme. Guarantees positive-definite turbulent kinetic energy and dissipation rate, preventing solver crashes caused by negative $k$ or $\omega$.
-- **Gradients (`gradSchemes`)**:
-  `cellLimited Gauss linear 1`
-  Limits cell-centered gradients to prevent overshooting at high-aspect-ratio boundary layer interfaces.
-- **Laplacian & Surface Normal Gradients**:
-  `Gauss linear limited corrected 0.5`
-  Applies non-orthogonal corrections for mesh angles up to $70^\circ$.
+```openfoam
+divSchemes
+{
+    default         none;
+    div(phi,U)      bounded Gauss limitedLinear 1;        // 2nd-order TVD with Sweby limiter (sharp wing wake resolution)
+    div(phi,k)      bounded Gauss upwind;                 // 1st-order bounded upwind (guarantees positive turbulent kinetic energy)
+    div(phi,omega)  bounded Gauss upwind;                 // 1st-order bounded upwind (guarantees positive specific dissipation rate)
+}
+
+gradSchemes
+{
+    default         Gauss linear;
+    grad(U)         cellLimited Gauss linear 1;           // Cell-limited gradient (prevents overshoots at boundary layer interfaces)
+}
+
+laplacianSchemes
+{
+    default         Gauss linear limited corrected 0.5;   // Non-orthogonal corrected laplacian (stable up to 75° non-orthogonality)
+}
+```
 
 ### Linear Solvers & Multigrid Acceleration (`fvSolution`)
 
-- **Pressure ($p$)**: Geometric-Algebraic Multigrid (`GAMG`)
-  - Smoother: `DICGaussSeidel`
-  - Relative tolerance: `relTol 0.01`
-  - Coarse level merging: `mergeLevels 2;`
-    Merges coarse grid levels across MPI processor boundaries, eliminating inter-node communication bottlenecks on 32+ cores.
-- **Velocity & Turbulence ($U, k, \omega$)**:
-  - Solver: `PBiCGStab` (Preconditioned Biconjugate Gradient Stabilized)
-  - Preconditioner: `DILU` (Diagonal Incomplete LU)
-  - Relative tolerance: `relTol 0.01`
+The linear solvers balance fast convergence with parallel scaling across 32+ MPI ranks:
+
+```openfoam
+solvers
+{
+    p
+    {
+        solver                  GAMG;                    // Geometric-Algebraic Multigrid solver for elliptic pressure equation
+        smoother                DICGaussSeidel;          // Diagonal incomplete-Cholesky Gauss-Seidel smoother
+        tolerance               1e-7;                    // Absolute convergence target for pressure residual
+        relTol                  0.01;                    // Relative residual reduction per SIMPLE outer loop (1%)
+        nPreSweeps              0;                       // Multigrid pre-smoothing sweeps
+        nPostSweeps             2;                       // Multigrid post-smoothing sweeps
+        cacheAgglomeration      true;                    // Reuses coarse grid hierarchy across iterations
+        agglomerator            faceAreaPair;            // Coarsening algorithm based on face area pairing
+        nCellsInCoarsestLevel   500;                     // Minimum cell count on the coarsest multigrid level
+        mergeLevels             2;                       // Merges coarse grid levels across MPI processor boundaries (high-core scaling)
+    }
+
+    "(U|k|omega)"
+    {
+        solver                  PBiCGStab;               // Preconditioned Bi-Conjugate Gradient Stabilized linear solver
+        preconditioner          DILU;                    // Diagonal Incomplete LU decomposition preconditioner
+        tolerance               1e-8;                    // Absolute convergence tolerance for momentum/turbulence
+        relTol                  0.01;                    // Relative residual reduction per iteration (1%)
+        minIter                 1;                       // Minimum number of linear iterations per time step
+    }
+}
+```
 
 ### Turbulence Closure & Wall Functions ($k$-$\omega$ SST)
 
@@ -893,9 +939,9 @@ $$x_{\text{CoP}} = \frac{M_{\text{pitch}}}{F_{\text{downforce}}}$$
 Configure the center of rotation (`CofR`) at the front axle in `config.json`:
 ```json
 "force_refs": {
-    "CofR": [0.0, 0.0, 0.0],
-    "lRef": 1.530,    // Wheelbase in meters
-    "Aref": 1.000     // Frontal area in m²
+    "CofR": [0.0, 0.0, 0.0],             // Center of Rotation (x, y, z) for pitch moment calculation (front axle)
+    "lRef": 1.530,                       // Reference length in meters (wheelbase for pitch moment)
+    "Aref": 1.000                        // Reference frontal area in m² for force coefficients (Cd, Cl)
 }
 ```
 The percentage of front downforce is then calculated directly from the pitch moment.
