@@ -1,5 +1,5 @@
 {
-    "_README": "=== CFD-GEN CONFIGURATION FILE ===",
+    "_README": "=== OpenFOAM Case Generator Configuration ===",
     "_README2": "Only fields WITHOUT underscore prefix are used. Fields starting with _ are comments.",
     "_README3": "All fields below are REQUIRED. Everything else uses universal defaults (see config.py).",
 

@@ -1,17 +1,25 @@
-# OpenFOAM Case Generator for External Aerodynamics (`cfd-gen`)
+# OpenFOAM Case Generator for External Aerodynamics
 
 An automated, geometry-adaptive OpenFOAM case generator engineered for external vehicle aerodynamics, Formula Student / FSAE racecar development, and aerodynamic bodywork.
 
-Given an ASCII STL geometry and a concise JSON configuration, `cfd-gen` automatically derives wind tunnel domain bounds, feature edge extraction, two-stage wake refinement boxes, boundary layer inflation, robust SIMPLEC numerical schemes, boundary field conditions, SLURM cluster submission scripts, and real-time post-processing monitors.
+Given an ASCII STL geometry and a concise JSON configuration, the generator automatically derives wind tunnel domain bounds, feature edge extraction, two-stage wake refinement boxes, boundary layer inflation, robust SIMPLEC numerical schemes, boundary field conditions, SLURM cluster submission scripts, and real-time post-processing monitors.
+
+Requires **zero package installation** and runs entirely using standard Python and OpenFOAM commands.
 
 ---
 
 ## Table of Contents
 
 1. [Key Features](#key-features)
-2. [Quick Start & Installation](#quick-start--installation)
+2. [Quick Start & Requirements](#quick-start--requirements)
 3. [Case Anatomy & Directory Structure](#case-anatomy--directory-structure)
-4. [End-to-End Workflow Tutorial](#end-to-end-workflow-tutorial)
+4. [Standard Command Workflow](#standard-command-workflow)
+   - [Step 1: Place STL Geometry](#step-1-place-stl-geometry)
+   - [Step 2: Configure Case (`configs/config.json`)](#step-2-configure-case-configsconfigjson)
+   - [Step 3: Preview Case (Dry Run)](#step-3-preview-case-dry-run)
+   - [Step 4: Generate OpenFOAM Case](#step-4-generate-openfoam-case)
+   - [Step 5: Run Simulation (Standard OpenFOAM Commands)](#step-5-run-simulation-standard-openfoam-commands)
+   - [Step 6: Post-Process Aerodynamic Forces](#step-6-post-process-aerodynamic-forces)
 5. [Configuration Guide (`config.json`)](#configuration-guide-configjson)
    - [Essential Settings](#essential-settings)
    - [Ground Plane & Ride Height Styles](#ground-plane--ride-height-styles)
@@ -58,6 +66,7 @@ Given an ASCII STL geometry and a concise JSON configuration, `cfd-gen` automati
 
 ## Key Features
 
+- **Standard Commands Only**: No custom CLI binary installation needed. Run directly with standard `python setup_case.py`, standard OpenFOAM commands (`blockMesh`, `snappyHexMesh`, `simpleFoam`), and standard `python read_forces.py`.
 - **Optimized for FSAE & Vehicle Aerodynamics**: Domain dimensions, refinement shells, boundary layers, and wake regions are tailored specifically for ground vehicles, targeting the optimal simulation sweet spot (~6–9 million cells on standard fidelity).
 - **Two-Stage Wake Architecture**: Replaces massive uniform wake boxes with a high-resolution `nearWakeBox` (capturing rear wing vortices, undertray diffuser recovery, and tire separation) paired with an efficient `farWakeBox` (preserving wake transport to the outlet without cell bloat), saving 8–10 million redundant cells.
 - **Conforming Distance Refinement Shells**: Uses proximity-based distance shells (e.g. 25 mm $\rightarrow$ Level 4, 80 mm $\rightarrow$ Level 3) that drape smoothly over complex bodywork curves instead of crude axis-aligned boxes.
@@ -67,47 +76,41 @@ Given an ASCII STL geometry and a concise JSON configuration, `cfd-gen` automati
 - **Auto-Stop Convergence Monitor**: A background monitor analyzes live aerodynamic forces, calculates variance over a rolling 200-iteration window, and cleanly triggers solver termination (`stopAt writeNow;`) once variation drops below 0.5%, preventing wasted compute hours.
 - **HPC & SLURM Cluster Pipeline**: Production-grade cluster script with node-local fast scratch (`$TMPDIR` / `/dev/shm`) execution, background status sync, signal trapping (`SIGTERM`/`SIGINT`), emergency reconstruction, and processor backup.
 - **$O(1)$-Memory Streaming STL Engine**: Streams large CAD assemblies (100–500+ MB STLs) line-by-line for bounding box extraction and verbatim coordinate copying, eliminating memory bloat and preserving 100% CAD precision.
-- **Zero Heavy Dependencies**: Core case generation depends exclusively on the Python standard library.
+- **Zero External Python Dependencies for Generation**: Uses only Python's built-in standard library for all case generation and force parsing (`matplotlib` is only optional if you want graphical plots).
 
 ---
 
-## Quick Start & Installation
+## Quick Start & Requirements
 
 ### System Requirements
 
-- **Operating System**: Linux (Ubuntu 20.04/22.04/24.04, RHEL/Rocky 8/9), macOS, or Windows WSL2.
+- **Operating System**: Linux (Ubuntu, RHEL, Rocky, Debian), macOS, or Windows (WSL2 / native Python).
 - **OpenFOAM**: OpenFOAM v2006 through v2606 (ESI/OpenCFD) or OpenFOAM 9/10/11 (Foundation).
-- **Python**: Python $\ge$ 3.9 (standard library for case generation; `matplotlib` optional for GUI plots).
+- **Python**: Python $\ge$ 3.9 (standard library only for case generation; `matplotlib` optional for GUI plots).
 
-### Installation
+### Getting Started (No Installation Required)
 
-Clone the repository:
+Simply clone the repository and run:
 
 ```bash
 git clone https://github.com/tadtapongc/OpenFOAM-CaseGenerator.git
 cd OpenFOAM-CaseGenerator
 ```
 
-Install in editable mode:
+You do not need to install anything. All commands use standard Python scripts:
+- `python setup_case.py configs/config.json`: Generates the OpenFOAM case.
+- `python read_forces.py`: Analyzes forces, plots convergence, and compares cases.
 
+*(Optional)* If you want real-time animated GUI plots:
 ```bash
-# Core generator (Python standard library only)
-pip install -e .
-
-# With optional plotting and live monitor support
-pip install -e ".[plot]"
+pip install matplotlib
 ```
-
-This registers three CLI entry points:
-- `cfd-setup`: Generates OpenFOAM case directories from JSON configs.
-- `cfd-forces`: Reads, tabulates, compares, and plots aerodynamic force logs.
-- `cfd-monitor`: Standalone convergence auto-stop daemon.
 
 ---
 
 ## Case Anatomy & Directory Structure
 
-When `cfd-gen` generates a case, it creates a fully self-contained OpenFOAM case directory structured as follows:
+When a case is generated, it creates a fully self-contained OpenFOAM case directory structured as follows:
 
 ```text
 cases/<case_name>/
@@ -158,7 +161,7 @@ cases/<case_name>/
 
 ---
 
-## End-to-End Workflow Tutorial
+## Standard Command Workflow
 
 ```text
 [ CAD Export (.STL) ]
@@ -168,31 +171,31 @@ cases/<case_name>/
                                                  │
                                                  ▼
 [ 5. Solve: ./Allrun.parallel ] ◄────── [ 4. Generate: python setup_case.py ]
-     or sbatch run.sh                           (Dry-run: --dry-run)
+     or standard OpenFOAM cmds                  (Dry-run: --dry-run)
+     or sbatch run.sh
          │
          ▼
 [ 6. Post-Process: python read_forces.py ]
      (--plot, --live, --compare)
 ```
 
-### Step 1: CAD Export & Preparation
+### Step 1: Place STL Geometry
 
-1. **Units**: Ensure your CAD geometry is exported in **meters**. OpenFOAM assumes dimensions in SI units ($1.0 = 1\text{ meter}$).
-2. **Format**: Export as **ASCII STL** (solid name inside the file will be matched to the filename).
-3. **Watertight / Manifold**: Geometry should be closed and watertight. Small gaps between adjacent wings or flaps should be checked so cells do not leak into hollow interiors.
-4. **Placement**: Place the file into the project `stl/` folder:
+1. Export your CAD model as an **ASCII STL** file in **meters** ($1.0 = 1\text{ meter}$).
+2. Ensure the geometry is closed/watertight.
+3. Place it in the `stl/` folder:
    ```bash
-   cp my_chassis.STL stl/
+   cp my_car.STL stl/
    ```
 
 ### Step 2: Configure Case (`configs/config.json`)
 
-Create or edit your JSON configuration file:
+Edit `configs/config.json` with standard JSON:
 
 ```json
 {
-    "case_name": "FSAE_FrontWing",
-    "stl_files": ["front_wing.STL"],
+    "case_name": "RP14_FSAE",
+    "stl_files": ["RP14.STL"],
     "fidelity": "standard",
 
     "flow": {
@@ -207,8 +210,7 @@ Create or edit your JSON configuration file:
     },
 
     "domain_box": "auto",
-    "ground_clearance": 0.035,
-    "symmetry_plane": 0.0,
+    "symmetry_plane": -0.1185,
 
     "domain_faces": {
         "-x": "symmetry",
@@ -225,9 +227,9 @@ Create or edit your JSON configuration file:
 }
 ```
 
-### Step 3: Preview with Dry Run
+### Step 3: Preview Case (Dry Run)
 
-Before creating directories or copying files, preview the derived geometry bounds, virtual wind tunnel dimensions, and mesh parameters:
+Check derived wind tunnel bounds, bounding box dimensions, and mesh parameters before writing any files:
 
 ```bash
 python setup_case.py configs/config.json --dry-run
@@ -238,22 +240,22 @@ Output:
 ============================================================
   CFD CASE CONFIGURATION PREVIEW (DRY RUN)
 ============================================================
-  Case name:       FSAE_FrontWing
+  Case name:       RP14_FSAE
   Fidelity:        standard
-  STL files:       front_wing.STL
+  STL files:       RP14.STL
   Flow velocity:   16.67 m/s (dir: -z, moving ground: True)
   Output axes:     drag: -z, downforce: -y
   Parallel:        32 procs (scotch)
 
   Geometry Bounds:
-    X: [   0.0000,    0.7200]  (width:  0.720 m)
-    Y: [   0.0350,    0.3800]  (height: 0.345 m)
-    Z: [  -0.4500,    0.4500]  (length: 0.900 m)
+    X: [  -0.1185,    0.7200]  (width:  0.838 m)
+    Y: [   0.0350,    1.1800]  (height: 1.145 m)
+    Z: [  -1.4500,    1.5500]  (length: 3.000 m)
 
   Derived Domain Bounds:
-    X: [   0.0000,    3.6000]  (width:  3.600 m)
-    Y: [   0.0000,    1.7250]  (height: 1.725 m)
-    Z: [  -7.6500,    4.0500]  (length: 11.700 m)
+    X: [  -0.1185,    4.0755]  (width:  4.194 m)
+    Y: [   0.0000,    5.7600]  (height: 5.760 m)
+    Z: [ -25.4500,   13.5500]  (length: 39.000 m)
 
   Mesh Parameters (standard):
     Base cell:     0.1000 m (100 mm)
@@ -264,42 +266,98 @@ Output:
 ============================================================
 ```
 
-### Step 4: Generate the Case
+### Step 4: Generate OpenFOAM Case
 
-Write the case directory tree under `cases/<case_name>/`:
+Generate the complete OpenFOAM case directory structure under `cases/<case_name>/`:
 
 ```bash
 python setup_case.py configs/config.json
 ```
 
-Use `--force` to overwrite an existing case folder.
+Use `--force` if you want to overwrite an existing case folder:
+```bash
+python setup_case.py configs/config.json --force
+```
 
-### Step 5: Execute Simulation
+### Step 5: Run Simulation (Standard OpenFOAM Commands)
 
 Navigate into the generated case directory:
 
 ```bash
-cd cases/FSAE_FrontWing
+cd cases/RP14_FSAE
+```
 
-# Run locally in parallel (uses MPI with 32 cores):
+You can run the simulation using **Method A (Automated Script)**, **Method B (Direct Standard OpenFOAM Commands)**, or **Method C (SLURM Cluster)**:
+
+#### Method A: Run via Automated Bash Script
+```bash
 ./Allrun.parallel
+```
 
-# Or submit to SLURM cluster:
+#### Method B: Run Step-by-Step with Standard OpenFOAM Commands
+If you prefer executing standard OpenFOAM commands manually in your terminal:
+
+```bash
+# 1. Extract sharp feature edges (140° angle) into .eMesh format
+surfaceFeatureExtract
+
+# 2. Create the outer background hexahedral grid
+blockMesh
+
+# 3. Decompose domain into subdomains for parallel execution
+decomposePar
+
+# 4. Generate parallel volume mesh with castellated refinement, snapping, and layers
+mpirun -np 32 snappyHexMesh -parallel -overwrite
+
+# 5. Verify mesh quality (non-orthogonality, skewness, topology) across all MPI ranks
+mpirun -np 32 checkMesh -allGeometry -allTopology -noFunctionObjects -parallel
+
+# 6. Reconstruct the volume mesh back into constant/polyMesh
+reconstructParMesh -constant
+
+# 7. Renumber cell labels to minimize sparse matrix bandwidth
+renumberMesh -overwrite
+
+# 8. Re-decompose fields for the CFD solver
+decomposePar -force
+
+# 9. Compute divergence-free initial velocity field
+mpirun -np 32 potentialFoam -parallel -writephi
+
+# 10. Run steady-state incompressible RANS solver (SIMPLEC)
+mpirun -np 32 simpleFoam -parallel
+
+# 11. Reconstruct solution time steps for ParaView / post-processing
+reconstructPar -latestTime
+```
+
+#### Method C: Submit to SLURM Cluster
+```bash
 sbatch run.sh
 ```
 
-### Step 6: Post-Processing & Verification
+#### Reset / Clean Case
+To wipe mesh and solver output files back to initial state:
+```bash
+./Allclean
+```
 
-Inspect aerodynamic force results:
+### Step 6: Post-Process Aerodynamic Forces
+
+Run the standard post-processing script from the project root:
 
 ```bash
-# Print formatted force table and convergence assessment
+# 1. Print formatted aerodynamic force summary table:
 python read_forces.py
 
-# Launch interactive graphical convergence dashboard
+# 2. Open interactive real-time convergence dashboard:
 python read_forces.py --live
 
-# Compare all completed cases in the workspace
+# 3. Plot force convergence history to an image/figure:
+python read_forces.py --plot
+
+# 4. Compare aerodynamic forces across all cases in cases/:
 python read_forces.py --compare
 ```
 
@@ -312,7 +370,7 @@ python read_forces.py --compare
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `case_name` | `string` | *required* | Folder name created under `cases/<case_name>/` |
-| `stl_files` | `list[str]` | *required* | List of STL files in `stl/` (e.g. `["wing.stl"]` or `["wing.stl", "body.stl"]`) |
+| `stl_files` | `list[str]` | *required* | List of STL files in `stl/` (e.g. `["car.STL"]` or `["wing.stl", "body.stl"]`) |
 | `fidelity` | `string` | `"standard"` | Quality preset: `"fast"`, `"standard"`, or `"fine"` |
 | `flow.velocity` | `float` | `16.67` | Freestream velocity in m/s (16.67 m/s $\approx$ 60 km/h) |
 | `flow.direction` | `string` | `"-z"` | Freestream direction vector (`"-z"`, `"+z"`, `"-x"`, etc.) |
@@ -325,10 +383,10 @@ python read_forces.py --compare
 
 ### Ground Plane & Ride Height Styles
 
-For ground vehicle aerodynamics, accurate ground positioning relative to wing elements or undertrays is essential:
+Adjust ground positioning relative to the CAD geometry:
 
 - **Style 1 — Relative Ride Height (`ground_clearance`)**:
-  Specifies the distance in meters below the lowest CAD vertex. Perfect for ride-height sensitivity sweeps:
+  Specifies the distance in meters below the lowest CAD vertex. Ideal for ride-height sensitivity sweeps:
   ```json
   "ground_clearance": 0.035   // Ground placed exactly 35 mm below lowest point of STL
   ```
@@ -338,7 +396,7 @@ For ground vehicle aerodynamics, accurate ground positioning relative to wing el
   "ground_plane": 0.0         // Ground plane placed at y = 0.0
   ```
 - **Style 3 — Auto-Snap (Default)**:
-  If both parameters are omitted, the ground plane automatically snaps to the lowest point of the geometry (`y = smin`).
+  If omitted, the ground plane automatically snaps to the lowest point of the geometry (`y = smin`).
 
 ### Symmetry Plane & Half-Car Simulation
 
@@ -356,8 +414,8 @@ Simulating a symmetric half-car cuts cell count and compute time in half:
 }
 ```
 
-- **Offset Centerlines**: If the CAD model has an origin offset (e.g. car centerline at $x = -0.1185$), specify `"symmetry_plane": -0.1185`. `cfd-gen` clips the wind tunnel at this exact coordinate and offsets wake boxes accordingly.
-- **Automatic Force Doubling**: `read_forces.py` automatically detects half-car setups and reports both simulated half-model forces and projected full-car ($\times 2$) forces.
+- **Offset Centerlines**: If the CAD model has an origin offset (e.g. car centerline at $x = -0.1185$), specify `"symmetry_plane": -0.1185`. The generator clips the wind tunnel at this exact coordinate and offsets wake boxes accordingly.
+- **Automatic Force Doubling**: `python read_forces.py` automatically detects half-car setups and reports both simulated half-model forces and projected full-car ($\times 2$) forces side-by-side.
 
 ### Aircraft & Free-Air Simulation
 
@@ -430,7 +488,7 @@ $$k = \frac{3}{2} (U_\infty \cdot I)^2, \quad \omega = \frac{k}{(\nu_t / \nu) \c
 
 ### Expert Overrides
 
-Every default in `cfd-gen` can be overridden by adding an `"overrides"` block or direct parameter mappings in `config.json`:
+Every default can be overridden by adding an `"overrides"` block or direct parameter mappings in `config.json`:
 
 ```json
 "overrides": {
@@ -450,7 +508,7 @@ Every default in `cfd-gen` can be overridden by adding an `"overrides"` block or
 
 ## Fidelity Presets & Mesh Sizing
 
-`cfd-gen` provides three carefully calibrated fidelity presets:
+Three carefully calibrated fidelity presets are provided:
 
 | Metric / Parameter | Fast | Standard (FSAE Sweet Spot) | Fine (Validation) |
 | :--- | :--- | :--- | :--- |
@@ -474,7 +532,7 @@ Every default in `cfd-gen` can be overridden by adding an `"overrides"` block or
 
 ### Automatic Domain Sizing Mathematics
 
-To prevent artificial boundary blockage and pressure reflection while minimizing cell count, `cfd-gen` sizes the virtual wind tunnel based on aerodynamic blockage criteria:
+To prevent artificial boundary blockage and pressure reflection while minimizing cell count, the generator sizes the virtual wind tunnel based on aerodynamic blockage criteria:
 
 Let geometry extents along length, height, and lateral width be $L_x, L_y, L_z$. The domain bounding box $[D_{min}, D_{max}]$ is derived as follows:
 
@@ -487,7 +545,7 @@ Let geometry extents along length, height, and lateral width be $L_x, L_y, L_z$.
 
 ### Coordinate Transformations & Orientation
 
-`cfd-gen` supports arbitrary vehicle CAD export orientations through an internal vector transformation matrix:
+Arbitrary vehicle CAD export orientations are supported through an internal vector transformation matrix:
 
 ```text
 Flow Direction (-z):
@@ -496,7 +554,7 @@ Flow Direction (-z):
   - Lateral (Width):     X-axis (Symmetry at -x, Far Wall at +x)
 ```
 
-If your CAD was exported with flow along `-x` and up along `+z`, set `"direction": "-x"` and `"downforce_axis": "-z"`. The engine automatically swaps indexing, aspect ratios, wake bounding boxes, and velocity vectors.
+If your CAD was exported with flow along `-x` and up along `+z`, set `"direction": "-x"` and `"downforce_axis": "-z"`. The generator automatically swaps indexing, aspect ratios, wake bounding boxes, and velocity vectors.
 
 ### Road & Moving Ground Boundary Condition
 
@@ -515,7 +573,7 @@ When simulating a half-model:
 1. CAD geometry crossing the symmetry plane is trimmed by `snappyHexMesh` at the boundary.
 2. The `locationInMesh` seed point is projected away from the symmetry plane toward the outer far-wall ceiling corner to guarantee it sits strictly within the fluid volume.
 3. Wake boxes (`nearWakeBox` and `farWakeBox`) are automatically clipped so their inner lateral face aligns exactly with the symmetry plane coordinate.
-4. `read_forces.py` queries `system/blockMeshDict` for symmetry boundaries. If detected, it computes both simulated half-forces and full-car projected forces:
+4. `python read_forces.py` queries `system/blockMeshDict` for symmetry boundaries. If detected, it computes both simulated half-forces and full-car projected forces:
    $$F_{\text{full car}} = 2 \times F_{\text{half car}}$$
 
 ---
@@ -546,7 +604,7 @@ $$n_x = \text{round}\left(\frac{\Delta X}{h_0}\right), \quad n_y = \text{round}\
 
 ### Step 3: Conforming Distance-Based Refinement Shells
 
-Rather than generating millions of cells inside an oversized rectangular box around the chassis, `cfd-gen` uses **distance-based surface shells**:
+Rather than generating millions of cells inside an oversized rectangular box around the chassis, the generator uses **distance-based surface shells**:
 - Within **25 mm** of geometry $\rightarrow$ **Level 4** refinement (6.25 mm cell size).
 - Within **80 mm** of geometry $\rightarrow$ **Level 3** refinement (12.5 mm cell size).
 
@@ -554,7 +612,7 @@ These shells hug the curvature of wings, suspension arms, and sidepods, providin
 
 ### Step 4: Two-Stage Wake Refinement Architecture
 
-Wake vortex shedding and flow separation require high resolution behind the car, but uniform wake boxes waste massive compute resources. `cfd-gen` uses a **two-stage wake architecture**:
+Wake vortex shedding and flow separation require high resolution behind the car, but uniform wake boxes waste massive compute resources. The generator uses a **two-stage wake architecture**:
 
 ```text
                 ┌──────────────────┐
@@ -614,7 +672,7 @@ This produces a divergence-free, physically plausible initial velocity field aro
 
 ### SIMPLEC Pressure-Velocity Coupling
 
-`cfd-gen` uses **SIMPLEC** (`consistent true;`) rather than standard SIMPLE:
+The generator uses **SIMPLEC** (`consistent true;`) rather than standard SIMPLE:
 
 In standard SIMPLE, the velocity correction neglects neighbor velocity corrections ($\sum A_{nb} u'_{nb}$), requiring aggressive under-relaxation ($U \approx 0.3, p \approx 0.3$) to prevent divergent oscillations.
 
@@ -671,7 +729,7 @@ The $k$-$\omega$ SST (Shear Stress Transport) model combines:
 
 In full-car simulations, $y^+$ varies dramatically from $y^+ \approx 5$ on small wing flaps to $y^+ \approx 120$ on large undertray panels.
 
-Traditional wall functions require $y^+ > 30$ and fail catastrophically in the buffer layer ($5 < y^+ < 30$). `cfd-gen` uses **Spalding's continuous law of the wall**:
+Traditional wall functions require $y^+ > 30$ and fail catastrophically in the buffer layer ($5 < y^+ < 30$). The generator uses **Spalding's continuous law of the wall**:
 
 $$y^+ = u^+ + \frac{1}{E} \left[ e^{\kappa u^+} - 1 - \kappa u^+ - \frac{(\kappa u^+)^2}{2} - \frac{(\kappa u^+)^3}{6} \right]$$
 
@@ -719,7 +777,7 @@ Run `python read_forces.py`:
 
 ### Multi-Part Force Accounting
 
-If multiple STL files are supplied (e.g. `["front_wing.stl", "rear_wing.stl", "undertray.stl"]`), `cfd-gen` generates dedicated function objects for each component:
+If multiple STL files are supplied (e.g. `["front_wing.stl", "rear_wing.stl", "undertray.stl"]`), dedicated function objects are generated for each component:
 - `postProcessing/forces_front_wing/0/force.dat`
 - `postProcessing/forces_rear_wing/0/force.dat`
 - `postProcessing/forces_undertray/0/force.dat`
@@ -803,7 +861,7 @@ sbatch run.sh
 
 ## Performance Optimization Architecture
 
-`cfd-gen` includes eight targeted performance optimizations across every layer of the CFD pipeline:
+Eight targeted performance optimizations are implemented across every layer of the CFD pipeline:
 
 | Layer | Optimization | Mechanism | Measured Impact |
 | :--- | :--- | :--- | :--- |
@@ -848,15 +906,15 @@ The percentage of front downforce is then calculated directly from the pitch mom
 
 ### 1. `snappyHexMesh` crashes with "Point is not inside mesh"
 - **Cause**: The `locationInMesh` coordinate falls inside the CAD body or outside the domain box.
-- **Solution**: `cfd-gen` automatically places `locationInMesh` in the upstream-ceiling-farwall corner. If using custom overrides, ensure `locationInMesh` coordinates sit in open air.
+- **Solution**: The generator automatically places `locationInMesh` in the upstream-ceiling-farwall corner. If using custom overrides, ensure `locationInMesh` coordinates sit in open air.
 
 ### 2. Solution diverges on iteration 1 with `Floating point exception`
 - **Cause**: Divergence caused by zero initial velocity around sharp trailing edges.
-- **Solution**: `cfd-gen` includes `potentialFoam` in `Allrun.parallel`. Ensure `potentialFoam` runs successfully to initialize a smooth velocity field before `simpleFoam` begins.
+- **Solution**: `potentialFoam` is automatically run prior to `simpleFoam` in `Allrun.parallel`. Ensure `potentialFoam` runs successfully to initialize a smooth velocity field before `simpleFoam` begins.
 
 ### 3. Boundary layers fail to inflate on wings
 - **Cause**: Surface triangulation is too coarse or `featureAngle` is too acute.
-- **Solution**: Ensure `fidelity` is set to `"standard"` or `"fine"`. `cfd-gen` uses `featureAngle 170;` and `resolveFeatureAngle 35;` to ensure layers wrap around sharp edges.
+- **Solution**: Ensure `fidelity` is set to `"standard"` or `"fine"`. The generator uses `featureAngle 170;` and `resolveFeatureAngle 35;` to ensure layers wrap around sharp edges.
 
 ### 4. My CAD model is in millimeters instead of meters
 - **Cause**: OpenFOAM treats STL coordinates as meters. A 1500 mm car will be meshed as a 1.5-kilometer-long vehicle.
@@ -866,7 +924,7 @@ The percentage of front downforce is then calculated directly from the pitch mom
 
 ## Automated Regression Tests
 
-The project includes an automated test suite executed with Python's standard library `unittest`:
+The test suite runs with standard Python:
 
 ```bash
 python -m unittest discover -s tests -v
