@@ -99,6 +99,8 @@ cd OpenFOAM-CaseGenerator
 
 You do not need to install anything. All commands use standard Python scripts:
 - `python setup_case.py configs/config.json`: Generates the OpenFOAM case.
+- `python setup_case.py configs/config.json --dry-run`: Previews domain and mesh sizing without generating files.
+- `python setup_case.py --init`: Generates starter template directories (`configs/`, `stl/`, `cases/`).
 - `python read_forces.py`: Analyzes forces, plots convergence, and compares cases.
 
 *(Optional)* If you want real-time animated GUI plots:
@@ -120,6 +122,7 @@ cases/<case_name>/
 │   ├── k                               # Turbulent kinetic energy [m²/s²]
 │   ├── omega                           # Specific dissipation rate [1/s]
 │   └── nut                             # Turbulent kinematic eddy viscosity [m²/s]
+├── 0.orig/                             # Pristine initial field backup (restored by ./Allclean)
 ├── constant/
 │   ├── transportProperties             # Kinematic viscosity (nu = 1.516e-5 m²/s)
 │   ├── turbulenceProperties            # Turbulence model selection (kOmegaSST)
@@ -135,8 +138,10 @@ cases/<case_name>/
 │   ├── fvSolution                      # SIMPLEC relaxation, GAMG multigrid & PBiCGStab solvers
 │   └── decomposeParDict                # MPI domain decomposition (Scotch method)
 ├── Allrun.parallel                     # Local parallel execution bash script (MPI)
+├── Allrun                              # Local serial execution bash script
 ├── Allclean                            # Case cleanup script (resets mesh and solver outputs)
 ├── run.sh                              # Production SLURM cluster submission batch script
+├── convergence_monitor.py              # Background auto-stop monitor script (reads force.dat & updates controlDict)
 └── case_config.json                    # Frozen snapshot of the configuration used to generate this case
 ```
 
@@ -215,7 +220,7 @@ Edit `configs/config.json` with standard JSON:
     "domain_faces": {
         "-x": "symmetry",                // Inner car centerline: symmetry boundary condition
         "+x": "farField",                // Outer lateral side wall: slip wall boundary (no boundary layer)
-        "-y": "ground",                  // Road floor: movingWallVelocity matching freestream speed
+        "-y": "ground",                  // Road floor: fixedValue uniform matching freestream speed (moving road)
         "+y": "farField",                // Wind tunnel ceiling: slip wall boundary
         "+z": "inlet",                   // Virtual wind tunnel air intake: uniform fixed velocity
         "-z": "outlet"                   // Downstream exhaust: uniform 0 gauge pressure (p = 0)
@@ -317,7 +322,7 @@ renumberMesh -overwrite
 decomposePar
 
 # 9. Solve Laplace potential equation (∇²Φ = 0) to compute a divergence-free initial velocity
-mpirun -np 32 potentialFoam -parallel -writephi
+mpirun -np 32 potentialFoam -parallel -writephi -noFunctionObjects
 
 # 10. Run steady-state incompressible RANS solver using SIMPLEC pressure-velocity coupling
 mpirun -np 32 simpleFoam -parallel
@@ -983,4 +988,4 @@ The test suite validates:
 
 ## License
 
-This project is licensed under the MIT License — see the repository license file for details.
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
