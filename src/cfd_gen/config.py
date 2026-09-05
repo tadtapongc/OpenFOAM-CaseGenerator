@@ -117,7 +117,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "cacheAgglomeration": True,
             "agglomerator": "faceAreaPair",
             "nCellsInCoarsestLevel": 500,
-            "mergeLevels": 1,
+            "mergeLevels": 2,
         },
         "U": {
             "solver": "PBiCGStab",
@@ -134,10 +134,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "consistent": True,
     },
 
-    # Relaxation — SIMPLEC-optimized, damps oscillation
+    # Relaxation — SIMPLEC-optimized (consistent formulation enables U=0.7, p=0.7)
     "relaxation": {
-        "fields": {"p": 0.5},
-        "equations": {"U": 0.6, "k": 0.5, "omega": 0.5},
+        "fields": {"p": 0.7},
+        "equations": {"U": 0.7, "k": 0.5, "omega": 0.5},
     },
 
     # Wall functions (Spalding bridges entire y+ range)

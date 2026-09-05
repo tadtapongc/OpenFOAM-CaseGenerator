@@ -247,7 +247,7 @@ To simulate an airplane, UAV, or wing outside of ground effect in open air:
 ### Solver & Numerical Schemes
 - **Solver**: `simpleFoam` (Steady-state incompressible RANS).
 - **Initialization**: `potentialFoam` computes an initial divergence-free velocity field before `simpleFoam` starts.
-- **Algorithm**: **SIMPLEC** (`consistent true`), enabling robust velocity relaxation ($U = 0.6, p = 0.5$).
+- **Algorithm**: **SIMPLEC** (`consistent true`), enabling robust velocity relaxation ($U = 0.7, p = 0.7$).
 - **Turbulence Model**: $k$-$\omega$ SST (Menter's Shear Stress Transport) with continuous `nutUSpaldingWallFunction`.
 - **Convection Schemes**:
   - Velocity: `bounded Gauss limitedLinear 1` (2nd-order TVD with Sweby limiter).

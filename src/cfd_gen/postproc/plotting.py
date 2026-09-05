@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import statistics
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,21 @@ def _force_stats(values: list[float], window: int = 200) -> dict[str, float]:
         "max": max(win),
         "last": values[-1],
     }
+
+
+def _rolling_average(values: list[float], window: int = 100) -> list[float]:
+    """Compute rolling window average in O(N) using cumulative sums."""
+    if not values:
+        return []
+    cumsum = [0.0]
+    for v in values:
+        cumsum.append(cumsum[-1] + v)
+    avg_line = []
+    for i in range(len(values)):
+        start = max(0, i - window + 1)
+        count = i - start + 1
+        avg_line.append((cumsum[i + 1] - cumsum[start]) / count)
+    return avg_line
 
 
 def plot_forces(
@@ -134,6 +150,22 @@ def live_monitor(
             f"Range:          [{stats['min']:.2f}, {stats['max']:.2f}] {unit}"
         )
 
+    force_cache: dict[str, Any] = {"time": 0.0, "data": None}
+
+    def get_forces() -> tuple[list[float], list[float], list[float]] | None:
+        now = time.time()
+        if force_cache["data"] is not None and (now - force_cache["time"] < 1.0):
+            return force_cache["data"]
+        files = find_force_files(case_dir)
+        if not files:
+            return None
+        t, d, df = read_forces(files, drag_idx, drag_sign, df_idx, df_sign)
+        if not t:
+            return None
+        force_cache["time"] = now
+        force_cache["data"] = (t, d, df)
+        return force_cache["data"]
+
     def draw(frame):
         ax.clear()
         p = state["page"]
@@ -169,25 +201,19 @@ def live_monitor(
             ax.set_title(f"Residuals | {len(t)} iters", fontweight="bold", fontsize=14)
 
         elif p == 1:  # Drag
-            files = find_force_files(case_dir)
-            if not files:
+            force_data = get_forces()
+            if not force_data:
                 ax.text(0.5, 0.5, "Waiting...", ha="center", va="center",
                         transform=ax.transAxes)
                 return []
-            times, drags, _ = read_forces(files, drag_idx, drag_sign, df_idx, df_sign)
-            if not times:
-                return []
+            times, drags, _ = force_data
 
             stats = _force_stats(drags)
             ax.plot(times, drags, "b-", linewidth=0.8, alpha=0.7)
 
-            # Running average line
+            # Running average line (O(N) rolling average)
             if len(drags) > 50:
-                window = 100
-                avg_line = []
-                for i in range(len(drags)):
-                    start = max(0, i - window + 1)
-                    avg_line.append(statistics.mean(drags[start:i+1]))
+                avg_line = _rolling_average(drags, window=100)
                 ax.plot(times, avg_line, "b-", linewidth=2.0, label="Avg (100)")
 
             # Average band
@@ -208,26 +234,20 @@ def live_monitor(
             )
 
         elif p == 2:  # Downforce
-            files = find_force_files(case_dir)
-            if not files:
+            force_data = get_forces()
+            if not force_data:
                 ax.text(0.5, 0.5, "Waiting...", ha="center", va="center",
                         transform=ax.transAxes)
                 return []
-            times, drags, dfs = read_forces(files, drag_idx, drag_sign, df_idx, df_sign)
-            if not times:
-                return []
+            times, drags, dfs = force_data
 
             stats = _force_stats(dfs)
             d_stats = _force_stats(drags)
             ax.plot(times, dfs, "r-", linewidth=0.8, alpha=0.7)
 
-            # Running average line
+            # Running average line (O(N) rolling average)
             if len(dfs) > 50:
-                window = 100
-                avg_line = []
-                for i in range(len(dfs)):
-                    start = max(0, i - window + 1)
-                    avg_line.append(statistics.mean(dfs[start:i+1]))
+                avg_line = _rolling_average(dfs, window=100)
                 ax.plot(times, avg_line, "r-", linewidth=2.0, label="Avg (100)")
 
             # Average band
@@ -250,14 +270,12 @@ def live_monitor(
             )
 
         elif p == 3:  # Summary
-            files = find_force_files(case_dir)
-            if not files:
+            force_data = get_forces()
+            if not force_data:
                 ax.text(0.5, 0.5, "Waiting...", ha="center", va="center",
                         transform=ax.transAxes)
                 return []
-            times, drags, dfs = read_forces(files, drag_idx, drag_sign, df_idx, df_sign)
-            if not times:
-                return []
+            times, drags, dfs = force_data
 
             d_stats = _force_stats(drags)
             f_stats = _force_stats(dfs)

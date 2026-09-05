@@ -244,7 +244,7 @@ castellatedMeshControls
     maxLocalCells       {mesh.get("maxLocalCells", 2000000)};
     maxGlobalCells      {mesh.get("maxGlobalCells", 30000000)};
     minRefinementCells  {mesh.get("minRefinementCells", 10)};
-    maxLoadUnbalance    {mesh.get("maxLoadUnbalance", 0.10)};
+    maxLoadUnbalance    {mesh.get("maxLoadUnbalance", 0.25)};
     nCellsBetweenLevels {mesh.get("nCellsBetweenLevels", 3)};
 
     features

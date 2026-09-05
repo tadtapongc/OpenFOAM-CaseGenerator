@@ -18,7 +18,7 @@ from cfd_gen.cli import _do_generate, _do_init
 from cfd_gen.config import load_config, validate
 from cfd_gen.geometry import compute_domain_box, face_assignments
 from cfd_gen.postproc.forces import check_convergence, find_force_files, read_forces, is_symmetry_case
-from cfd_gen.postproc.plotting import _force_stats
+from cfd_gen.postproc.plotting import _force_stats, _rolling_average
 from cfd_gen.postproc.residuals import read_residuals
 from cfd_gen.postproc.convergence_monitor import monitor
 from cfd_gen.stl_utils import copy_stl, read_stl, stl_bounds, stl_info, write_stl
@@ -360,6 +360,33 @@ class ProjectTest(unittest.TestCase):
         self.assertEqual(name, "large_part")
         self.assertEqual(count, 1000)
         self.assertEqual(bbox, ((0.0, 0.0, 0.0), (1000.0, 1.0, 2.0)))
+
+    def test_rolling_average_math_and_empty(self):
+        self.assertEqual(_rolling_average([]), [])
+        vals = [10.0, 20.0, 30.0]
+        self.assertEqual(_rolling_average(vals, window=2), [10.0, 15.0, 25.0])
+        import random, statistics
+        data = [random.uniform(50, 150) for _ in range(150)]
+        expected = [
+            statistics.mean(data[max(0, i - 40 + 1) : i + 1])
+            for i in range(len(data))
+        ]
+        actual = _rolling_average(data, window=40)
+        for e, a in zip(expected, actual):
+            self.assertAlmostEqual(e, a, places=7)
+
+    def test_performance_defaults_and_parallel_checkmesh(self):
+        case = self.generate()
+        cfg = json.loads((case / "case_config.json").read_text())
+        self.assertEqual(cfg["linear_solvers"]["p"]["mergeLevels"], 2)
+        self.assertEqual(cfg["relaxation"]["fields"]["p"], 0.7)
+        self.assertEqual(cfg["relaxation"]["equations"]["U"], 0.7)
+        snappy = (case / "system/snappyHexMeshDict").read_text()
+        self.assertIn("maxLoadUnbalance    0.25;", snappy)
+        allrun_parallel = (case / "Allrun.parallel").read_text()
+        self.assertIn("runParallel checkMesh", allrun_parallel)
+        run_sh = (case / "run.sh").read_text()
+        self.assertIn("checkMesh -allGeometry -allTopology -noFunctionObjects -parallel", run_sh)
 
 
 if __name__ == "__main__":

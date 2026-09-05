@@ -230,9 +230,9 @@ runApplication surfaceFeatureExtract
 runApplication blockMesh
 runApplication decomposePar
 runParallel snappyHexMesh -overwrite -noFunctionObjects
+runParallel checkMesh -allGeometry -allTopology -noFunctionObjects
 runApplication reconstructParMesh -constant
 rm -rf processor*
-runApplication checkMesh -allGeometry -allTopology -noFunctionObjects
 runApplication renumberMesh -overwrite -noFunctionObjects
 
 # Solve
@@ -351,10 +351,9 @@ sync_progress() {{
         sleep {sync_interval} &
         SLEEP_PID=$!
         wait "$SLEEP_PID" || true
-        rsync -a --include="*/" \\
+        rsync -a --include="log.*" \\
+                 --include="postProcessing" \\
                  --include="postProcessing/**" \\
-                 --include="processor*/postProcessing/**" \\
-                 --include="log.*" \\
                  --exclude="*" \\
                  "$RAM_DIR/" "$ORIG_DIR/" 2>/dev/null || true
     done
@@ -486,12 +485,12 @@ decomposePar > log.decomposePar 2>&1
 echo ">>> Running snappyHexMesh (parallel)"
 mpirun -np $SLURM_NTASKS snappyHexMesh -overwrite -noFunctionObjects -parallel > log.snappyHexMesh 2>&1
 
+echo ">>> Checking mesh (parallel)"
+mpirun -np $SLURM_NTASKS checkMesh -allGeometry -allTopology -noFunctionObjects -parallel > log.checkMesh 2>&1
+
 echo ">>> Reconstructing mesh"
 reconstructParMesh -constant > log.reconstructParMesh 2>&1
 rm -rf processor*
-
-echo ">>> Checking mesh"
-checkMesh -allGeometry -allTopology -noFunctionObjects > log.checkMesh 2>&1
 
 echo ">>> Renumbering mesh"
 renumberMesh -overwrite -noFunctionObjects > log.renumberMesh 2>&1
