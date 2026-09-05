@@ -1,0 +1,231 @@
+"""Behavioral regression checks; run with python -m unittest discover -s tests."""
+from __future__ import annotations
+
+import contextlib
+import io
+import json
+from pathlib import Path
+import runpy
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from cfd_gen.cli import _do_generate, _do_init
+from cfd_gen.config import load_config, validate
+from cfd_gen.geometry import compute_domain_box, face_assignments
+from cfd_gen.postproc.forces import check_convergence, find_force_files, read_forces, is_symmetry_case
+from cfd_gen.postproc.plotting import _force_stats
+from cfd_gen.postproc.residuals import read_residuals
+from cfd_gen.postproc.convergence_monitor import monitor
+from cfd_gen.stl_utils import write_stl
+from cfd_gen.writers.scripts import _convergence_monitor_script
+
+
+def force_row(time, drag, downforce=20):
+    return f"{time} (0 {-downforce} {-drag}) (0 0 0) (0 0 0)\n"
+
+
+class ProjectTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        write_stl(self.root / "stl" / "body.stl", "body", [
+            ((0, 0, 1), (0, 0, 0), (1, 0, 0), (0, 1, 3)),
+        ])
+
+    def config(self, **extra):
+        path = self.root / "config.json"
+        path.write_text(json.dumps({"case_name": "test_case", "stl_files": ["body.stl"], **extra}))
+        return path
+
+    def generate(self, **extra):
+        path = self.config(**extra)
+        with contextlib.redirect_stdout(io.StringIO()):
+            _do_generate(path, self.root)
+        return self.root / extra.get("case_dir", "cases") / "test_case"
+
+    def test_missing_geometry_fails_before_creating_case(self):
+        with self.assertRaises(SystemExit), contextlib.redirect_stdout(io.StringIO()):
+            _do_generate(self.config(stl_files=["absent.stl", "body.stl"]), self.root)
+        self.assertFalse((self.root / "cases").exists())
+
+    def test_multiple_geometry_names_remain_paired(self):
+        write_stl(self.root / "stl" / "wing.stl", "wing", [
+            ((0, 0, 1), (10, 0, 0), (11, 0, 0), (10, 1, 3)),
+        ])
+        case = self.generate(stl_files=["wing.stl", "body.stl"])
+        from cfd_gen.stl_utils import stl_bounds
+        self.assertEqual(stl_bounds(case / "constant/triSurface/wing.stl")[0][0], 10)
+        self.assertEqual(stl_bounds(case / "constant/triSurface/body.stl")[0][0], 0)
+
+    def test_minimal_config_aligns_ground_and_symmetry(self):
+        case = self.generate()
+        cfg = json.loads((case / "case_config.json").read_text())
+        self.assertEqual(cfg["domain_box"]["min"], [0, 0, -24])
+        self.assertEqual(cfg["domain_faces"]["-x"], "symmetry")
+        self.assertTrue(is_symmetry_case(case_dir=case))
+
+    def test_overrides_and_custom_output_directory(self):
+        case = self.generate(
+            case_dir="custom", solver={"end_time": 123}, layers={"n_layers": 2},
+            slurm={"time": "04:00:00"},
+            mesh_params={"locationInMesh": [0.2, 0.3, 0.4], "maxLoadUnbalance": 0.25},
+        )
+        cfg = json.loads((case / "case_config.json").read_text())
+        self.assertFalse((self.root / "cases").exists())
+        self.assertEqual(cfg["solver"]["end_time"], 123)
+        self.assertEqual(cfg["layers"]["n_layers"], 2)
+        self.assertEqual(cfg["slurm"]["time"], "04:00:00")
+        mesh = (case / "system/snappyHexMeshDict").read_text()
+        self.assertIn("locationInMesh (0.2000 0.3000 0.4000)", mesh)
+        self.assertIn("maxLoadUnbalance    0.25;", mesh)
+
+    def test_scripts_have_linux_newlines_and_standalone_monitor(self):
+        case = self.generate()
+        for name in ("Allrun", "Allrun.parallel", "Allclean", "run.sh", "convergence_monitor.py"):
+            with self.subTest(name=name):
+                self.assertNotIn(b"\r", (case / name).read_bytes())
+        namespace = runpy.run_path(str(case / "convergence_monitor.py"))
+        self.assertEqual(namespace["MIN_ITERS"], 300)
+        self.assertEqual(namespace["WINDOW"], 200)
+        self.assertEqual(namespace["THRESHOLD"], 0.5)
+
+    def test_init_preserves_existing_example(self):
+        path = self.root / "configs/example.json"
+        path.parent.mkdir()
+        path.write_text("my configuration")
+        with contextlib.redirect_stdout(io.StringIO()):
+            _do_init(self.root)
+        self.assertEqual(path.read_text(), "my configuration")
+
+    def test_dry_run_does_not_write_case(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            _do_generate(self.config(), self.root, dry_run=True)
+        self.assertFalse((self.root / "cases").exists())
+
+    def test_invalid_configs_produce_validation_errors(self):
+        examples = [
+            {"flow": {"velocity": "fast"}}, {"flow": {"velocity": None}},
+            {"flow": {"velocity": float("nan")}}, {"flow": []},
+            {"fluid": {"nu": 0}}, {"mesh_params": {"base_cell_size": 0}},
+            {"parallel": {"n_procs": 0}}, {"fidelity": "typo"}, {"fidelity": []},
+            {"domain_box": {"min": [0], "max": [1]}},
+            {"domain_faces": {"-x": "symmetry"}}, {"domain_faces": None},
+            {"outputs": {"downforce_axis": "-z"}},
+            {"case_name": "../elsewhere"}, {"stl_files": "body.stl"},
+            {"stl_files": ["body.stl", "body.stl"]},
+            {"mesh_params": {"surface_level": [5, 4]}},
+        ]
+        for example in examples:
+            with self.subTest(example=example):
+                errors, _ = validate(load_config(self.config(**example)), self.root)
+                self.assertTrue(errors)
+
+    def test_new_section_comments_are_filtered(self):
+        cfg = load_config(self.config(mesh_params={"_comment": "ignore", "base_cell_size": 0.1}))
+        self.assertNotIn("_comment", cfg["mesh_params"])
+
+    def test_non_object_configuration_and_overrides_fail_cleanly(self):
+        for value in ([], {"overrides": []}):
+            path = self.root / "invalid.json"
+            path.write_text(json.dumps(value))
+            with self.assertRaises(ValueError):
+                load_config(path)
+
+    def test_explicit_and_implicit_domain_faces_agree(self):
+        cfg = load_config(self.config())
+        implicit = compute_domain_box(cfg, ((0, 0, 0), (1, 1, 3)))
+        cfg["domain_faces"] = face_assignments(cfg)
+        self.assertEqual(implicit, compute_domain_box(cfg, ((0, 0, 0), (1, 1, 3))))
+
+    def test_custom_patch_names_have_correct_types_and_alignment(self):
+        case = self.generate(patches={"ground": "road", "symmetry": "centre"},
+                             domain_faces={"-x": "symmetry", "+x": "farField", "-y": "ground",
+                                           "+y": "farField", "+z": "inlet", "-z": "outlet"})
+        mesh = (case / "system/blockMeshDict").read_text()
+        self.assertIn("road\n    {\n        type wall;", mesh)
+        self.assertIn("centre\n    {\n        type symmetry;", mesh)
+        self.assertTrue(is_symmetry_case(case_dir=case))
+        self.assertIn("    road\n", (case / "0/U").read_text())
+
+    def test_positive_ground_and_symmetry_faces(self):
+        case = self.generate(ground_clearance=0.1, symmetry_plane=1,
+                             domain_faces={"+x": "symmetry", "-x": "farField", "+y": "ground",
+                                           "-y": "farField", "+z": "inlet", "-z": "outlet"})
+        cfg = json.loads((case / "case_config.json").read_text())
+        self.assertEqual(cfg["domain_box"]["max"][:2], [1, 1.1])
+        self.assertEqual(cfg["domain_box"]["min"][:2], [-4, -4])
+        for region in cfg["mesh_params"]["refinement_regions"]:
+            self.assertEqual(region["max"][:2], [1, 1.11])
+        self.assertIn("locationInMesh (-3.7500 -3.7450", (case / "system/snappyHexMeshDict").read_text())
+
+    def test_explicit_ground_zero_is_absolute(self):
+        cfg = load_config(self.config(ground_plane=0))
+        self.assertEqual(compute_domain_box(cfg, ((0, 2, 0), (1, 3, 3)))["min"][1], 0)
+
+    def test_restart_rows_and_malformed_rows(self):
+        old = self.root / "old.dat"
+        new = self.root / "new.dat"
+        old.write_text(force_row(100, 10) + force_row(200, 5))
+        new.write_text(force_row(100, 99) + "101 (0 -20 broken) (0 0 0) (0 0 0)\n"
+                       + force_row(102, 100) + force_row(103, float("nan")))
+        self.assertEqual(read_forces([old, new], 2, -1, 1, -1),
+                         ([100.0, 102.0], [99.0, 100.0], [20.0, 20.0]))
+        cfg = load_config(self.config())
+        namespace = {"__name__": "standalone_test"}
+        exec(_convergence_monitor_script(cfg), namespace)
+        self.assertEqual(namespace["read_forces"]([old, new], 2, -1, 1, -1),
+                         read_forces([old, new], 2, -1, 1, -1))
+
+    def test_numeric_restart_discovery_and_processor_fallback(self):
+        for name in ("10", "2"):
+            path = self.root / "processor1/postProcessing/forces" / name / "force.dat"
+            path.parent.mkdir(parents=True)
+            path.write_text(force_row(100, int(name)))
+        (self.root / "processor0/postProcessing/forces").mkdir(parents=True)
+        files = find_force_files(self.root)
+        self.assertEqual([p.parent.name for p in files], ["2", "10"])
+        self.assertEqual(read_forces(files, 2, -1, 1, -1)[1], [10])
+
+    def test_residual_restart_headers_and_partial_rows(self):
+        old = self.root / "old.dat"
+        new = self.root / "new.dat"
+        old.write_text("# Time p_initial\n1 0.1\n2 0.2\n50 0.001\n")
+        new.write_text("# Time p_initial Ux_initial\n2 0.02 0.3\n3 0.01 0.2\n4 0.005\n")
+        data, headers = read_residuals([old, new])
+        self.assertEqual(data["Time"], [1, 2, 3])
+        self.assertEqual(data["p_initial"], [0.1, 0.02, 0.01])
+        self.assertEqual(data["Ux_initial"], [None, 0.3, 0.2])
+        self.assertIn("Ux_initial", headers)
+
+    def test_plot_stats_do_not_claim_early_or_zero_mean_convergence(self):
+        self.assertGreater(_force_stats([10])["pct"], 0.5)
+        self.assertEqual(_force_stats([10])["last"], 10)
+        self.assertGreater(_force_stats([-1, 1] * 20)["pct"], 0.5)
+        self.assertEqual(_force_stats([10] * 20)["pct"], 0)
+
+    def test_convergence_defaults_preserved(self):
+        self.assertFalse(check_convergence([10] * 19, [20] * 19)[0])
+        self.assertTrue(check_convergence([10] * 20, [20] * 20)[0])
+        self.assertFalse(check_convergence([0] * 200, [0] * 200)[0])
+
+    def test_monitor_reads_axes_from_target_case(self):
+        case = self.root / "remote_case"
+        (case / "system").mkdir(parents=True)
+        (case / "system/controlDict").write_text("stopAt endTime;\n")
+        (case / "case_config.json").write_text(json.dumps({"outputs": {"drag_axis": "+x", "downforce_axis": "-y"}}))
+        path = case / "postProcessing/forces/0/force.dat"
+        path.parent.mkdir(parents=True)
+        path.write_text("".join(f"{t} (10 -20 0) (0 0 0) (0 0 0)\n" for t in range(300)))
+        # A second poll would expose incorrect axes without hanging the test.
+        with patch("cfd_gen.postproc.convergence_monitor.time.sleep", side_effect=[None, RuntimeError("second poll")]), contextlib.redirect_stdout(io.StringIO()):
+            self.assertTrue(monitor(case_dir=case))
+        self.assertIn("writeNow", (case / "system/controlDict").read_text())
+
+
+if __name__ == "__main__":
+    unittest.main()

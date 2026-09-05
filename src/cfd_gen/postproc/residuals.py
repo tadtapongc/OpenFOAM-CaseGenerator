@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 
@@ -32,7 +33,8 @@ def find_residual_files(base_dir: str | Path | None = None) -> list[Path]:
                     f = d / "solverInfo.dat"
                     if f.exists():
                         all_files.append(f)
-                break
+                if all_files:
+                    break
 
     return all_files
 
@@ -43,44 +45,50 @@ def read_residuals(files: list[Path]) -> tuple[dict[str, list[float | None]], li
     Returns:
         (data_dict, headers)
     """
-    data: dict[str, list[float | None]] = {}
     headers: list[str] = []
-    seen: set[float] = set()
+    rows: dict[float, dict[str, float | None]] = {}
 
     for path in files:
+        file_headers: list[str] = []
+        segment_started = False
         try:
             with open(path) as f:
                 for line in f:
+                    line = line.strip()
                     if line.startswith("#"):
                         if "Time" in line:
-                            headers = line.strip("# \n").split()
+                            file_headers = line.strip("# \n").split()
+                            for h in file_headers:
+                                if h not in headers:
+                                    headers.append(h)
                         continue
-                    if not line.strip() or not headers:
+                    if not line or not file_headers:
                         continue
                     parts = line.split()
                     try:
                         t = float(parts[0])
                     except (ValueError, IndexError):
                         continue
-                    t_key = round(t, 8)
-                    if t_key in seen:
+                    if not math.isfinite(t) or len(parts) < len(file_headers):
                         continue
-                    seen.add(t_key)
-                    for i, h in enumerate(headers):
+                    if not segment_started:
+                        rows = {key: row for key, row in rows.items() if key < round(t, 8)}
+                        segment_started = True
+                    row = {}
+                    for i, h in enumerate(file_headers):
                         if i < len(parts):
                             try:
                                 val: float | None = float(parts[i])
+                                if not math.isfinite(val):
+                                    val = None
                             except ValueError:
                                 val = None
                         else:
                             val = None
-                        data.setdefault(h, []).append(val)
+                        row[h] = val
+                    rows[round(t, 8)] = row
         except (OSError, ValueError):
             pass
 
-    if "Time" in data and data["Time"]:
-        sort_idx = sorted(range(len(data["Time"])), key=lambda i: data["Time"][i] or 0)
-        for key in data:
-            data[key] = [data[key][i] for i in sort_idx]
-
+    data = {h: [rows[t].get(h) for t in sorted(rows)] for h in headers}
     return data, headers

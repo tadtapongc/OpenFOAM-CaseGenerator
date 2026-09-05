@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import math
 from pathlib import Path
 from typing import Any
 
@@ -238,8 +239,8 @@ def deep_merge(base: dict, override: dict) -> dict:
     for key, val in override.items():
         if key.startswith("_"):
             continue
-        if key in result and isinstance(result[key], dict) and isinstance(val, dict):
-            result[key] = deep_merge(result[key], val)
+        if isinstance(val, dict):
+            result[key] = deep_merge(result.get(key, {}) if isinstance(result.get(key), dict) else {}, val)
         else:
             result[key] = copy.deepcopy(val)
     return result
@@ -257,14 +258,18 @@ def load_config(config_path: str | Path) -> dict[str, Any]:
     Everything else uses universal defaults.
     """
     config_path = Path(config_path)
-    with open(config_path) as f:
+    with open(config_path, encoding="utf-8") as f:
         user_cfg = json.load(f)
+    if not isinstance(user_cfg, dict):
+        raise ValueError("Config must be a JSON object")
 
     # Strip comment keys
     user_cfg = {k: v for k, v in user_cfg.items() if not k.startswith("_")}
 
     # Apply overrides section into top-level (power user feature)
     overrides = user_cfg.pop("overrides", {})
+    if not isinstance(overrides, dict):
+        raise ValueError("'overrides' must be an object")
 
     cfg = deep_merge(DEFAULT_CONFIG, user_cfg)
     if overrides:
@@ -282,20 +287,56 @@ def validate(cfg: dict[str, Any], project_dir: Path) -> tuple[list[str], list[st
     errors: list[str] = []
     warnings: list[str] = []
 
-    # Required fields
-    if not cfg.get("stl_files"):
-        errors.append("'stl_files' is required (list of STL filenames)")
+    from cfd_gen.geometry import FIDELITY_PRESETS, face_assignments, face_role, parse_axis
 
-    if not cfg.get("case_name"):
-        errors.append("'case_name' is required")
+    # Check containers before dereferencing nested values.
+    sections = [key for key, value in DEFAULT_CONFIG.items() if isinstance(value, dict)]
+    for section in sections + ["mesh_params", "domain"]:
+        if not isinstance(cfg.get(section, {}), dict):
+            errors.append(f"'{section}' must be an object")
+    if errors:
+        return errors, warnings
+
+    def finite(value: Any) -> bool:
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+    def vector(value: Any, label: str) -> bool:
+        valid = isinstance(value, (list, tuple)) and len(value) == 3 and all(finite(v) for v in value)
+        if not valid:
+            errors.append(f"{label} must contain three finite numbers")
+        return valid
+
+    def positive(section: str, key: str, integer: bool = False, allow_zero: bool = False) -> None:
+        value = cfg.get(section, {}).get(key)
+        if key not in cfg.get(section, {}):
+            return
+        if (not finite(value) or (value < 0 if allow_zero else value <= 0)
+                or (integer and not isinstance(value, int))):
+            errors.append(f"{section}.{key} must be a finite {'integer' if integer else 'number'} "
+                          f"{'≥ 0' if allow_zero else '> 0'}")
+
+    # Required fields
+    stl_files = cfg.get("stl_files")
+    if not isinstance(stl_files, list) or not stl_files or not all(isinstance(n, str) and n for n in stl_files):
+        errors.append("'stl_files' is required (list of STL filenames)")
+        stl_files = []
+
+    name = cfg.get("case_name")
+    if not isinstance(name, str) or not name or name in (".", "..") or any(c in name for c in '/\\\r\n'):
+        errors.append("'case_name' must be a nonempty folder name without path separators")
+    for key in ("stl_dir", "case_dir"):
+        if not isinstance(cfg.get(key), str) or not cfg[key]:
+            errors.append(f"'{key}' must be a nonempty path string")
+    if not isinstance(cfg.get("fidelity", "standard"), str) or cfg.get("fidelity", "standard") not in FIDELITY_PRESETS:
+        errors.append("fidelity must be fast, standard, or fine")
 
     # Flow
     flow = cfg.get("flow", {})
-    if flow.get("velocity", 0) <= 0:
-        errors.append("flow.velocity must be > 0")
+    positive("flow", "velocity")
+    if not isinstance(flow.get("ground"), bool):
+        errors.append("flow.ground must be true or false")
 
     try:
-        from cfd_gen.geometry import parse_axis
         parse_axis(flow.get("direction", ""))
     except ValueError as e:
         errors.append(f"flow.direction: {e}")
@@ -304,26 +345,72 @@ def validate(cfg: dict[str, Any], project_dir: Path) -> tuple[list[str], list[st
     outputs = cfg.get("outputs", {})
     for key in ("drag_axis", "downforce_axis"):
         try:
-            from cfd_gen.geometry import parse_axis
             parse_axis(outputs.get(key, ""))
         except ValueError as e:
             errors.append(f"outputs.{key}: {e}")
 
     # STL files
-    stl_dir = project_dir / cfg.get("stl_dir", "STL")
-    if not stl_dir.exists():
+    stl_dir = project_dir / (cfg.get("stl_dir") if isinstance(cfg.get("stl_dir"), str) else "stl")
+    if not stl_dir.is_dir():
         errors.append(f"STL directory not found: {stl_dir}")
     else:
-        for name in cfg.get("stl_files", []):
+        stems = set()
+        for name in stl_files:
+            stem = name.rsplit(".", 1)[0] if "." in name else name
+            if not stem or stem in stems or any(c in name for c in '/\\\r\n'):
+                errors.append(f"STL names must be filenames with unique nonempty stems: {name!r}")
+                continue
+            stems.add(stem)
             found = _find_stl(stl_dir, name)
             if not found:
-                warnings.append(f"STL not found: '{name}' in {stl_dir}")
+                errors.append(f"STL not found: '{name}' in {stl_dir}")
 
     # Patches
     required_patches = {"inlet", "outlet", "ground", "walls", "symmetry"}
     missing = required_patches - set(cfg.get("patches", {}).keys())
     if missing:
         errors.append(f"Missing patch keys: {missing}")
+    patch_names = list(cfg.get("patches", {}).values())
+    if not all(isinstance(n, str) and n and not any(c.isspace() for c in n) for n in patch_names):
+        errors.append("patch names must be nonempty strings without whitespace")
+    elif len(set(patch_names)) != len(patch_names):
+        errors.append("patch names must be unique")
+
+    for section, keys in {
+        "fluid": ("nu", "rho"), "turbulence": ("intensity", "nut_ratio"),
+        "mesh_params": ("base_cell_size",), "solver": ("end_time", "write_interval"),
+        "layers": ("expansion_ratio", "first_layer_thickness", "min_thickness"),
+        "force_refs": ("lRef", "Aref"), "slurm": ("sync_interval",),
+    }.items():
+        for key in keys:
+            positive(section, key)
+    for section, keys in {
+        "parallel": ("n_procs",), "slurm": ("nodes", "cpus_per_task"),
+        "mesh_params": ("maxGlobalCells", "maxLocalCells", "nCellsBetweenLevels"),
+    }.items():
+        for key in keys:
+            positive(section, key, integer=True)
+    for key in ("edge_level", "near_wake_level", "far_wake_level", "wake_level", "minRefinementCells"):
+        positive("mesh_params", key, integer=True, allow_zero=True)
+    positive("layers", "n_layers", integer=True, allow_zero=True)
+    positive("solver", "purge_write", integer=True, allow_zero=True)
+    for key, value in cfg.get("domain", {}).items():
+        if key.endswith("_factor"):
+            positive("domain", key)
+    for key in ("ground_plane", "ground_clearance", "symmetry_plane", "centerline"):
+        value = cfg.get(key)
+        if value is not None and (not finite(value) or (key == "ground_clearance" and value < 0)):
+            errors.append(f"{key} must be finite" + (" and ≥ 0" if key == "ground_clearance" else ""))
+    vector(cfg["force_refs"].get("CofR"), "force_refs.CofR")
+    mesh = cfg.get("mesh_params", {})
+    for key in ("locationInMesh", "location_in_mesh"):
+        if key in mesh:
+            vector(mesh[key], f"mesh_params.{key}")
+    level = mesh.get("surface_level")
+    if level is not None and (not isinstance(level, (list, tuple)) or len(level) != 2
+                             or not all(isinstance(n, int) and not isinstance(n, bool) and n >= 0 for n in level)
+                             or level[0] > level[1]):
+        errors.append("mesh_params.surface_level must be two ordered nonnegative integers")
 
     # Ground settings precedence warning
     if cfg.get("ground_plane") is not None and cfg.get("ground_clearance") is not None:
@@ -337,13 +424,42 @@ def validate(cfg: dict[str, Any], project_dir: Path) -> tuple[list[str], list[st
     if box not in ("auto", None) and not isinstance(box, dict):
         errors.append("'domain_box' must be 'auto' or a dict: {\"min\": [x,y,z], \"max\": [x,y,z]}")
     elif isinstance(box, dict):
-        if "min" not in box or "max" not in box:
-            errors.append("domain_box must have 'min' and 'max' keys")
-        else:
+        min_valid = vector(box.get("min"), "domain_box.min")
+        max_valid = vector(box.get("max"), "domain_box.max")
+        if min_valid and max_valid:
             for i in range(3):
                 if box["min"][i] >= box["max"][i]:
                     errors.append(f"domain_box min[{i}] >= max[{i}]")
 
+    # Geometry and field writers require independent flow and vertical axes.
+    try:
+        flow_vec = parse_axis(flow.get("direction", ""))
+        up_vec = parse_axis(outputs.get("downforce_axis", ""))
+        drag_vec = parse_axis(outputs.get("drag_axis", ""))
+        if any(a and b for a, b in zip(flow_vec, up_vec)):
+            errors.append("flow.direction and outputs.downforce_axis must use different axes")
+        if any(a and b for a, b in zip(drag_vec, up_vec)):
+            errors.append("drag_axis and downforce_axis must use different axes")
+    except ValueError:
+        pass
+    faces = cfg.get("domain_faces")
+    if "domain_faces" in cfg:
+        if not isinstance(faces, dict) or set(faces) != {s+a for a in "xyz" for s in "-+"}:
+            errors.append("domain_faces must assign all six faces: -x, +x, -y, +y, -z, +z")
+        elif any(not isinstance(v, str) or face_role(cfg, v) not in required_patches for v in faces.values()):
+            errors.append("domain_faces values must be boundary roles or configured patch names")
+    if not errors:
+        resolved = face_assignments(cfg)
+        roles = {d: face_role(cfg, p) for d, p in resolved.items()}
+        if "inlet" not in roles.values() or "outlet" not in roles.values():
+            errors.append("domain_faces must include inlet and outlet")
+        up_idx = next(i for i, v in enumerate(up_vec) if v)
+        flow_idx = next(i for i, v in enumerate(flow_vec) if v)
+        lateral_idx = next(i for i in range(3) if i not in (up_idx, flow_idx))
+        for role, axis in (("ground", up_idx), ("symmetry", lateral_idx)):
+            assigned = [d for d, r in roles.items() if r == role]
+            if len(assigned) > 1 or any(d[-1] != "xyz"[axis] for d in assigned):
+                errors.append(f"{role} must occupy at most one face on the {'xyz'[axis]} axis")
     return errors, warnings
 
 
@@ -355,7 +471,7 @@ def _find_stl(stl_dir: Path, name: str) -> Path | None:
     for pattern in (name, f"{stem}.stl", f"{stem}.STL",
                     f"{stem.lower()}.stl", f"{stem.lower()}.STL"):
         p = stl_dir / pattern
-        if p.exists():
+        if p.is_file():
             return p
     return None
 

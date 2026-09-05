@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from cfd_gen.geometry import (
+    face_assignments,
+    face_role,
     flow_axis_index_sign,
     parse_axis,
     up_axis_index,
@@ -35,41 +37,7 @@ def _get_face_assignments(cfg: dict[str, Any]) -> dict[str, str]:
     Returns:
         dict mapping direction ("+x", "-x", etc.) to patch name
     """
-    patches = cfg["patches"]
-
-    # Explicit assignment — user specifies each face
-    if "domain_faces" in cfg:
-        return cfg["domain_faces"]
-
-    # Auto-assign from flow direction (fallback)
-    flow_idx, flow_sign = flow_axis_index_sign(cfg)
-    up_idx = up_axis_index(cfg)
-
-    if flow_sign > 0:
-        inlet_dir = "-" + "xyz"[flow_idx]
-        outlet_dir = "+" + "xyz"[flow_idx]
-    else:
-        inlet_dir = "+" + "xyz"[flow_idx]
-        outlet_dir = "-" + "xyz"[flow_idx]
-
-    ground_dir = "-" + "xyz"[up_idx]
-    lateral_axes = [i for i in range(3) if i != flow_idx and i != up_idx]
-    symmetry_dir = "-" + "xyz"[lateral_axes[0]] if lateral_axes else "-x"
-
-    all_dirs = ["+x", "-x", "+y", "-y", "+z", "-z"]
-    assigned = {inlet_dir, outlet_dir, ground_dir, symmetry_dir}
-    wall_dirs = [d for d in all_dirs if d not in assigned]
-
-    face_map = {
-        inlet_dir: patches["inlet"],
-        outlet_dir: patches["outlet"],
-        ground_dir: patches["ground"],
-        symmetry_dir: patches["symmetry"],
-    }
-    for d in wall_dirs:
-        face_map[d] = patches["walls"]
-
-    return face_map
+    return face_assignments(cfg)
 
 
 # ============================================================
@@ -104,12 +72,7 @@ def write_block_mesh_dict(cfg: dict[str, Any], case_dir: Path) -> None:
     # Build boundary block
     boundary_lines = []
     for patch_name, faces in patch_faces.items():
-        # Determine type: check if patch_name matches a known type
-        patch_type = "patch"  # default
-        for key, ptype in PATCH_TYPES.items():
-            if key in patch_name.lower():
-                patch_type = ptype
-                break
+        patch_type = PATCH_TYPES.get(face_role(cfg, patch_name), "patch")
         faces_str = " ".join(faces)
         boundary_lines.append(f"""\
     {patch_name}
@@ -244,12 +207,15 @@ def write_snappy_hex_mesh_dict(cfg: dict[str, Any], case_dir: Path) -> None:
 
         # Up axis: near ceiling (top of domain, far from ground)
         loc[up_idx] = box["max"][up_idx] - extent[up_idx] * 0.05
+        faces = _get_face_assignments(cfg)
+        if face_role(cfg, faces[f"+{'xyz'[up_idx]}"]) == "ground":
+            loc[up_idx] = box["min"][up_idx] + extent[up_idx] * 0.05
 
         # Lateral axis: away from symmetry plane (toward far wall)
         domain_faces = _get_face_assignments(cfg)
         sym_dir = None
         for face_dir, patch_name in domain_faces.items():
-            if "symmetry" in patch_name.lower():
+            if face_role(cfg, patch_name) == "symmetry":
                 sym_dir = face_dir
                 break
 

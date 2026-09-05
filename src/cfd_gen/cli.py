@@ -79,12 +79,15 @@ def _do_init(project_dir: Path) -> None:
         },
     }
     out_path = cfg_dir / "example.json"
-    out_path.write_text(json.dumps(example, indent=4) + "\n")
+    if not out_path.exists():
+        out_path.write_text(json.dumps(example, indent=4) + "\n")
+        print(f"\n  ✓ Created: {out_path}")
+    else:
+        print(f"\n  ℹ  Kept existing: {out_path}")
 
     (project_dir / "stl").mkdir(exist_ok=True)
     (project_dir / "cases").mkdir(exist_ok=True)
 
-    print(f"\n  ✓ Created: {out_path}")
     print(f"  ✓ Created: stl/ and cases/")
     print(f"\n  Next steps:")
     print(f"    1. Place STL files in stl/")
@@ -103,6 +106,8 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
     from cfd_gen.geometry import (
         compute_domain_box,
         compute_mesh_params,
+        face_assignments,
+        face_role,
         turbulence_values,
         vec_str,
         velocity_vector,
@@ -113,10 +118,13 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
         sys.exit(f"ERROR: {cfg_path} not found")
 
     # Load and validate config
-    cfg = load_config(cfg_path)
+    try:
+        cfg = load_config(cfg_path)
+    except (OSError, ValueError) as exc:
+        sys.exit(f"ERROR: {exc}")
     
     # Load raw config to correctly handle user overrides
-    with open(cfg_path) as f:
+    with open(cfg_path, encoding="utf-8") as f:
         raw_user = json.load(f)
     raw_overrides = raw_user.get("overrides", {})
     
@@ -139,22 +147,26 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
 
     # Resolve STL names (strip extensions for OpenFOAM patch names)
     stl_dir = project_dir / cfg["stl_dir"]
-    stl_names: list[str] = []
-    stl_paths: list[Path] = []
+    stl_pairs: list[tuple[str, Path]] = []
     for name in cfg["stl_files"]:
         stem = name.rsplit(".", 1)[0] if "." in name else name
-        stl_names.append(stem)
         path = find_stl(stl_dir, name)
-        if path:
-            stl_paths.append(path)
+        if path is None:
+            sys.exit(f"ERROR: STL disappeared before generation: {name}")
+        stl_pairs.append((stem, path))
 
+    stl_names = [stem for stem, _ in stl_pairs]
     cfg["stl_names"] = stl_names
+    cfg["domain_faces"] = face_assignments(cfg)
 
     # Compute combined STL bounds
     all_min = [float("inf")] * 3
     all_max = [float("-inf")] * 3
-    for path in stl_paths:
-        smin, smax = stl_bounds(path)
+    for _, path in stl_pairs:
+        try:
+            smin, smax = stl_bounds(path)
+        except (OSError, ValueError) as exc:
+            sys.exit(f"ERROR: {exc}")
         for i in range(3):
             all_min[i] = min(all_min[i], smin[i])
             all_max[i] = max(all_max[i], smax[i])
@@ -167,10 +179,12 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
     # Auto-compute domain box if requested or missing
     if cfg.get("domain_box") in ("auto", None) or not isinstance(cfg.get("domain_box"), dict):
         cfg["domain_box"] = compute_domain_box(cfg, combined_bounds)
+    if any(lo >= hi for lo, hi in zip(cfg["domain_box"]["min"], cfg["domain_box"]["max"])):
+        sys.exit("ERROR: Derived domain has nonpositive dimensions; check ground and symmetry planes")
 
     # Check STL clearance relative to domain boundaries
     box = cfg["domain_box"]
-    domain_faces = cfg.get("domain_faces", {})
+    domain_faces = {d: face_role(cfg, p) for d, p in cfg["domain_faces"].items()}
     axis_labels = ["x", "y", "z"]
     for i in range(3):
         clearance_min = all_min[i] - box["min"][i]
@@ -229,7 +243,7 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
         cfg["snap"]["nFeatureSnapIter"] = preset.get("nFeatureSnapIter", 15)
         
     # Only apply preset SLURM time if user left it as default 'auto'
-    if cfg["slurm"]["time"] in ("auto", "04:00:00"):
+    if cfg["slurm"]["time"] == "auto":
         cfg["slurm"]["time"] = preset.get("slurm_time", "04:00:00")
 
     # Derived values for display
@@ -258,9 +272,10 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
 
     div_u_scheme = cfg.get("schemes", {}).get("div_U", "bounded Gauss limitedLinear 1")
 
+    case_dir = project_dir / cfg["case_dir"] / cfg["case_name"]
     # Dry run — stop here
     if dry_run:
-        print(f"\n  DRY RUN — would generate: cases/{cfg['case_name']}/")
+        print(f"\n  DRY RUN — would generate: {case_dir}")
         print(f"    Velocity:   {cfg['flow']['velocity']:.2f} m/s  U={vec_str(vel)}")
         print(f"    k={k:.5g}  ω={omega:.5g}  νt={nut:.5g}")
         print(f"    Surfaces:   {', '.join(stl_names)}")
@@ -268,9 +283,8 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
         return
 
     # Generate case
-    case_dir = project_dir / "cases" / cfg["case_name"]
     print(f"\n{'='*60}")
-    print(f"  Generating: cases/{cfg['case_name']}/")
+    print(f"  Generating: {case_dir}")
     print(f"  Velocity: {cfg['flow']['velocity']:.2f} m/s | Cell: {mesh['base_cell_size']} m")
     print(f"  Surfaces: {', '.join(stl_names)}")
     print(f"  Pipeline: potentialFoam → simpleFoam ({end_time} iters, {div_u_scheme})")
@@ -283,7 +297,7 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
     # Copy STL files
     print(f"\n  STL files:")
     tri_dir = case_dir / "constant" / "triSurface"
-    for stem, path in zip(stl_names, stl_paths):
+    for stem, path in stl_pairs:
         try:
             n_tri = copy_stl(path, tri_dir / f"{stem}.stl", stem)
             print(f"    ✓ {stem} ({n_tri:,} triangles)")
@@ -327,8 +341,8 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
     # Save config snapshot (for post-processing)
     (case_dir / "case_config.json").write_text(json.dumps(cfg, indent=2) + "\n")
 
-    print(f"\n  ✓ Case: cases/{cfg['case_name']}/")
-    print(f"    cd cases/{cfg['case_name']} && ./Allrun.parallel")
+    print(f"\n  ✓ Case: {case_dir}")
+    print(f'    cd "{case_dir}" && ./Allrun.parallel')
     print()
 
 

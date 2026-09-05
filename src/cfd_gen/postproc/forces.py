@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import math
+import re
 import statistics
 from pathlib import Path
 from typing import Any
@@ -78,7 +80,8 @@ def is_symmetry_case(config_path: str | None = None, case_dir: str | Path | None
 
     if cfg:
         faces = cfg.get("domain_faces", {})
-        if any("symmetry" in str(v).lower() for v in faces.values()):
+        symmetry_name = cfg.get("patches", {}).get("symmetry", "symmetry")
+        if any(v == symmetry_name or "symmetry" in str(v).lower() for v in faces.values()):
             return True
 
     # Fallback: check constant/polyMesh/boundary
@@ -86,7 +89,7 @@ def is_symmetry_case(config_path: str | None = None, case_dir: str | Path | None
     if boundary_file.exists():
         try:
             content = boundary_file.read_text(errors="replace")
-            if "type            symmetry;" in content or "type symmetry;" in content:
+            if re.search(r"\btype\s+symmetry(?:Plane)?\s*;", content):
                 return True
         except Exception:
             pass
@@ -126,7 +129,8 @@ def find_force_files(base_dir: str | Path | None = None) -> list[Path]:
                     f = d / "force.dat"
                     if f.exists():
                         all_files.append(f)
-                break
+                if all_files:
+                    break
 
     return all_files
 
@@ -147,13 +151,13 @@ def read_forces(
     Returns:
         (times, drags, downforces)
     """
-    times, drags, downforces = [], [], []
-    seen: set[float] = set()
+    samples: dict[float, tuple[float, float, float]] = {}
 
     if not isinstance(files, (list, tuple)):
         files = [files]
 
     for path in files:
+        segment_started = False
         try:
             with open(path) as f:
                 for line in f:
@@ -163,25 +167,29 @@ def read_forces(
                     parts = line.replace("(", "").replace(")", "").split()
                     if len(parts) < 10:
                         continue
-                    t = float(parts[0])
-                    t_key = round(t, 8)
-                    if t_key in seen:
+                    try:
+                        values = [float(v) for v in parts[:10]]
+                    except ValueError:
                         continue
-                    seen.add(t_key)
-                    total = [float(parts[1]), float(parts[2]), float(parts[3])]
-                    times.append(t)
-                    drags.append(total[drag_idx] * drag_sign)
-                    downforces.append(total[df_idx] * df_sign)
-        except (OSError, ValueError):
+                    if not all(math.isfinite(v) for v in values):
+                        continue
+                    t = values[0]
+                    if not segment_started:
+                        # A restarted run supersedes the old trajectory from here,
+                        # including old future samples it has not reached yet.
+                        samples = {key: sample for key, sample in samples.items() if sample[0] < t}
+                        segment_started = True
+                    # Files arrive in restart order; newer valid rows replace overlaps.
+                    samples[round(t, 8)] = (
+                        t, values[1 + drag_idx] * drag_sign,
+                        values[1 + df_idx] * df_sign,
+                    )
+        except OSError:
             pass
 
-    if times:
-        combined = sorted(zip(times, drags, downforces))
-        times = [c[0] for c in combined]
-        drags = [c[1] for c in combined]
-        downforces = [c[2] for c in combined]
-
-    return times, drags, downforces
+    combined = sorted(samples.values())
+    return ([c[0] for c in combined], [c[1] for c in combined],
+            [c[2] for c in combined])
 
 
 # ============================================================
@@ -201,6 +209,10 @@ def check_convergence(
 
     Threshold is 0.5% over 200 iterations — reliable for external aero.
     """
+    if window < 2 or threshold <= 0 or not math.isfinite(threshold):
+        raise ValueError("window must be >= 2 and threshold must be finite and > 0")
+    if len(drags) != len(downforces):
+        raise ValueError("Drag and downforce histories must have equal lengths")
     if len(drags) < window:
         window = len(drags)
     if window < 20:
@@ -208,6 +220,8 @@ def check_convergence(
 
     d_win = drags[-window:]
     f_win = downforces[-window:]
+    if not all(math.isfinite(v) for v in d_win + f_win):
+        return False, 100.0, 100.0, 0.0, 0.0
     d_avg = statistics.mean(d_win)
     f_avg = statistics.mean(f_win)
     d_std = statistics.stdev(d_win)

@@ -24,6 +24,8 @@ AXIS_MAP: dict[str, tuple[int, int, int]] = {
 
 def parse_axis(s: str) -> tuple[int, int, int]:
     """Parse axis string to unit vector tuple."""
+    if not isinstance(s, str):
+        raise ValueError("Axis must be a string: +x, -x, +y, -y, +z, -z")
     s = s.strip().lower()
     if s not in AXIS_MAP:
         raise ValueError(f"Invalid axis '{s}'. Use: +x, -x, +y, -y, +z, -z")
@@ -88,6 +90,31 @@ def turbulence_values(cfg: dict[str, Any]) -> tuple[float, float, float]:
     return k, omega, nut
 
 
+def face_role(cfg: dict[str, Any], patch_name: str) -> str:
+    """Resolve a patch name to its configured boundary role."""
+    for role, name in cfg["patches"].items():
+        if patch_name == name:
+            return role
+    return {"farField": "walls"}.get(patch_name, patch_name)
+
+
+def face_assignments(cfg: dict[str, Any]) -> dict[str, str]:
+    """Resolve the six faces once for domain sizing and every writer."""
+    patches = cfg["patches"]
+    if "domain_faces" in cfg:
+        return {direction: patches.get(face_role(cfg, name), name)
+                for direction, name in cfg["domain_faces"].items()}
+    flow_idx, flow_sign = flow_axis_index_sign(cfg)
+    up_idx = up_axis_index(cfg)
+    lateral_idx = next(i for i in range(3) if i not in (flow_idx, up_idx))
+    faces = {sign + axis: patches["walls"] for axis in "xyz" for sign in "-+"}
+    faces[("-" if flow_sign > 0 else "+") + "xyz"[flow_idx]] = patches["inlet"]
+    faces[("+" if flow_sign > 0 else "-") + "xyz"[flow_idx]] = patches["outlet"]
+    faces["-" + "xyz"[up_idx]] = patches["ground"]
+    faces["-" + "xyz"[lateral_idx]] = patches["symmetry"]
+    return faces
+
+
 # ============================================================
 # DOMAIN SIZING — Geometry-derived, generous padding
 # ============================================================
@@ -140,7 +167,7 @@ def compute_domain_box(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str, 
 
     # Up axis: ground plane for vehicles, or open air padding for airplanes/free-flight
     up_extent = max(extents[up_idx], 0.1)
-    domain_faces = cfg.get("domain_faces", {})
+    domain_faces = {d: face_role(cfg, name) for d, name in face_assignments(cfg).items()}
     up_min_key = f"-{'xyz'[up_idx]}"
     is_ground = "ground" in domain_faces.get(up_min_key, "").lower()
 
@@ -180,6 +207,19 @@ def compute_domain_box(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str, 
     else:
         dmin[lateral_idx] = smin[lateral_idx] - lat_extent * lateral
         dmax[lateral_idx] = smax[lateral_idx] + lat_extent * lateral
+
+    # The positive-face variants retain the half-model on the opposite side.
+    if domain_faces.get(f"+{'xyz'[up_idx]}") == "ground":
+        dmin[up_idx] = smin[up_idx] - up_extent * top
+        dmax[up_idx] = (float(ground_coord) if ground_coord is not None else
+                       smax[up_idx] + float(cfg.get("ground_clearance") or 0))
+    if domain_faces.get(f"+{'xyz'[lateral_idx]}") == "symmetry":
+        edge = smax[lateral_idx]
+        plane = (float(sym_coord) if sym_coord is not None else
+                 0.0 if abs(edge) < 0.05 else edge)
+        width = max(0.1, plane - smin[lateral_idx]) if sym_coord is not None else lat_extent
+        dmax[lateral_idx] = plane
+        dmin[lateral_idx] = smin[lateral_idx] - width * lateral
 
     return {
         "min": [round(v, 4) for v in dmin],
@@ -280,8 +320,8 @@ FIDELITY_PRESETS: dict[str, dict[str, Any]] = {
 def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str, Any]:
     """Derive all mesh parameters from geometry bounds.
 
-    Philosophy: relative sizing for everything. No absolute cell sizes.
-    The mesh adapts to whatever geometry you throw at it.
+    Domain and wake dimensions follow geometry bounds. Cell sizes and distance
+    shells use metre-valued fidelity presets unless explicitly overridden.
 
     Refinement strategy:
         - Distance-based shells around the STL surface.
@@ -342,7 +382,7 @@ def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str,
     lateral_idx = next(i for i in range(3) if i != flow_idx and i != up_idx)
 
     # Vertical alignment (ground for vehicles, or symmetric padding for airplanes)
-    domain_faces = cfg.get("domain_faces", {})
+    domain_faces = {d: face_role(cfg, name) for d, name in face_assignments(cfg).items()}
     up_min_key = f"-{'xyz'[up_idx]}"
     is_ground = "ground" in domain_faces.get(up_min_key, "").lower()
 
@@ -421,6 +461,16 @@ def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str,
         far_min[flow_idx] = smin[flow_idx] - far_length
         far_max[flow_idx] = smin[flow_idx]
 
+    domain_box = cfg.get("domain_box")
+    if not isinstance(domain_box, dict):
+        domain_box = compute_domain_box(cfg, combined_bounds)
+    if domain_faces.get(f"+{'xyz'[up_idx]}") == "ground":
+        for upper in (near_max, far_max):
+            upper[up_idx] = domain_box["max"][up_idx] + 0.01
+    if domain_faces.get(f"+{'xyz'[lateral_idx]}") == "symmetry":
+        for upper in (near_max, far_max):
+            upper[lateral_idx] = domain_box["max"][lateral_idx]
+
     default_regions = [
         {"name": "nearWakeBox", "min": [round(v, 4) for v in near_min],
          "max": [round(v, 4) for v in near_max], "level": near_wake_level},
@@ -430,7 +480,7 @@ def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str,
 
     refinement_regions = user_mesh.get("refinement_regions", default_regions)
 
-    return {
+    result = {
         "base_cell_size": round(base_cell, 4),
         "surface_level": surface_level,
         "edge_level": edge_level,
@@ -443,5 +493,9 @@ def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str,
         "resolveFeatureAngle": resolve_feature_angle,
         "allowFreeStandingZoneFaces": user_mesh.get("allowFreeStandingZoneFaces", True),
     }
+    for key in ("location_in_mesh", "locationInMesh", "maxLoadUnbalance"):
+        if key in user_mesh:
+            result[key] = user_mesh[key]
+    return result
 
 

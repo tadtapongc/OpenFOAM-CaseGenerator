@@ -4,18 +4,19 @@ from __future__ import annotations
 
 import statistics
 import sys
+from pathlib import Path
 from typing import Any
 
 
 def _force_stats(values: list[float], window: int = 200) -> dict[str, float]:
     """Compute stats over the last `window` values."""
-    if len(values) < 10:
-        return {"avg": 0, "std": 0, "pct": 0, "min": 0, "max": 0, "last": 0}
+    if not values:
+        return {"avg": 0, "std": 0, "pct": float("inf"), "min": 0, "max": 0, "last": 0}
     w = min(window, len(values))
     win = values[-w:]
     avg = statistics.mean(win)
     std = statistics.stdev(win) if w > 1 else 0
-    pct = (std / abs(avg) * 100) if avg != 0 else 0
+    pct = (std / abs(avg) * 100) if avg != 0 and w >= 20 else float("inf")
     return {
         "avg": avg,
         "std": std,
@@ -197,7 +198,8 @@ def live_monitor(
             ax.set_xlabel("Iteration")
             ax.grid(True, alpha=0.3)
 
-            conv_str = "✓ CONVERGED" if stats["pct"] < 0.5 else f"±{stats['pct']:.2f}%"
+            conv_str = ("Waiting for 20 samples" if len(drags) < 20 else
+                        "✓ CONVERGED" if stats["pct"] < 0.5 else f"±{stats['pct']:.2f}%")
             ax.set_title(
                 f"Drag ({drag_axis})  |  Avg: {stats['avg']:.2f} N  |  Var: {conv_str}  |  "
                 f"Range: [{stats['min']:.2f}, {stats['max']:.2f}]  |  {len(times)} iters",
@@ -238,7 +240,8 @@ def live_monitor(
 
             # Stats in title
             ld = abs(stats["avg"] / d_stats["avg"]) if d_stats["avg"] != 0 else 0
-            conv_str = "✓ CONVERGED" if stats["pct"] < 0.5 else f"±{stats['pct']:.2f}%"
+            conv_str = ("Waiting for 20 samples" if len(dfs) < 20 else
+                        "✓ CONVERGED" if stats["pct"] < 0.5 else f"±{stats['pct']:.2f}%")
             ax.set_title(
                 f"Downforce ({df_axis})  |  Avg: {stats['avg']:.2f} N  |  Var: {conv_str}  |  "
                 f"L/D: {ld:.2f}  |  {len(times)} iters",

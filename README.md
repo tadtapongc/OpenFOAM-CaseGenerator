@@ -163,7 +163,7 @@ Example force report with automatic symmetry detection:
 | `symmetry_plane` | float | *optional* | Centerline coordinate if vehicle symmetry is not at 0.0 (e.g. `-0.1185`) |
 | `ground_clearance` | float | *optional* | Gap in meters below lowest STL point (e.g. `0.035` for 35 mm front wing ride height) |
 | `ground_plane` | float | *optional* | Fixed absolute coordinate of ground plane (e.g. `0.0` or `-0.050`) |
-| `parallel.n_procs` | integer | `32` | Number of CPU cores for MPI decomposition |
+| `parallel.n_procs` | integer | `10` | Number of CPU cores for MPI decomposition; the supplied main config selects 32 |
 
 ### Ground Level & Ride Height Sweeps (Optional)
 
@@ -177,7 +177,7 @@ Adjust the road position relative to the geometry for full-car simulations, fron
   ```json
   "ground_plane": 0.0         // Road plane fixed at y = 0.0
   ```
-*(If omitted or set to `0.0`, the ground plane automatically snaps to the lowest point of the vehicle).*
+*(If omitted, the ground plane snaps to the lowest point of the vehicle unless `ground_clearance` is supplied. An explicit `ground_plane: 0.0` places the road at absolute zero.)*
 
 ### Aircraft & Free-Flight Simulation (Optional)
 
@@ -294,3 +294,12 @@ OpenFOAM-CaseGenerator/
   - OpenFOAM `surfaceFeatureExtract` and `snappyHexMesh` require ASCII STL format. If your CAD exports binary STL, save or export as ASCII (e.g. in SolidWorks: *Save As $\rightarrow$ STL $\rightarrow$ Options $\rightarrow$ ASCII*).
 - **Cluster Scratch Directory (`$TMPDIR`)**:
   - The generated `run.sh` runs inside node local scratch (`$TMPDIR`) on HPC clusters, syncing forces and logs back to the case folder every 15 seconds. This eliminates network filesystem (NFS/Lustre) bottlenecks. Set `"use_tmpdir": false` in `config.json` if running directly in-place.
+  - Solver failures return a nonzero exit status after recovery. If reconstruction or copying results fails, the script preserves recovery data and reports its location; scratch runs retain `.running_location` for recovery.
+
+Regenerating an existing case updates its input files and `0.orig`, while retaining previous results. Run `./Allclean` before a fresh simulation, or use a new `case_name` to retain the previous run separately. `--init` preserves an existing `configs/example.json`.
+
+Regression checks use only Python's standard library:
+```bash
+python -m unittest discover -s tests -v
+```
+On Linux, this also executes the generated scripts with fake solver commands in temporary directories, testing failure recovery without running CFD. Those shell checks are skipped on Windows.

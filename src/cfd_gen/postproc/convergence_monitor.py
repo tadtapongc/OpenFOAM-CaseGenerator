@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 import time
 from pathlib import Path
@@ -77,7 +78,13 @@ def monitor(
     else:
         case_dir = Path(case_dir)
 
-    drag_idx, drag_sign, df_idx, df_sign, drag_axis, df_axis = load_axis_config(config_path)
+    if interval <= 0 or not math.isfinite(interval) or min_iters < 1 or window < 2:
+        raise ValueError("interval must be finite and > 0, min_iters >= 1, and window >= 2")
+    if threshold <= 0 or not math.isfinite(threshold):
+        raise ValueError("threshold must be finite and > 0")
+    drag_idx, drag_sign, df_idx, df_sign, drag_axis, df_axis = load_axis_config(
+        config_path, case_dir=case_dir
+    )
 
     print(f"  Convergence monitor started")
     print(f"    Threshold: ±{threshold}% | Window: {window} iters | Min: {min_iters} iters")

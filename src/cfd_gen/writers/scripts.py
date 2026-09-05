@@ -5,16 +5,31 @@ Generates: Allrun.parallel, Allrun, Allclean, run.sh (SLURM), convergence_monito
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 from typing import Any
 
 from cfd_gen.geometry import parse_axis
 
+MONITOR_CLEANUP = """\
+stop_monitor() {
+    if [ -n "${MONITOR_PID:-}" ]; then
+        kill "$MONITOR_PID" 2>/dev/null || true
+        wait "$MONITOR_PID" 2>/dev/null || true
+        MONITOR_PID=
+    fi
+}
+trap stop_monitor EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+"""
+
 
 def _write_script(path: Path, content: str) -> None:
     """Write script file with executable permission."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+    with path.open("w", encoding="utf-8", newline="\n") as stream:
+        stream.write(content)
     path.chmod(0o755)
 
 
@@ -33,6 +48,14 @@ def _convergence_monitor_script(cfg: dict[str, Any]) -> str:
     df_idx = next(i for i, v in enumerate(df_vec) if v != 0)
     df_sign = int(df_vec[df_idx])
 
+    # Embed the same maintained readers used by the CLI, without a runtime
+    # package dependency on the cluster.
+    from cfd_gen.postproc import forces
+    force_helpers = "\n\n".join(inspect.getsource(func) for func in (
+        forces._dir_time, forces.find_force_files, forces.read_forces,
+        forces.check_convergence,
+    ))
+
     return f'''\
 #!/usr/bin/env python3
 """Auto-stop monitor: stops simpleFoam when forces converge.
@@ -42,7 +65,9 @@ variation drop below THRESHOLD over the last WINDOW iterations,
 modifies controlDict to set stopAt=writeNow for a clean exit.
 """
 
-import os
+from __future__ import annotations
+
+import math
 import statistics
 import sys
 import time
@@ -59,75 +84,7 @@ MIN_ITERS = 300     # minimum before checking
 INTERVAL = 10       # seconds between checks
 
 
-def find_force_files():
-    """Find force.dat files."""
-    files = []
-    forces_dir = Path("postProcessing/forces")
-    if forces_dir.exists():
-        for d in sorted(forces_dir.iterdir()):
-            f = d / "force.dat"
-            if f.exists():
-                files.append(f)
-    # Parallel fallback
-    if not files:
-        for proc in sorted(Path(".").glob("processor*")):
-            pf = proc / "postProcessing" / "forces"
-            if pf.exists():
-                for d in sorted(pf.iterdir()):
-                    f = d / "force.dat"
-                    if f.exists():
-                        files.append(f)
-                break
-    return files
-
-
-def read_forces(files):
-    """Parse force.dat → (times, drags, downforces)."""
-    times, drags, downforces = [], [], []
-    seen = set()
-    for path in files:
-        try:
-            with open(path) as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith("#"):
-                        continue
-                    parts = line.replace("(", "").replace(")", "").split()
-                    if len(parts) < 10:
-                        continue
-                    t = float(parts[0])
-                    t_key = round(t, 8)
-                    if t_key in seen:
-                        continue
-                    seen.add(t_key)
-                    total = [float(parts[1]), float(parts[2]), float(parts[3])]
-                    times.append(t)
-                    drags.append(total[DRAG_IDX] * DRAG_SIGN)
-                    downforces.append(total[DF_IDX] * DF_SIGN)
-        except (OSError, ValueError):
-            pass
-    if times:
-        combined = sorted(zip(times, drags, downforces))
-        times = [c[0] for c in combined]
-        drags = [c[1] for c in combined]
-        downforces = [c[2] for c in combined]
-    return times, drags, downforces
-
-
-def check_convergence(drags, downforces):
-    """Check if forces are converged. Returns (converged, d_pct, f_pct, d_avg, f_avg)."""
-    window = min(WINDOW, len(drags))
-    if window < 20:
-        return False, 100.0, 100.0, 0.0, 0.0
-    d_win = drags[-window:]
-    f_win = downforces[-window:]
-    d_avg = statistics.mean(d_win)
-    f_avg = statistics.mean(f_win)
-    d_std = statistics.stdev(d_win)
-    f_std = statistics.stdev(f_win)
-    d_pct = (d_std / abs(d_avg) * 100) if d_avg != 0 else 100.0
-    f_pct = (f_std / abs(f_avg) * 100) if f_avg != 0 else 100.0
-    return (d_pct < THRESHOLD and f_pct < THRESHOLD), d_pct, f_pct, d_avg, f_avg
+{force_helpers}
 
 
 def trigger_stop():
@@ -157,11 +114,13 @@ def main():
         if not files:
             continue
 
-        times, drags, downforces = read_forces(files)
+        times, drags, downforces = read_forces(files, DRAG_IDX, DRAG_SIGN, DF_IDX, DF_SIGN)
         if len(times) < MIN_ITERS:
             continue
 
-        converged, d_pct, f_pct, d_avg, f_avg = check_convergence(drags, downforces)
+        converged, d_pct, f_pct, d_avg, f_avg = check_convergence(
+            drags, downforces, window=WINDOW, threshold=THRESHOLD
+        )
 
         n = len(times)
         status = "OK" if converged else ".."
@@ -224,8 +183,9 @@ def write_scripts(cfg: dict[str, Any], case_dir: Path) -> None:
 set -e
 cd "${{0%/*}}" || exit
 . ${{WM_PROJECT_DIR:?}}/bin/tools/RunFunctions
+{MONITOR_CLEANUP}
 
-echo "Case: $(basename $(pwd)) | Cores: {n} | Iters: {end_time}"
+echo "Case: $(basename "$PWD") | Cores: {n} | Iters: {end_time}"
 
 # Restore stopAt in case convergence monitor changed it on a previous run
 if [ -f system/controlDict ]; then
@@ -250,17 +210,22 @@ runParallel -s potential potentialFoam -noFunctionObjects || true
 python3 ./convergence_monitor.py > log.convergenceMonitor 2>&1 &
 MONITOR_PID=$!
 
-runParallel simpleFoam || true
+SOLVER_STATUS=0
+runParallel simpleFoam || SOLVER_STATUS=$?
 
 # Stop monitor if still running
-kill $MONITOR_PID 2>/dev/null || true
-wait $MONITOR_PID 2>/dev/null || true
+stop_monitor
 
 # Always reconstruct (even if solver was interrupted)
-runApplication reconstructPar
-rm -rf processor*
+if runApplication reconstructPar; then
+    rm -rf processor*
+else
+    echo "Reconstruction failed; processor results have been preserved." >&2
+    [ "$SOLVER_STATUS" -ne 0 ] || SOLVER_STATUS=1
+fi
 
-echo "Done. Results in $(pwd)"
+[ "$SOLVER_STATUS" -ne 0 ] || echo "Done. Results in $(pwd)"
+exit "$SOLVER_STATUS"
 """)
 
     # ---- Allrun (serial) ----
@@ -269,6 +234,7 @@ echo "Done. Results in $(pwd)"
 set -e
 cd "${{0%/*}}" || exit
 . ${{WM_PROJECT_DIR:?}}/bin/tools/RunFunctions
+{MONITOR_CLEANUP}
 
 # Restore stopAt in case convergence monitor changed it on a previous run
 if [ -f system/controlDict ]; then
@@ -286,12 +252,13 @@ runApplication potentialFoam -noFunctionObjects || true
 python3 ./convergence_monitor.py > log.convergenceMonitor 2>&1 &
 MONITOR_PID=$!
 
-runApplication simpleFoam || true
+SOLVER_STATUS=0
+runApplication simpleFoam || SOLVER_STATUS=$?
 
-kill $MONITOR_PID 2>/dev/null || true
-wait $MONITOR_PID 2>/dev/null || true
+stop_monitor
 
-echo "Done."
+[ "$SOLVER_STATUS" -ne 0 ] || echo "Done."
+exit "$SOLVER_STATUS"
 """)
 
     # ---- Allclean ----
@@ -328,6 +295,9 @@ fi
     if use_tmpdir:
         dir_setup_and_cleanup = f"""\
 ORIG_DIR=$PWD
+SOLVER_PHASE=0
+RECONSTRUCTION_ATTEMPTED=0
+PRESERVE_PROCESSORS=0
 
 # Robustly create a temporary directory prioritizing $TMPDIR (Cluster scratch space), then /dev/shm, then /tmp
 if [ -n "$TMPDIR" ] && [ -w "$TMPDIR" ]; then
@@ -340,14 +310,14 @@ fi
 
 echo ">>> Setting up local execution in $RAM_DIR"
 echo "$RAM_DIR on $(hostname)" > "$ORIG_DIR/.running_location"
-echo ">>> Copying case to $RAM_DIR"
-rsync -a "$ORIG_DIR/" "$RAM_DIR/"
-cd "$RAM_DIR"
 
 # Background sync loop to keep ORIG_DIR updated with forces, residuals, and logs in real-time
 sync_progress() {{
+    trap 'kill "${{SLEEP_PID:-}}" 2>/dev/null || true; exit 0' TERM INT
     while true; do
-        sleep {sync_interval}
+        sleep {sync_interval} &
+        SLEEP_PID=$!
+        wait "$SLEEP_PID" || true
         rsync -a --include="*/" \\
                  --include="postProcessing/**" \\
                  --include="processor*/postProcessing/**" \\
@@ -356,48 +326,78 @@ sync_progress() {{
                  "$RAM_DIR/" "$ORIG_DIR/" 2>/dev/null || true
     done
 }}
-sync_progress &
-SYNC_PID=$!
-
 # Ensure results are copied back when script exits or is interrupted
 cleanup() {{
+    STATUS=$?
+    trap - EXIT
+    stop_monitor
     echo ">>> Job exiting. Syncing results..."
     if [ -n "${{SYNC_PID:-}}" ]; then
-        kill $SYNC_PID 2>/dev/null || true
-        wait $SYNC_PID 2>/dev/null || true
+        kill "$SYNC_PID" 2>/dev/null || true
+        wait "$SYNC_PID" 2>/dev/null || true
     fi
-    if ls -d processor* > /dev/null 2>&1; then
+    if [ "$SOLVER_PHASE" -eq 1 ] && [ "$RECONSTRUCTION_ATTEMPTED" -eq 0 ] && ls -d processor* > /dev/null 2>&1; then
         echo ">>> Interrupted! Attempting to reconstruct latest time..."
-        reconstructPar -latestTime > log.reconstructPar_cleanup 2>&1 || true
-        rm -rf processor*
+        if reconstructPar -latestTime > log.reconstructPar_cleanup 2>&1; then
+            rm -rf processor*
+        else
+            echo ">>> Reconstruction failed; preserving processor results." >&2
+            PRESERVE_PROCESSORS=1
+            [ "$STATUS" -ne 0 ] || STATUS=1
+        fi
     fi
     echo ">>> Copying results back to network filesystem"
-    rsync -a "$RAM_DIR/" "$ORIG_DIR/"
-    echo ">>> Cleaning up RAM disk"
-    cd "$ORIG_DIR"
-    rm -rf "$RAM_DIR"
-    rm -f "$ORIG_DIR/.running_location"
+    if ! rsync -a "$RAM_DIR/" "$ORIG_DIR/"; then
+        echo ">>> Copy failed; results remain in $RAM_DIR" >&2
+        PRESERVE_PROCESSORS=1
+        [ "$STATUS" -ne 0 ] || STATUS=1
+    fi
+    if [ "$PRESERVE_PROCESSORS" -eq 0 ]; then
+        cd "$ORIG_DIR"
+        rm -rf "$RAM_DIR"
+        rm -f "$ORIG_DIR/.running_location"
+    else
+        echo ">>> Recovery data retained in $RAM_DIR (see .running_location)" >&2
+    fi
     echo "=============================================="
     echo "Job finished at $(date)"
     echo "=============================================="
+    exit "$STATUS"
 }}
-trap cleanup EXIT"""
+trap cleanup EXIT
+echo ">>> Copying case to $RAM_DIR"
+rsync -a "$ORIG_DIR/" "$RAM_DIR/"
+cd "$RAM_DIR"
+sync_progress &
+SYNC_PID=$!
+"""
     else:
         dir_setup_and_cleanup = """\
 ORIG_DIR=$PWD
+SOLVER_PHASE=0
+RECONSTRUCTION_ATTEMPTED=0
+PRESERVE_PROCESSORS=0
 cd "$ORIG_DIR"
 
 # Ensure interrupted parallel runs attempt reconstruction
 cleanup() {
+    STATUS=$?
+    trap - EXIT
+    stop_monitor
     echo ">>> Job exiting..."
-    if ls -d processor* > /dev/null 2>&1; then
+    if [ "$SOLVER_PHASE" -eq 1 ] && [ "$RECONSTRUCTION_ATTEMPTED" -eq 0 ] && ls -d processor* > /dev/null 2>&1; then
         echo ">>> Interrupted! Attempting to reconstruct latest time..."
-        reconstructPar -latestTime > log.reconstructPar_cleanup 2>&1 || true
-        rm -rf processor*
+        if reconstructPar -latestTime > log.reconstructPar_cleanup 2>&1; then
+            rm -rf processor*
+        else
+            echo ">>> Reconstruction failed; preserving processor results." >&2
+            [ "$STATUS" -ne 0 ] || STATUS=1
+        fi
     fi
     echo "=============================================="
     echo "Job finished at $(date)"
     echo "=============================================="
+    exit "$STATUS"
 }
 trap cleanup EXIT"""
 
@@ -431,6 +431,7 @@ if [ -n "${{FOAM_INST_DIR:-}}" ]; then
 fi
 
 set -e
+{MONITOR_CLEANUP}
 
 {dir_setup_and_cleanup}
 
@@ -463,6 +464,7 @@ echo ">>> Renumbering mesh"
 renumberMesh -overwrite -noFunctionObjects > log.renumberMesh 2>&1
 
 # ======================== SOLVE ========================
+SOLVER_PHASE=1
 echo ">>> Decomposing for solver"
 decomposePar > log.decomposePar.solver 2>&1
 
@@ -474,13 +476,20 @@ python3 ./convergence_monitor.py > log.convergenceMonitor 2>&1 &
 MONITOR_PID=$!
 
 echo ">>> Running simpleFoam"
-mpirun -np $SLURM_NTASKS simpleFoam -parallel > log.simpleFoam 2>&1 || true
+SOLVER_STATUS=0
+mpirun -np $SLURM_NTASKS simpleFoam -parallel > log.simpleFoam 2>&1 || SOLVER_STATUS=$?
 
 # Stop monitor
-kill $MONITOR_PID 2>/dev/null || true
-wait $MONITOR_PID 2>/dev/null || true
+stop_monitor
 
 echo ">>> Reconstructing results"
-reconstructPar > log.reconstructPar 2>&1
-rm -rf processor*
+RECONSTRUCTION_ATTEMPTED=1
+if reconstructPar > log.reconstructPar 2>&1; then
+    rm -rf processor*
+else
+    echo ">>> Reconstruction failed; preserving processor results." >&2
+    PRESERVE_PROCESSORS=1
+    [ "$SOLVER_STATUS" -ne 0 ] || SOLVER_STATUS=1
+fi
+exit "$SOLVER_STATUS"
 """)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run force post-processing without installing. Usage: python3 run_forces.py [--live|--plot|--compare]"""
+"""Run force post-processing without installing. Usage: python3 read_forces.py [--live|--plot|--compare]"""
 
 import sys
 from pathlib import Path
