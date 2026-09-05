@@ -400,13 +400,8 @@ def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str,
     else:
         sym_x = smin[lateral_idx]
 
-    # --- 1. Near Wake Box (High-resolution: rear wing, diffuser, tire separation) ---
-    near_pad_lat = max(0.10, extents[lateral_idx] * 0.15)
-    near_pad_top = max(0.15, extents[up_idx] * 0.25)
-    near_length = max(2.0, extents[flow_idx] * 1.2)
-
-    near_min = list(smin)
-    near_max = list(smax)
+    # Precompute ground coordinate once if ground plane is present
+    ground_z: float | None = None
     if is_ground:
         if "ground_plane" in cfg and cfg["ground_plane"] is not None:
             ground_z = float(cfg["ground_plane"]) - 0.01
@@ -416,6 +411,16 @@ def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str,
             ground_z = cfg["domain_box"]["min"][up_idx] - 0.01
         else:
             ground_z = smin[up_idx] - 0.01
+
+    # --- 1. Near Wake Box (High-resolution: rear wing, diffuser, tire separation) ---
+    near_pad_lat = max(0.10, extents[lateral_idx] * 0.15)
+    near_pad_top = max(0.15, extents[up_idx] * 0.25)
+    near_length = max(2.0, extents[flow_idx] * 1.2)
+
+    near_min = list(smin)
+    near_max = list(smax)
+    if is_ground:
+        assert ground_z is not None
         near_min[up_idx] = ground_z
     else:
         near_min[up_idx] = smin[up_idx] - near_pad_top
@@ -443,6 +448,7 @@ def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str,
     far_min = list(smin)
     far_max = list(smax)
     if is_ground:
+        assert ground_z is not None
         far_min[up_idx] = ground_z
     else:
         far_min[up_idx] = smin[up_idx] - far_pad_top

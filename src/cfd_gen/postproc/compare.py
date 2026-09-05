@@ -10,6 +10,7 @@ from cfd_gen.postproc.forces import (
     axis_index_sign,
     check_convergence,
     find_force_files,
+    is_symmetry_case,
     read_forces,
 )
 
@@ -62,7 +63,6 @@ def compare_cases(cases_dir: Path | None = None) -> None:
         conv, dp, fp, da, fa = check_convergence(drags, dfs)
         ld = abs(fa / da) if da != 0 else 0
 
-        from cfd_gen.postproc.forces import is_symmetry_case
         is_sym = is_symmetry_case(case_dir=d)
         mult = 2.0 if is_sym else 1.0
 

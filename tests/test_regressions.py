@@ -226,6 +226,77 @@ class ProjectTest(unittest.TestCase):
             self.assertTrue(monitor(case_dir=case))
         self.assertIn("writeNow", (case / "system/controlDict").read_text())
 
+    def test_stl_utf8_encoding_and_replacement(self):
+        path = self.root / "stl/utf8_wing.stl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        content = (
+            "solid wing_α\n"
+            "  facet normal 0.0 0.0 1.0\n"
+            "    outer loop\n"
+            "      vertex 0.0 0.0 0.0\n"
+            "      vertex 1.0 0.0 0.0\n"
+            "      vertex 0.0 1.0 3.0\n"
+            "    endloop\n"
+            "  endfacet\n"
+            "endsolid wing_α\n"
+        )
+        path.write_bytes(content.encode("utf-8"))
+        from cfd_gen.stl_utils import read_stl
+        name, triangles = read_stl(path)
+        self.assertEqual(name, "wing_α")
+        self.assertEqual(len(triangles), 1)
+
+    def test_plotting_headless_manager_none(self):
+        from cfd_gen.postproc.plotting import live_monitor
+        with patch("matplotlib.pyplot.show"), patch(
+            "cfd_gen.postproc.forces.load_axis_config", return_value=(2, -1, 1, -1, "-z", "-y")
+        ):
+            with patch("matplotlib.pyplot.subplots") as mock_subplots:
+                import matplotlib.pyplot as plt
+                fig = plt.Figure()
+                fig.canvas.manager = None
+                ax = fig.add_subplot(111)
+                mock_subplots.return_value = (fig, ax)
+                with patch("matplotlib.animation.FuncAnimation"), contextlib.redirect_stdout(io.StringIO()):
+                    live_monitor(config_path=None, case_dir=self.root)
+
+    def test_cli_override_with_non_dict_section(self):
+        cfg_path = self.config(overrides={"custom_extension": "non_dict_override"})
+        with contextlib.redirect_stdout(io.StringIO()):
+            _do_generate(cfg_path, self.root)
+        self.assertTrue((self.root / "cases/test_case").exists())
+
+    def test_postproc_unification_and_shared_helpers(self):
+        from cfd_gen.postproc.forces import (
+            _dir_time as forces_dir_time,
+            AXIS_MAP as F_AXIS_MAP,
+            axis_index_sign as forces_axis_index_sign,
+        )
+        from cfd_gen.postproc.residuals import _dir_time as residuals_dir_time
+        from cfd_gen.geometry import (
+            AXIS_MAP as G_AXIS_MAP,
+            axis_index_sign as geom_axis_index_sign,
+        )
+        self.assertIs(forces_dir_time, residuals_dir_time)
+        self.assertIs(F_AXIS_MAP, G_AXIS_MAP)
+        self.assertIs(forces_axis_index_sign, geom_axis_index_sign)
+
+    def test_forces_restart_filtering_float_rounding(self):
+        f = self.root / "float_forces.dat"
+        f.write_text(
+            "0.10000000 (0 -10 -20) (0 0 0) (0 0 0)\n"
+            "0.20000000 (0 -10 -20) (0 0 0) (0 0 0)\n"
+        )
+        f_restart = self.root / "float_forces_restart.dat"
+        f_restart.write_text(
+            "0.20000000 (0 -15 -25) (0 0 0) (0 0 0)\n"
+            "0.30000000 (0 -15 -25) (0 0 0) (0 0 0)\n"
+        )
+        times, drags, dfs = read_forces([f, f_restart], 2, -1, 1, -1)
+        self.assertEqual(len(times), 3)
+        self.assertEqual(times, [0.1, 0.2, 0.3])
+        self.assertEqual(drags, [20.0, 25.0, 25.0])
+
 
 if __name__ == "__main__":
     unittest.main()

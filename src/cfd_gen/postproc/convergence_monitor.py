@@ -131,8 +131,6 @@ def monitor(
             print(f"  → Done. Solver will write current state and exit.")
             return True
 
-    return False
-
 
 def main() -> None:
     """CLI entry point for convergence monitor."""

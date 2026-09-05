@@ -74,7 +74,7 @@ def read_stl(filepath: str | Path) -> tuple[str, list[Triangle]]:
             f"  Convert to ASCII in your CAD tool (SolidWorks: Save As → STL → ASCII)."
         )
 
-    text = filepath.read_text()
+    text = filepath.read_text(encoding="utf-8", errors="replace")
 
     match = re.match(r"^\s*solid\s+(.*)", text, re.MULTILINE)
     if not match:
@@ -125,7 +125,7 @@ def write_stl(filepath: str | Path, name: str, triangles: Sequence[Triangle]) ->
     lines.append(f"endsolid {name}")
     lines.append("")
 
-    filepath.write_text("\n".join(lines))
+    filepath.write_text("\n".join(lines), encoding="utf-8")
 
 
 def stl_bounds(filepath: str | Path) -> BBox:

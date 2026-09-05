@@ -92,7 +92,8 @@ def live_monitor(
 
     fig, ax = plt.subplots(figsize=(12, 7))
     plt.subplots_adjust(bottom=0.12, top=0.90, left=0.10, right=0.95)
-    fig.canvas.manager.set_window_title("OpenFOAM Live Monitor")
+    if fig.canvas.manager is not None:
+        fig.canvas.manager.set_window_title("OpenFOAM Live Monitor")
     plt.rcParams.update({"font.size": 12})
 
     ax_prev = plt.axes([0.35, 0.02, 0.08, 0.04])
@@ -300,5 +301,5 @@ def live_monitor(
 
     update_indicator()
     _ = animation.FuncAnimation(fig, draw, interval=interval * 1000, cache_frame_data=False)
-    print(f"  Live monitor (update every {interval}s) | ← → to switch pages")
+    print(f"  Live monitor (update every {interval}s) | <- -> to switch pages")
     plt.show()

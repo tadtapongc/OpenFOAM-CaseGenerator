@@ -126,12 +126,14 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
     # Load raw config to correctly handle user overrides
     with open(cfg_path, encoding="utf-8") as f:
         raw_user = json.load(f)
-    raw_overrides = raw_user.get("overrides", {})
+    raw_overrides = raw_user.get("overrides", {}) if isinstance(raw_user, dict) else {}
     
     def _is_set(section: str, key: str) -> bool:
         """Check if user explicitly set a value in their config."""
-        if section in raw_overrides and key in raw_overrides[section]: return True
-        if section in raw_user and key in raw_user[section]: return True
+        if isinstance(raw_overrides, dict) and isinstance(raw_overrides.get(section), dict) and key in raw_overrides[section]:
+            return True
+        if isinstance(raw_user, dict) and isinstance(raw_user.get(section), dict) and key in raw_user[section]:
+            return True
         return False
 
     print(f"  Config: {cfg_path}")

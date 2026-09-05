@@ -9,24 +9,7 @@ import statistics
 from pathlib import Path
 from typing import Any
 
-# ============================================================
-# AXIS UTILITIES
-# ============================================================
-
-AXIS_MAP = {
-    "+x": (1, 0, 0), "x": (1, 0, 0), "-x": (-1, 0, 0),
-    "+y": (0, 1, 0), "y": (0, 1, 0), "-y": (0, -1, 0),
-    "+z": (0, 0, 1), "z": (0, 0, 1), "-z": (0, 0, -1),
-}
-
-
-def axis_index_sign(axis_str: str) -> tuple[int, int]:
-    """Return (index, sign) for axis string."""
-    vec = AXIS_MAP[axis_str.strip().lower()]
-    for i, v in enumerate(vec):
-        if v != 0:
-            return i, int(v)
-    return 0, 1
+from cfd_gen.geometry import AXIS_MAP, axis_index_sign
 
 
 def load_axis_config(
@@ -174,13 +157,14 @@ def read_forces(
                     if not all(math.isfinite(v) for v in values):
                         continue
                     t = values[0]
+                    t_key = round(t, 8)
                     if not segment_started:
                         # A restarted run supersedes the old trajectory from here,
                         # including old future samples it has not reached yet.
-                        samples = {key: sample for key, sample in samples.items() if sample[0] < t}
+                        samples = {key: sample for key, sample in samples.items() if key < t_key}
                         segment_started = True
                     # Files arrive in restart order; newer valid rows replace overlaps.
-                    samples[round(t, 8)] = (
+                    samples[t_key] = (
                         t, values[1 + drag_idx] * drag_sign,
                         values[1 + df_idx] * df_sign,
                     )

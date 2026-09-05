@@ -9,7 +9,12 @@ import re
 from pathlib import Path
 from typing import Any
 
-from cfd_gen.geometry import turbulence_values, vec_str, velocity_vector
+from cfd_gen.geometry import (
+    face_assignments,
+    turbulence_values,
+    vec_str,
+    velocity_vector,
+)
 from cfd_gen.writers.base import FOOTER, foam_header
 
 
@@ -53,9 +58,7 @@ def write_fields(cfg: dict[str, Any], case_dir: Path) -> None:
         ground_omega = "zeroGradient;"
         ground_nut = f"calculated;\n        value           uniform {nv};"
 
-    from cfd_gen.writers.mesh import _get_face_assignments
-    face_assignments = _get_face_assignments(cfg)
-    active_patches = set(face_assignments.values())
+    active_patches = set(face_assignments(cfg).values())
     has_ground = patches["ground"] in active_patches
     has_symmetry = patches["symmetry"] in active_patches
 

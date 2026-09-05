@@ -6,11 +6,7 @@ import math
 from pathlib import Path
 
 
-def _dir_time(p: Path) -> float:
-    try:
-        return float(p.name)
-    except ValueError:
-        return 0.0
+from cfd_gen.postproc.forces import _dir_time
 
 
 def find_residual_files(base_dir: str | Path | None = None) -> list[Path]:
