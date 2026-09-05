@@ -5,6 +5,7 @@ Generates: Allrun.parallel, Allrun, Allclean, run.sh (SLURM), convergence_monito
 
 from __future__ import annotations
 
+import ast
 import inspect
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,44 @@ trap stop_monitor EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 """
+
+
+class _AnnotationStripper(ast.NodeTransformer):
+    """Remove type annotations so embedded functions run on older Python (e.g. 3.6)."""
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
+        node.returns = None
+        for arg in getattr(node.args, "posonlyargs", []) + node.args.args + node.args.kwonlyargs:
+            arg.annotation = None
+        if node.args.vararg:
+            node.args.vararg.annotation = None
+        if node.args.kwarg:
+            node.args.kwarg.annotation = None
+        return self.generic_visit(node)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> ast.AST:
+        if node.value is not None:
+            return ast.Assign(targets=[node.target], value=node.value)
+        return None
+
+
+def _clean_force_helpers() -> str:
+    """Extract force readers and strip type annotations for cluster Python 3.6 compatibility."""
+    from cfd_gen.postproc import forces
+
+    raw_source = "\n\n".join(
+        inspect.getsource(func)
+        for func in (
+            forces._dir_time,
+            forces.find_force_files,
+            forces.read_forces,
+            forces.check_convergence,
+        )
+    )
+    tree = ast.parse(raw_source)
+    cleaned = _AnnotationStripper().visit(tree)
+    ast.fix_missing_locations(cleaned)
+    return ast.unparse(cleaned)
 
 
 def _write_script(path: Path, content: str) -> None:
@@ -48,13 +87,9 @@ def _convergence_monitor_script(cfg: dict[str, Any]) -> str:
     df_idx = next(i for i, v in enumerate(df_vec) if v != 0)
     df_sign = int(df_vec[df_idx])
 
-    # Embed the same maintained readers used by the CLI, without a runtime
-    # package dependency on the cluster.
-    from cfd_gen.postproc import forces
-    force_helpers = "\n\n".join(inspect.getsource(func) for func in (
-        forces._dir_time, forces.find_force_files, forces.read_forces,
-        forces.check_convergence,
-    ))
+    # Embed the same maintained readers used by the CLI, stripped of type annotations
+    # so the script runs cleanly on Python 3.6+ without external package dependencies.
+    force_helpers = _clean_force_helpers()
 
     return f'''\
 #!/usr/bin/env python3
@@ -64,8 +99,6 @@ Checks force.dat every INTERVAL seconds. When both drag and downforce
 variation drop below THRESHOLD over the last WINDOW iterations,
 modifies controlDict to set stopAt=writeNow for a clean exit.
 """
-
-from __future__ import annotations
 
 import math
 import statistics

@@ -1,6 +1,7 @@
 """Behavioral regression checks; run with python -m unittest discover -s tests."""
 from __future__ import annotations
 
+import ast
 import contextlib
 import io
 import json
@@ -89,6 +90,15 @@ class ProjectTest(unittest.TestCase):
         for name in ("Allrun", "Allrun.parallel", "Allclean", "run.sh", "convergence_monitor.py"):
             with self.subTest(name=name):
                 self.assertNotIn(b"\r", (case / name).read_bytes())
+        monitor_code = (case / "convergence_monitor.py").read_text(encoding="utf-8")
+        self.assertNotIn("from __future__ import annotations", monitor_code)
+        parsed = ast.parse(monitor_code)
+        self.assertFalse(any(isinstance(n, ast.AnnAssign) for n in ast.walk(parsed)))
+        for n in ast.walk(parsed):
+            if isinstance(n, ast.FunctionDef):
+                self.assertIsNone(n.returns)
+                for a in getattr(n.args, "posonlyargs", []) + n.args.args + n.args.kwonlyargs:
+                    self.assertIsNone(a.annotation)
         namespace = runpy.run_path(str(case / "convergence_monitor.py"))
         self.assertEqual(namespace["MIN_ITERS"], 300)
         self.assertEqual(namespace["WINDOW"], 200)
