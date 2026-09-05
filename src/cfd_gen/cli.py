@@ -112,7 +112,7 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
         vec_str,
         velocity_vector,
     )
-    from cfd_gen.stl_utils import copy_stl, stl_bounds
+    from cfd_gen.stl_utils import copy_stl, stl_bounds, stl_info
 
     if not cfg_path.exists():
         sys.exit(f"ERROR: {cfg_path} not found")
@@ -164,9 +164,12 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
     # Compute combined STL bounds
     all_min = [float("inf")] * 3
     all_max = [float("-inf")] * 3
-    for _, path in stl_pairs:
+    stl_info_map: dict[str, tuple[str, int, tuple[tuple[float, float, float], tuple[float, float, float]]]] = {}
+    for stem, path in stl_pairs:
         try:
-            smin, smax = stl_bounds(path)
+            info = stl_info(path)
+            stl_info_map[stem] = info
+            smin, smax = info[2]
         except (OSError, ValueError) as exc:
             sys.exit(f"ERROR: {exc}")
         for i in range(3):
@@ -301,7 +304,8 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
     tri_dir = case_dir / "constant" / "triSurface"
     for stem, path in stl_pairs:
         try:
-            n_tri = copy_stl(path, tri_dir / f"{stem}.stl", stem)
+            info = stl_info_map.get(stem)
+            n_tri = copy_stl(path, tri_dir / f"{stem}.stl", stem, info=info)
             print(f"    ✓ {stem} ({n_tri:,} triangles)")
         except ValueError as e:
             print(f"    ✗ {stem} ERROR: {e}")

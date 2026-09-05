@@ -21,7 +21,7 @@ from cfd_gen.postproc.forces import check_convergence, find_force_files, read_fo
 from cfd_gen.postproc.plotting import _force_stats
 from cfd_gen.postproc.residuals import read_residuals
 from cfd_gen.postproc.convergence_monitor import monitor
-from cfd_gen.stl_utils import write_stl
+from cfd_gen.stl_utils import copy_stl, read_stl, stl_bounds, stl_info, write_stl
 from cfd_gen.writers.scripts import _convergence_monitor_script
 
 
@@ -306,6 +306,60 @@ class ProjectTest(unittest.TestCase):
         self.assertEqual(len(times), 3)
         self.assertEqual(times, [0.1, 0.2, 0.3])
         self.assertEqual(drags, [20.0, 25.0, 25.0])
+
+    def test_streaming_stl_bounds_and_info(self):
+        path = self.root / "stl/precision.stl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "solid precision_body\n"
+            "  facet normal 0.000000e+00 0.000000e+00 1.000000e+00\n"
+            "    outer loop\n"
+            "      vertex -1.250000e-01  2.500000e+00  3.750000e-02\n"
+            "      vertex  1.000000e+01  0.000000e+00 -5.000000e-01\n"
+            "      vertex  0.000000e+00 -1.000000e+01  4.000000e+00\n"
+            "    endloop\n"
+            "  endfacet\n"
+            "endsolid precision_body\n"
+        )
+        name, count, bbox = stl_info(path)
+        self.assertEqual(name, "precision_body")
+        self.assertEqual(count, 1)
+        self.assertEqual(bbox, ((-0.125, -10.0, -0.5), (10.0, 2.5, 4.0)))
+        self.assertEqual(stl_bounds(path), bbox)
+
+    def test_copy_stl_renaming_preserves_exact_lines(self):
+        src = self.root / "stl/original.stl"
+        dst = self.root / "stl/renamed.stl"
+        src.write_text(
+            "solid cad_export_name\n"
+            "  facet normal 0 0 1\n"
+            "    outer loop\n"
+            "      vertex 1.234567890123456 2.345678901234567 3.456789012345678\n"
+            "      vertex 4.567890123456789 5.678901234567890 6.789012345678901\n"
+            "      vertex 7.890123456789012 8.901234567890123 9.012345678901234\n"
+            "    endloop\n"
+            "  endfacet\n"
+            "endsolid cad_export_name\n"
+        )
+        n = copy_stl(src, dst, "renamed_wing")
+        self.assertEqual(n, 1)
+        lines = dst.read_text().splitlines()
+        self.assertEqual(lines[0], "solid renamed_wing")
+        self.assertEqual(lines[-1], "endsolid renamed_wing")
+        # Middle lines must be preserved verbatim without any precision truncation
+        self.assertIn("      vertex 1.234567890123456 2.345678901234567 3.456789012345678", lines)
+
+    def test_large_stl_streaming_scalability(self):
+        large_stl = self.root / "stl/large.stl"
+        triangles = [
+            ((0.0, 0.0, 1.0), (float(i), 0.0, 0.0), (float(i + 1), 1.0, 0.0), (float(i), 1.0, 2.0))
+            for i in range(1000)
+        ]
+        write_stl(large_stl, "large_part", triangles)
+        name, count, bbox = stl_info(large_stl)
+        self.assertEqual(name, "large_part")
+        self.assertEqual(count, 1000)
+        self.assertEqual(bbox, ((0.0, 0.0, 0.0), (1000.0, 1.0, 2.0)))
 
 
 if __name__ == "__main__":

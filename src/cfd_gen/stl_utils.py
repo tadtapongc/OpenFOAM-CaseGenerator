@@ -53,8 +53,67 @@ def is_binary_stl(filepath: Path) -> bool:
     return size == expected_size
 
 
+def stl_info(filepath: str | Path) -> tuple[str, int, BBox]:
+    """Inspect an ASCII STL file in a single streaming pass with O(1) memory.
+
+    Returns:
+        (solid_name, triangle_count, ((xmin, ymin, zmin), (xmax, ymax, zmax)))
+
+    Raises:
+        FileNotFoundError: If file doesn't exist.
+        ValueError: If file is binary or malformed.
+    """
+    filepath = Path(filepath)
+    if not filepath.exists():
+        raise FileNotFoundError(f"STL file not found: {filepath}")
+
+    if is_binary_stl(filepath):
+        raise ValueError(
+            f"Binary STL not supported: {filepath}\n"
+            f"  Convert to ASCII in your CAD tool (SolidWorks: Save As → STL → ASCII)."
+        )
+
+    name: str | None = None
+    min_x = min_y = min_z = float("inf")
+    max_x = max_y = max_z = float("-inf")
+    vertex_count = 0
+
+    with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            if name is None and line.startswith("solid"):
+                name = line[5:].strip() or filepath.stem
+            elif line.startswith("vertex"):
+                parts = line.split()
+                if len(parts) >= 4:
+                    try:
+                        x = float(parts[1])
+                        y = float(parts[2])
+                        z = float(parts[3])
+                    except ValueError:
+                        continue
+                    if x < min_x: min_x = x
+                    if x > max_x: max_x = x
+                    if y < min_y: min_y = y
+                    if y > max_y: max_y = y
+                    if z < min_z: min_z = z
+                    if z > max_z: max_z = z
+                    vertex_count += 1
+
+    if name is None:
+        raise ValueError(f"Not a valid ASCII STL: {filepath}")
+    if vertex_count < 3:
+        raise ValueError(f"No triangles found in {filepath}")
+
+    n_triangles = vertex_count // 3
+    bbox: BBox = ((min_x, min_y, min_z), (max_x, max_y, max_z))
+    return name, n_triangles, bbox
+
+
 def read_stl(filepath: str | Path) -> tuple[str, list[Triangle]]:
-    """Read an ASCII STL file.
+    """Read an ASCII STL file into triangle tuples.
 
     Returns:
         (solid_name, list_of_triangles)
@@ -74,34 +133,40 @@ def read_stl(filepath: str | Path) -> tuple[str, list[Triangle]]:
             f"  Convert to ASCII in your CAD tool (SolidWorks: Save As → STL → ASCII)."
         )
 
-    text = filepath.read_text(encoding="utf-8", errors="replace")
-
-    match = re.match(r"^\s*solid\s+(.*)", text, re.MULTILINE)
-    if not match:
-        raise ValueError(f"Not a valid ASCII STL: {filepath}")
-    name = match.group(1).strip() or filepath.stem
-
-    facet_pattern = re.compile(
-        r"facet\s+normal\s+([\d.eE+\-]+)\s+([\d.eE+\-]+)\s+([\d.eE+\-]+)\s*\n"
-        r"\s*outer\s+loop\s*\n"
-        r"\s*vertex\s+([\d.eE+\-]+)\s+([\d.eE+\-]+)\s+([\d.eE+\-]+)\s*\n"
-        r"\s*vertex\s+([\d.eE+\-]+)\s+([\d.eE+\-]+)\s+([\d.eE+\-]+)\s*\n"
-        r"\s*vertex\s+([\d.eE+\-]+)\s+([\d.eE+\-]+)\s+([\d.eE+\-]+)\s*\n"
-        r"\s*endloop\s*\n"
-        r"\s*endfacet",
-        re.MULTILINE,
-    )
-
+    name: str | None = None
     triangles: list[Triangle] = []
-    for m in facet_pattern.finditer(text):
-        vals = [float(m.group(i)) for i in range(1, 13)]
-        triangles.append((
-            (vals[0], vals[1], vals[2]),
-            (vals[3], vals[4], vals[5]),
-            (vals[6], vals[7], vals[8]),
-            (vals[9], vals[10], vals[11]),
-        ))
+    curr_normal = (0.0, 0.0, 0.0)
+    curr_vertices: list[tuple[float, float, float]] = []
 
+    with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            if name is None and line.startswith("solid"):
+                name = line[5:].strip() or filepath.stem
+            elif line.startswith("facet"):
+                parts = line.split()
+                if len(parts) >= 5 and parts[1] == "normal":
+                    try:
+                        curr_normal = (float(parts[2]), float(parts[3]), float(parts[4]))
+                    except ValueError:
+                        curr_normal = (0.0, 0.0, 0.0)
+                curr_vertices = []
+            elif line.startswith("vertex"):
+                parts = line.split()
+                if len(parts) >= 4:
+                    try:
+                        curr_vertices.append((float(parts[1]), float(parts[2]), float(parts[3])))
+                    except ValueError:
+                        pass
+            elif line.startswith("endfacet"):
+                if len(curr_vertices) == 3:
+                    triangles.append((curr_normal, curr_vertices[0], curr_vertices[1], curr_vertices[2]))
+                curr_vertices = []
+
+    if name is None:
+        raise ValueError(f"Not a valid ASCII STL: {filepath}")
     if not triangles:
         raise ValueError(f"No triangles found in {filepath}")
 
@@ -113,39 +178,40 @@ def write_stl(filepath: str | Path, name: str, triangles: Sequence[Triangle]) ->
     filepath = Path(filepath)
     filepath.parent.mkdir(parents=True, exist_ok=True)
 
-    lines = [f"solid {name}"]
-    for normal, v1, v2, v3 in triangles:
-        lines.append(f"  facet normal {normal[0]:.6e} {normal[1]:.6e} {normal[2]:.6e}")
-        lines.append("    outer loop")
-        lines.append(f"      vertex {v1[0]:.6e} {v1[1]:.6e} {v1[2]:.6e}")
-        lines.append(f"      vertex {v2[0]:.6e} {v2[1]:.6e} {v2[2]:.6e}")
-        lines.append(f"      vertex {v3[0]:.6e} {v3[1]:.6e} {v3[2]:.6e}")
-        lines.append("    endloop")
-        lines.append("  endfacet")
-    lines.append(f"endsolid {name}")
-    lines.append("")
-
-    filepath.write_text("\n".join(lines), encoding="utf-8")
+    with open(filepath, "w", encoding="utf-8", newline="\n") as f:
+        f.write(f"solid {name}\n")
+        for normal, v1, v2, v3 in triangles:
+            f.write(f"  facet normal {normal[0]:.6e} {normal[1]:.6e} {normal[2]:.6e}\n")
+            f.write("    outer loop\n")
+            f.write(f"      vertex {v1[0]:.6e} {v1[1]:.6e} {v1[2]:.6e}\n")
+            f.write(f"      vertex {v2[0]:.6e} {v2[1]:.6e} {v2[2]:.6e}\n")
+            f.write(f"      vertex {v3[0]:.6e} {v3[1]:.6e} {v3[2]:.6e}\n")
+            f.write("    endloop\n")
+            f.write("  endfacet\n")
+        f.write(f"endsolid {name}\n")
 
 
 def stl_bounds(filepath: str | Path) -> BBox:
-    """Compute axis-aligned bounding box.
+    """Compute axis-aligned bounding box via streaming with O(1) memory.
 
     Returns:
         ((xmin, ymin, zmin), (xmax, ymax, zmax))
     """
-    _, triangles = read_stl(filepath)
-    xs, ys, zs = [], [], []
-    for _, v1, v2, v3 in triangles:
-        for v in (v1, v2, v3):
-            xs.append(v[0])
-            ys.append(v[1])
-            zs.append(v[2])
-    return (min(xs), min(ys), min(zs)), (max(xs), max(ys), max(zs))
+    _, _, bbox = stl_info(filepath)
+    return bbox
 
 
-def copy_stl(src: str | Path, dst: str | Path, name: str | None = None) -> int:
+def copy_stl(
+    src: str | Path,
+    dst: str | Path,
+    name: str | None = None,
+    *,
+    info: tuple[str, int, BBox] | None = None,
+) -> int:
     """Copy STL to destination, optionally rewriting solid name.
+
+    Uses zero-memory fast OS copy if name already matches, or streaming
+    header/footer substitution with verbatim coordinate preservation.
 
     Returns:
         Number of triangles.
@@ -154,12 +220,25 @@ def copy_stl(src: str | Path, dst: str | Path, name: str | None = None) -> int:
     dst = Path(dst)
     dst.parent.mkdir(parents=True, exist_ok=True)
 
-    original_name, triangles = read_stl(src)
-    n_triangles = len(triangles)
+    if info is None:
+        info = stl_info(src)
+    original_name, n_triangles, _ = info
 
     if name is None or name == original_name:
         shutil.copy2(src, dst)
     else:
-        write_stl(dst, name, triangles)
+        # Stream lines directly, preserving exact CAD vertex representations
+        with open(src, "r", encoding="utf-8", errors="replace") as fin, \
+             open(dst, "w", encoding="utf-8", newline="\n") as fout:
+            header_replaced = False
+            for line in fin:
+                stripped = line.strip()
+                if not header_replaced and stripped.startswith("solid"):
+                    fout.write(f"solid {name}\n")
+                    header_replaced = True
+                elif stripped.startswith("endsolid"):
+                    fout.write(f"endsolid {name}\n")
+                else:
+                    fout.write(line)
 
     return n_triangles
