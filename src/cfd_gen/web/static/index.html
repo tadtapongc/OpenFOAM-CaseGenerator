@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpenFOAM Case Generator Studio | Rapidamente Aero</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  
+  <!-- Three.js for 3D STL Visualization -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+
+  <!-- Chart.js for Convergence Telemetry -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body class="dark-theme">
+  <!-- Top Navigation Bar -->
+  <header class="navbar">
+    <div class="nav-brand">
+      <div class="brand-logo">🏎️</div>
+      <div class="brand-text">
+        <h1>Rapidamente <span>CFD Studio</span></h1>
+        <p class="subtitle">OpenFOAM Case Generator & HPC Cluster Dispatcher</p>
+      </div>
+    </div>
+    
+    <div class="nav-center">
+      <nav class="nav-tabs">
+        <button class="nav-tab active" data-tab="config-tab" id="tab-btn-config">⚙️ Case Config</button>
+        <button class="nav-tab" data-tab="cluster-tab" id="tab-btn-cluster">⚡ Cluster & Queue</button>
+        <button class="nav-tab" data-tab="telemetry-tab" id="tab-btn-telemetry">📈 Live Telemetry</button>
+        <button class="nav-tab" data-tab="cases-tab" id="tab-btn-cases">📂 Archive</button>
+      </nav>
+    </div>
+
+    <div class="nav-actions">
+      <div class="cluster-badge" id="cluster-status-badge">
+        <span class="status-dot disconnected"></span>
+        <span class="status-text">Disconnected</span>
+      </div>
+      <button class="btn btn-secondary btn-sm" id="btn-open-ssh-modal">🔑 SSH Login</button>
+      <button class="btn btn-primary btn-sm" id="btn-quick-run">🚀 Submit Simulation</button>
+    </div>
+  </header>
+
+  <!-- Main Workspace -->
+  <main class="main-container">
+    
+    <!-- TAB 1: VISUAL CASE CONFIG & 3D VIEWER -->
+    <section class="tab-pane active" id="config-tab">
+      <div class="two-column-layout">
+        
+        <!-- Left Column: 3D STL Viewer & STL Manager -->
+        <div class="panel viewer-panel" id="viewer-panel">
+          <div class="panel-header">
+            <h3>📐 3D Geometry Inspector</h3>
+            <div class="panel-header-actions">
+              <label class="btn btn-outline btn-xs" for="stl-file-input">➕ Upload STL</label>
+              <input type="file" id="stl-file-input" accept=".stl,.STL" multiple style="display:none;">
+              <button class="btn btn-ghost btn-xs" id="btn-reset-camera" title="Reset Camera">🎥 Center</button>
+              <button class="btn btn-secondary btn-xs" id="btn-toggle-expand-viewer" title="Toggle Expanded Area">⛶ Expand</button>
+            </div>
+          </div>
+          
+          <div class="viewer-container" id="stl-viewer-container">
+            <div class="viewer-overlay-tools">
+              <div class="view-toggles">
+                <label><input type="checkbox" id="chk-show-domain" checked> Domain Box</label>
+                <label><input type="checkbox" id="chk-show-bounds" checked> Model Bounds</label>
+                <label><input type="checkbox" id="chk-show-ground" checked> Ground</label>
+                <label><input type="checkbox" id="chk-show-flow" checked> Flow</label>
+              </div>
+              <div class="view-framing">
+                <button class="btn-frame active" id="btn-fit-domain" title="Fit Entire Wind Tunnel Domain Box">🌐 Fit Wind Tunnel</button>
+                <button class="btn-frame" id="btn-fit-model" title="Fit STL Model Geometry">🚗 Fit Model</button>
+              </div>
+              <div class="view-angles">
+                <button class="btn-view-angle" data-angle="iso" title="Isometric View">Iso</button>
+                <button class="btn-view-angle" data-angle="top" title="Top View">Top</button>
+                <button class="btn-view-angle" data-angle="side" title="Side View">Side</button>
+                <button class="btn-view-angle" data-angle="front" title="Front View">Front</button>
+              </div>
+            </div>
+            <div class="viewer-domain-info" id="viewer-domain-badge" style="display: none;">
+              <span class="badge-title">🌐 Wind Tunnel:</span>
+              <span id="domain-dims-text">--</span>
+            </div>
+            <div class="viewer-canvas-placeholder" id="viewer-empty-msg">
+              <p>Drag & Drop an STL file here or select one below</p>
+            </div>
+          </div>
+
+          <!-- STL File List & Scale Alerts -->
+          <div class="stl-manager">
+            <div class="stl-list-header">
+              <span>Active Geometry Files</span>
+              <span class="badge" id="active-stl-count">0 files</span>
+            </div>
+            <div class="stl-chip-list" id="stl-chip-list">
+              <!-- Loaded dynamically -->
+            </div>
+            <div class="alert alert-warning" id="scale-warning" style="display: none;">
+              ⚠️ <strong>Potential Millimeter Scale Detected:</strong> Geometry size exceeds 20m. OpenFOAM expects meters (m).
+            </div>
+          </div>
+        </div>
+
+        <!-- Right Column: Comprehensive Visual Configuration Studio -->
+        <div class="panel config-panel">
+          <div class="panel-header">
+            <div class="config-header-left">
+              <h3>🛠️ Case Configuration Studio</h3>
+              <div class="template-selector">
+                <label>Template:</label>
+                <select id="select-template">
+                  <option value="config.json">configs/config.json (FSAE RP14)</option>
+                  <option value="example.json">configs/example.json</option>
+                </select>
+                <button class="btn btn-ghost btn-xs" id="btn-load-template" title="Load selected template">Load</button>
+              </div>
+            </div>
+            <div class="panel-header-actions">
+              <button class="btn btn-outline btn-xs" id="btn-toggle-json-drawer">📄 Code / JSON View</button>
+              <button class="btn btn-ghost btn-xs" id="btn-reset-defaults">↺ Reset</button>
+            </div>
+          </div>
+
+          <!-- Sub-Tabs for Configuration Categories -->
+          <div class="sub-nav-tabs">
+            <button class="sub-tab active" data-subtab="subtab-general">General & Presets</button>
+            <button class="sub-tab" data-subtab="subtab-flow">Flow & Axes</button>
+            <button class="sub-tab" data-subtab="subtab-domain">Domain & Ground</button>
+            <button class="sub-tab" data-subtab="subtab-slurm">Parallel & SLURM</button>
+            <button class="sub-tab" data-subtab="subtab-expert">Overrides (Optional)</button>
+          </div>
+
+          <!-- Visual Configuration Form -->
+          <form id="case-config-form" class="config-form" onsubmit="return false;">
+
+            <!-- SUB-TAB 1: General & Presets -->
+            <div class="subtab-content active" id="subtab-general">
+              <div class="form-grid">
+                <div class="form-group col-span-2">
+                  <label for="cfg-case-name">Case Name <span class="required">*</span></label>
+                  <input type="text" id="cfg-case-name" class="input" placeholder="e.g. RP14_Wing_V1" required>
+                  <span class="field-hint">Folder name created under cases/ (no spaces or slashes).</span>
+                </div>
+
+                <div class="form-group col-span-2">
+                  <label>Simulation Fidelity Preset</label>
+                  <div class="fidelity-cards">
+                    <label class="fidelity-card" data-fidelity="fast">
+                      <input type="radio" name="cfg-fidelity" value="fast">
+                      <div class="card-body">
+                        <div class="card-title">🟢 Fast Check</div>
+                        <div class="card-cells">~2–4M cells</div>
+                        <div class="card-time">~10–15 min</div>
+                        <div class="card-desc">Quick validation & CAD orientation check</div>
+                      </div>
+                    </label>
+
+                    <label class="fidelity-card selected" data-fidelity="standard">
+                      <input type="radio" name="cfg-fidelity" value="standard" checked>
+                      <div class="card-body">
+                        <div class="card-title">🟡 Standard (FSAE)</div>
+                        <div class="card-cells">~6–9M cells</div>
+                        <div class="card-time">~35–50 min</div>
+                        <div class="card-desc">Production aerodynamic balance & L/D</div>
+                      </div>
+                    </label>
+
+                    <label class="fidelity-card" data-fidelity="fine">
+                      <input type="radio" name="cfg-fidelity" value="fine">
+                      <div class="card-body">
+                        <div class="card-title">🔴 Fine Aero</div>
+                        <div class="card-cells">~12–16M cells</div>
+                        <div class="card-time">~1.5–2 hrs</div>
+                        <div class="card-desc">High resolution wake & boundary layer</div>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- SUB-TAB 2: Flow & Aerodynamic Axes -->
+            <div class="subtab-content" id="subtab-flow">
+              <div class="form-grid">
+                
+                <div class="form-group col-span-2">
+                  <label>Freestream Velocity</label>
+                  <div class="dual-input-row">
+                    <div class="input-with-unit">
+                      <input type="number" id="cfg-flow-velocity-ms" class="input" step="0.01" value="16.67">
+                      <span class="unit-label">m/s</span>
+                    </div>
+                    <span class="input-divider">≈</span>
+                    <div class="input-with-unit">
+                      <input type="number" id="cfg-flow-velocity-kmh" class="input" step="0.1" value="60.0">
+                      <span class="unit-label">km/h</span>
+                    </div>
+                  </div>
+                  <input type="range" id="slider-velocity" min="5" max="150" value="60" class="range-slider">
+                  <span class="field-hint">Formula Student cornering speed is typically 50–70 km/h (14–20 m/s).</span>
+                </div>
+
+                <div class="form-group">
+                  <label for="cfg-flow-direction">Flow Direction</label>
+                  <select id="cfg-flow-direction" class="input">
+                    <option value="-z" selected>-z (Default: Flow from +Z towards -Z)</option>
+                    <option value="+z">+z (Flow from -Z towards +Z)</option>
+                    <option value="+x">+x (Flow along X)</option>
+                    <option value="-x">-x (Flow along -X)</option>
+                    <option value="+y">+y (Flow along Y)</option>
+                    <option value="-y">-y (Flow along -Y)</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label>Moving Ground Simulation</label>
+                  <label class="switch-control">
+                    <input type="checkbox" id="cfg-flow-ground" checked>
+                    <span class="switch-slider"></span>
+                    <span class="switch-label">Enable Moving Road BC</span>
+                  </label>
+                  <span class="field-hint">Applies matching road velocity on ground boundary.</span>
+                </div>
+
+                <div class="form-group">
+                  <label for="cfg-outputs-drag">Drag Axis Projection</label>
+                  <select id="cfg-outputs-drag" class="input">
+                    <option value="-z" selected>-z (Opposing freestream flow)</option>
+                    <option value="+z">+z</option>
+                    <option value="+x">+x</option>
+                    <option value="-x">-x</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label for="cfg-outputs-downforce">Downforce Axis Projection</label>
+                  <select id="cfg-outputs-downforce" class="input">
+                    <option value="-y" selected>-y (Towards ground plane)</option>
+                    <option value="+y">+y (Lift)</option>
+                    <option value="-z">-z</option>
+                    <option value="+z">+z</option>
+                  </select>
+                </div>
+
+              </div>
+            </div>
+
+            <!-- SUB-TAB 3: Domain & Boundaries -->
+            <div class="subtab-content" id="subtab-domain">
+              <div class="form-grid">
+                
+                <div class="form-group col-span-2">
+                  <label for="cfg-domain-box">Domain Wind Tunnel Box</label>
+                  <select id="cfg-domain-box" class="input">
+                    <option value="auto" selected>Auto-fit (Fits wind tunnel bounding box with aerodynamic margins)</option>
+                    <option value="custom">Explicit Custom Coordinates [min, max]</option>
+                  </select>
+                </div>
+
+                <div class="form-group col-span-2" id="custom-domain-container" style="display: none;">
+                  <label>Custom Bounding Box (Meters)</label>
+                  <div class="dual-input-row">
+                    <input type="text" id="cfg-domain-min" class="input" placeholder="Min: [-1.5, 0.0, -4.0]">
+                    <input type="text" id="cfg-domain-max" class="input" placeholder="Max: [1.5, 2.0, 8.0]">
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label for="cfg-symmetry-plane">Symmetry Plane Offset (m)</label>
+                  <div class="input-with-action">
+                    <input type="number" id="cfg-symmetry-plane" class="input domain-calc-trigger" step="0.0001" value="-0.1185">
+                    <button type="button" class="btn btn-secondary btn-sm" id="btn-auto-sym-inline" title="Auto-calculate symmetry plane at geometric center ((Xmin + Xmax) / 2)">
+                      🎯 Auto Center
+                    </button>
+                  </div>
+                  <span class="field-hint">Centerline coordinate if CAD symmetry is not at 0.0 (-0.1185 for RP14). Click <strong>🎯 Auto Center</strong> to calculate <code>(Xmin + Xmax)/2</code>.</span>
+                </div>
+
+                <div class="form-group col-span-2">
+                  <label for="cfg-ground-style">Ground Level / Ride Height Specification (2 + 1 Styles)</label>
+                  <select id="cfg-ground-style" class="input domain-calc-trigger">
+                    <option value="none" selected>Touching CAD Bottom / None (Default — road touches lowest point)</option>
+                    <option value="relative">Style 1: Relative Ride Height (Gap below lowest STL vertex)</option>
+                    <option value="absolute">Style 2: Absolute Ground Plane (Fixed CAD Y-coordinate, e.g. 0.0)</option>
+                  </select>
+                  <span class="field-hint">config.json leaves this as an example by default. Select Style 1 or 2 only if manual offset is needed.</span>
+                </div>
+
+                <div class="form-group" id="group-ground-relative" style="display: none;">
+                  <label for="cfg-ground-clearance">Style 1: Ride Height Gap (meters)</label>
+                  <div class="input-with-unit">
+                    <input type="number" id="cfg-ground-clearance" class="input domain-calc-trigger" step="0.001" placeholder="0.035">
+                    <span class="unit-label">m</span>
+                  </div>
+                  <span class="field-hint">Road placed at [CAD lowest point - gap] (e.g. 0.035 = 35mm front wing ride height).</span>
+                </div>
+
+                <div class="form-group" id="group-ground-absolute" style="display: none;">
+                  <label for="cfg-ground-plane">Style 2: Road CAD Coordinate (meters)</label>
+                  <div class="input-with-unit">
+                    <input type="number" id="cfg-ground-plane" class="input domain-calc-trigger" step="0.001" placeholder="0.0">
+                    <span class="unit-label">m</span>
+                  </div>
+                  <span class="field-hint">Road placed at fixed CAD coordinate (e.g. 0.0 if assembly CAD origin is on road).</span>
+                </div>
+
+                <!-- 6 Domain Faces -->
+                <div class="form-group col-span-2">
+                  <label>Boundary Face Assignments</label>
+                  <div class="faces-grid">
+                    <div class="face-box">
+                      <span class="face-tag">-X Face</span>
+                      <select id="cfg-face-neg-x" class="input input-sm">
+                        <option value="symmetry" selected>symmetry</option>
+                        <option value="farField">farField</option>
+                        <option value="inlet">inlet</option>
+                        <option value="outlet">outlet</option>
+                        <option value="ground">ground</option>
+                      </select>
+                    </div>
+                    <div class="face-box">
+                      <span class="face-tag">+X Face</span>
+                      <select id="cfg-face-pos-x" class="input input-sm">
+                        <option value="farField" selected>farField</option>
+                        <option value="symmetry">symmetry</option>
+                        <option value="inlet">inlet</option>
+                        <option value="outlet">outlet</option>
+                        <option value="ground">ground</option>
+                      </select>
+                    </div>
+                    <div class="face-box">
+                      <span class="face-tag">-Y Face (Floor)</span>
+                      <select id="cfg-face-neg-y" class="input input-sm">
+                        <option value="ground" selected>ground</option>
+                        <option value="farField">farField</option>
+                        <option value="symmetry">symmetry</option>
+                      </select>
+                    </div>
+                    <div class="face-box">
+                      <span class="face-tag">+Y Face (Ceiling)</span>
+                      <select id="cfg-face-pos-y" class="input input-sm">
+                        <option value="farField" selected>farField</option>
+                        <option value="ground">ground</option>
+                      </select>
+                    </div>
+                    <div class="face-box">
+                      <span class="face-tag">+Z Face (Inlet)</span>
+                      <select id="cfg-face-pos-z" class="input input-sm">
+                        <option value="inlet" selected>inlet</option>
+                        <option value="outlet">outlet</option>
+                        <option value="farField">farField</option>
+                      </select>
+                    </div>
+                    <div class="face-box">
+                      <span class="face-tag">-Z Face (Outlet)</span>
+                      <select id="cfg-face-neg-z" class="input input-sm">
+                        <option value="outlet" selected>outlet</option>
+                        <option value="inlet">inlet</option>
+                        <option value="farField">farField</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+            <!-- SUB-TAB 4: Parallel & SLURM Cluster -->
+            <div class="subtab-content" id="subtab-slurm">
+              <div class="form-grid">
+                
+                <div class="form-group">
+                  <label for="cfg-parallel-procs">CPU Cores (MPI Decompose)</label>
+                  <select id="cfg-parallel-procs" class="input">
+                    <option value="8">8 Cores</option>
+                    <option value="16">16 Cores</option>
+                    <option value="32" selected>32 Cores (Recommended for CU e-Science)</option>
+                    <option value="48">48 Cores</option>
+                    <option value="64">64 Cores</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label for="cfg-parallel-method">Decomposition Method</label>
+                  <select id="cfg-parallel-method" class="input">
+                    <option value="scotch" selected>scotch (Automatic graph partitioning)</option>
+                    <option value="hierarchical">hierarchical</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label for="cfg-slurm-qos">SLURM QoS</label>
+                  <select id="cfg-slurm-qos" class="input">
+                    <option value="cu_hpc" selected>cu_hpc (Priority queue)</option>
+                    <option value="cu_long">cu_long (Long running jobs)</option>
+                    <option value="normal">normal</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label for="cfg-slurm-partition">Partition</label>
+                  <input type="text" id="cfg-slurm-partition" class="input" value="cpu">
+                </div>
+
+                <div class="form-group">
+                  <label for="cfg-slurm-time">Time Limit (Walltime)</label>
+                  <input type="text" id="cfg-slurm-time" class="input" value="08:00:00">
+                </div>
+
+                <div class="form-group">
+                  <label for="cfg-slurm-mem">Memory per CPU</label>
+                  <input type="text" id="cfg-slurm-mem" class="input" value="2G">
+                </div>
+
+                <div class="form-group col-span-2">
+                  <label for="cfg-slurm-source">OpenFOAM Bashrc Source Path</label>
+                  <input type="text" id="cfg-slurm-source" class="input" value="$HOME/OpenFOAM/OpenFOAM-v2606/etc/bashrc">
+                </div>
+
+                <div class="form-group col-span-2">
+                  <label for="cfg-slurm-modules">OpenFOAM Environment Modules (comma-separated)</label>
+                  <input type="text" id="cfg-slurm-modules" class="input" value="GCC/11.3.0, OpenMPI/4.1.4-GCC-11.3.0">
+                </div>
+
+                <div class="form-group">
+                  <label>Fast Node Scratch ($TMPDIR)</label>
+                  <label class="switch-control">
+                    <input type="checkbox" id="cfg-slurm-tmpdir" checked>
+                    <span class="switch-slider"></span>
+                    <span class="switch-label">Run in fast local SSD/RAM</span>
+                  </label>
+                </div>
+
+                <div class="form-group">
+                  <label for="cfg-slurm-sync">Live Sync Interval</label>
+                  <div class="input-with-unit">
+                    <input type="number" id="cfg-slurm-sync" class="input" value="15" min="5" max="120">
+                    <span class="unit-label">seconds</span>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+            <!-- SUB-TAB 5: Overrides (Optional) -->
+            <div class="subtab-content" id="subtab-expert">
+              <div class="form-grid">
+                
+                <div class="form-group col-span-2">
+                  <label class="switch-control">
+                    <input type="checkbox" id="chk-enable-overrides">
+                    <span class="switch-slider"></span>
+                    <span class="switch-label">Enable Manual Overrides in config.json</span>
+                  </label>
+                  <span class="field-hint">By default (recommended), your config.json leaves overrides commented out. All solver schemes, turbulence models, and mesh levels use built-in FSAE defaults from your fidelity preset.</span>
+                </div>
+
+                <div class="alert alert-info col-span-2" id="overrides-disabled-notice">
+                  ℹ️ <strong>Using Built-in Presets:</strong> No overrides active. <code>config.json</code> will keep overrides cleanly commented out as in the standard FSAE template.
+                </div>
+
+                <!-- Mesh Params Overrides (Hidden unless enabled) -->
+                <div id="overrides-controls-container" class="col-span-2 form-grid" style="display: none;">
+                  <div class="form-group col-span-2">
+                    <h4 style="font-size: 13px; color: var(--accent-cyan);">Mesh Parameters (mesh_params)</h4>
+                    <span class="field-hint">Custom cell refinement levels overriding fidelity preset defaults.</span>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="cfg-override-basecell">Base Cell Size (m)</label>
+                    <input type="number" id="cfg-override-basecell" class="input" step="0.01" value="0.10">
+                    <span class="field-hint">Default is auto-scaled from car wheelbase/length.</span>
+                  </div>
+
+                  <div class="form-group">
+                    <label>Surface Refinement Levels [min, max]</label>
+                    <div class="dual-input-row">
+                      <input type="number" id="cfg-override-surf-min" class="input" value="4" min="1" max="10">
+                      <input type="number" id="cfg-override-surf-max" class="input" value="5" min="1" max="10">
+                    </div>
+                    <span class="field-hint">e.g. [4, 5] for FSAE wings and chassis.</span>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="cfg-override-edge">Edge Refinement Level</label>
+                    <input type="number" id="cfg-override-edge" class="input" value="6" min="1" max="10">
+                    <span class="field-hint">Feature edges level (default 6).</span>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="cfg-override-nearwake">Near Wake Refinement Level</label>
+                    <input type="number" id="cfg-override-nearwake" class="input" value="3" min="0" max="8">
+                    <span class="field-hint">Refinement zone immediately behind aerodynamic elements.</span>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="cfg-override-farwake">Far Wake Refinement Level</label>
+                    <input type="number" id="cfg-override-farwake" class="input" value="1" min="0" max="8">
+                    <span class="field-hint">Coarser wake refinement trailing downstream.</span>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+          </form>
+
+          <!-- Action Footer -->
+          <div class="config-actions-bar">
+            <button class="btn btn-outline" id="btn-validate-config">✓ Validate</button>
+            <button class="btn btn-secondary" id="btn-save-config">💾 Save Config</button>
+            <button class="btn btn-primary" id="btn-submit-case">🚀 Launch Simulation on Cluster</button>
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- Slide-Over Raw JSON Editor Drawer -->
+      <aside class="json-drawer" id="json-drawer">
+        <div class="drawer-header">
+          <h4>📄 Bidirectional Raw JSON View</h4>
+          <div class="drawer-actions">
+            <button class="btn btn-ghost btn-xs" id="btn-copy-json">📋 Copy</button>
+            <button class="btn btn-ghost btn-xs" id="btn-apply-json">🔄 Sync to Visual Form</button>
+            <button class="btn btn-ghost btn-xs" id="btn-close-drawer">✕</button>
+          </div>
+        </div>
+        <div class="drawer-body">
+          <textarea id="raw-json-editor" spellcheck="false"></textarea>
+          <div id="json-parse-status" class="json-status ok">JSON Valid & Synced</div>
+        </div>
+      </aside>
+    </section>
+
+
+    <!-- TAB 2: CLUSTER & SLURM QUEUE -->
+    <section class="tab-pane" id="cluster-tab">
+      <div class="grid-layout">
+        
+        <!-- Cluster Connection Status Card -->
+        <div class="panel">
+          <div class="panel-header">
+            <h3>⚡ HPC Cluster Connection (CU e-Science)</h3>
+            <button class="btn btn-primary btn-sm" id="btn-reconnect-ssh">🔄 Test & Refresh</button>
+          </div>
+          <div class="cluster-summary-grid">
+            <div class="metric-card">
+              <div class="metric-label">Target Host</div>
+              <div class="metric-value" id="disp-cluster-host">escience0.sc.chula.ac.th</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">SSH User</div>
+              <div class="metric-value" id="disp-cluster-user">tadtapongc</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">SLURM Status</div>
+              <div class="metric-value" id="disp-slurm-status">Checking...</div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-label">Remote Repository</div>
+              <div class="metric-value small" id="disp-remote-repo">/work/home/tadtapongc/...</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SLURM Job Queue Table -->
+        <div class="panel col-span-2">
+          <div class="panel-header">
+            <h3>📋 Active SLURM Jobs</h3>
+            <div class="panel-header-actions">
+              <button class="btn btn-ghost btn-xs" id="btn-refresh-queue">🔄 Refresh Queue</button>
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table" id="slurm-queue-table">
+              <thead>
+                <tr>
+                  <th>Job ID</th>
+                  <th>Name</th>
+                  <th>Partition</th>
+                  <th>Status</th>
+                  <th>Time Used</th>
+                  <th>Time Limit</th>
+                  <th>Nodes</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="slurm-queue-tbody">
+                <tr><td colspan="8" class="text-center text-muted">No active cluster jobs found.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+
+    <!-- TAB 3: LIVE CONVERGENCE & TELEMETRY -->
+    <section class="tab-pane" id="telemetry-tab">
+      <div class="telemetry-top-bar">
+        <div class="case-picker">
+          <label>Monitoring Case:</label>
+          <select id="telemetry-case-select" class="input input-sm">
+            <option value="">(Select a case to monitor)</option>
+          </select>
+          <button class="btn btn-ghost btn-xs" id="btn-refresh-telemetry">🔄 Refresh</button>
+        </div>
+        
+        <div class="convergence-status-pill" id="telemetry-convergence-pill">
+          <span class="pill-dot"></span>
+          <span class="pill-text">Awaiting Data</span>
+        </div>
+      </div>
+
+      <!-- Telemetry KPIs -->
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-title">Downforce (-Fy)</div>
+          <div class="kpi-val" id="kpi-downforce">-- <span class="kpi-unit">N</span></div>
+          <div class="kpi-sub" id="kpi-downforce-variation">±--%</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-title">Drag (-Fz)</div>
+          <div class="kpi-val" id="kpi-drag">-- <span class="kpi-unit">N</span></div>
+          <div class="kpi-sub" id="kpi-drag-variation">±--%</div>
+        </div>
+        <div class="kpi-card highlight">
+          <div class="kpi-title">Efficiency (L/D)</div>
+          <div class="kpi-val" id="kpi-ld">--</div>
+          <div class="kpi-sub">Downforce to Drag Ratio</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-title">Current Iteration</div>
+          <div class="kpi-val" id="kpi-iter">0</div>
+          <div class="kpi-sub" id="kpi-status-sub">Solver status</div>
+        </div>
+      </div>
+
+      <!-- Live Charts Grid -->
+      <div class="charts-grid">
+        <div class="panel">
+          <div class="panel-header">
+            <h3>📈 Aerodynamic Force Convergence (N)</h3>
+          </div>
+          <div class="chart-container">
+            <canvas id="chart-forces"></canvas>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <h3>📉 Equation Residuals (log scale)</h3>
+          </div>
+          <div class="chart-container">
+            <canvas id="chart-residuals"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Terminal Console Log Tail -->
+      <div class="panel console-panel">
+        <div class="panel-header">
+          <h3>💻 Live Solver Console Output</h3>
+          <div class="panel-header-actions">
+            <select id="select-log-type" class="input input-xs">
+              <option value="simpleFoam">log.simpleFoam (Solver)</option>
+              <option value="convergenceMonitor">log.convergenceMonitor</option>
+              <option value="snappyHexMesh">log.snappyHexMesh</option>
+            </select>
+            <button class="btn btn-ghost btn-xs" id="btn-tail-log">Tail Latest</button>
+          </div>
+        </div>
+        <pre class="console-box" id="console-output">Waiting for solver output...</pre>
+      </div>
+    </section>
+
+
+    <!-- TAB 4: CASE ARCHIVE & COMPARISONS -->
+    <section class="tab-pane" id="cases-tab">
+      <div class="panel">
+        <div class="panel-header">
+          <h3>📂 Case History & Aerodynamic Runs</h3>
+          <button class="btn btn-ghost btn-xs" id="btn-refresh-cases">🔄 Refresh</button>
+        </div>
+        <div class="table-responsive">
+          <table class="data-table" id="archive-table">
+            <thead>
+              <tr>
+                <th>Case Name</th>
+                <th>Location</th>
+                <th>Modified Date</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="archive-tbody">
+              <tr><td colspan="4" class="text-center text-muted">Loading cases...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- SSH Connection Modal Dialog -->
+  <div class="modal" id="ssh-modal" style="display: none;">
+    <div class="modal-backdrop" id="modal-backdrop"></div>
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3>🔑 Cluster SSH Credentials</h3>
+        <button class="btn-close" id="btn-close-ssh-modal">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small">Connects directly from your laptop to the Chulalongkorn e-Science HPC login node.</p>
+        
+        <form id="ssh-connect-form" onsubmit="return false;">
+          <div class="form-group">
+            <label for="ssh-host">Cluster Hostname</label>
+            <input type="text" id="ssh-host" class="input" value="escience0.sc.chula.ac.th" required>
+          </div>
+
+          <div class="form-group">
+            <label for="ssh-username">Cluster Username</label>
+            <input type="text" id="ssh-username" class="input" value="tadtapongc" required>
+          </div>
+
+          <div class="form-group">
+            <label for="ssh-password">Password</label>
+            <input type="password" id="ssh-password" class="input" placeholder="Enter cluster password">
+          </div>
+
+          <div class="form-group">
+            <label for="ssh-keypath">Private Key Path (Optional)</label>
+            <input type="text" id="ssh-keypath" class="input" placeholder="e.g. ~/.ssh/id_rsa">
+          </div>
+
+          <div class="form-group">
+            <label for="ssh-remotepath">Remote Repository Path</label>
+            <input type="text" id="ssh-remotepath" class="input" value="/work/home/tadtapongc/Rapidamente/cfd/OpenFOAM-CaseGenerator" required>
+          </div>
+
+          <div class="form-group">
+            <label class="checkbox-control">
+              <input type="checkbox" id="ssh-save-pw" checked>
+              <span>Remember password securely on this machine</span>
+            </label>
+          </div>
+
+          <div class="alert alert-danger" id="ssh-error-alert" style="display: none;"></div>
+          <div class="alert alert-success" id="ssh-success-alert" style="display: none;"></div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" id="btn-cancel-ssh">Cancel</button>
+        <button class="btn btn-primary" id="btn-connect-ssh-submit">Connect & Test</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- Application Scripts -->
+  <script src="js/viewer.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
