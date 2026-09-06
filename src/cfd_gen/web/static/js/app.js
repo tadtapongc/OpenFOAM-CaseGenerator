@@ -8,6 +8,10 @@ class CFDApp {
     this.charts = null;
     this.clusterConnected = false;
     this.pollInterval = null;
+    this.telemetryPollingActive = true;
+    this.archiveCases = [];
+    this.currentArchiveFilter = 'all';
+    this.archiveSearchTerm = '';
     this.isSyncingFromJson = false;
     this.currentSTLName = null;
 
@@ -83,6 +87,7 @@ class CFDApp {
     this.bindSTLUpload();
     this.bindSSHModal();
     this.bindTelemetryEvents();
+    this.bindCasesArchiveEvents();
 
     // 3. Load initial data from backend
     await this.loadLocalClusterConfig();
@@ -99,7 +104,7 @@ class CFDApp {
         this.refreshQueue();
       }
       const activeTab = document.querySelector('.nav-tab.active');
-      if (activeTab && activeTab.dataset.tab === 'telemetry-tab') {
+      if (this.telemetryPollingActive && activeTab && activeTab.dataset.tab === 'telemetry-tab') {
         this.pollTelemetry();
       }
     }, 5000);
@@ -1336,6 +1341,43 @@ class CFDApp {
     document.getElementById('telemetry-case-select')?.addEventListener('change', () => this.pollTelemetry());
     document.getElementById('btn-tail-log')?.addEventListener('click', () => this.fetchLogTail());
     document.getElementById('select-log-type')?.addEventListener('change', () => this.fetchLogTail());
+
+    // Live Sync (5s) Toggle button
+    const togglePollBtn = document.getElementById('btn-toggle-telemetry-polling');
+    const liveDot = document.getElementById('telemetry-live-dot');
+    const liveText = document.getElementById('telemetry-live-text');
+    togglePollBtn?.addEventListener('click', () => {
+      this.telemetryPollingActive = !this.telemetryPollingActive;
+      if (this.telemetryPollingActive) {
+        if (liveDot) liveDot.className = 'live-dot active';
+        if (liveText) liveText.textContent = 'Live Sync (5s)';
+        this.showToast('Telemetry live polling resumed', 'info');
+        this.pollTelemetry();
+      } else {
+        if (liveDot) liveDot.className = 'live-dot paused';
+        if (liveText) liveText.textContent = 'Paused';
+        this.showToast('Telemetry live polling paused', 'info');
+      }
+    });
+
+    // Copy Log text to clipboard
+    document.getElementById('btn-copy-log')?.addEventListener('click', () => {
+      const consoleBox = document.getElementById('console-output');
+      const text = consoleBox ? consoleBox.textContent : '';
+      if (!text || text.trim() === '') {
+        this.showToast('No log content to copy', 'info');
+        return;
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+          this.showToast('Console log copied to clipboard', 'success');
+        }).catch(() => {
+          this.showToast('Failed to copy to clipboard', 'error');
+        });
+      } else {
+        this.showToast('Clipboard API unavailable in this browser', 'error');
+      }
+    });
   }
 
   addTelemetryCase(caseName) {
@@ -1363,24 +1405,34 @@ class CFDApp {
     const caseName = select ? select.value : '';
     if (!caseName) return;
 
+    const pill = document.getElementById('telemetry-convergence-pill');
+    const forcesOverlay = document.getElementById('forces-empty-overlay');
+    const residualsOverlay = document.getElementById('residuals-empty-overlay');
+    const emptyDesc = document.getElementById('forces-empty-desc');
+    const emptyAction = document.getElementById('forces-empty-action');
+    const statusSub = document.getElementById('kpi-status-sub');
+
     // 1. Fetch Forces
     try {
       const res = await fetch(`/api/telemetry/forces?case_name=${encodeURIComponent(caseName)}`);
       const data = await res.json();
 
       if (data.has_data) {
+        if (forcesOverlay) forcesOverlay.style.display = 'none';
+        if (residualsOverlay) residualsOverlay.style.display = 'none';
+
         this.setValText('kpi-downforce', data.downforce_avg);
-        this.setValText('kpi-downforce-variation', `±${data.downforce_pct}%`);
+        this.setValText('kpi-downforce-variation', `±${data.downforce_pct}% variation`);
         this.setValText('kpi-drag', data.drag_avg);
-        this.setValText('kpi-drag-variation', `±${data.drag_pct}%`);
+        this.setValText('kpi-drag-variation', `±${data.drag_pct}% variation`);
         this.setValText('kpi-ld', data.ld_ratio);
         this.setValText('kpi-iter', data.latest_iteration);
+        if (statusSub) statusSub.textContent = data.converged ? 'Status: Converged' : 'Status: Solving';
 
-        const pill = document.getElementById('telemetry-convergence-pill');
         if (pill) {
           if (data.converged) {
             pill.className = 'convergence-status-pill converged';
-            pill.querySelector('.pill-text').textContent = 'CONVERGED';
+            pill.querySelector('.pill-text').textContent = 'CONVERGED (±1.5%)';
           } else {
             pill.className = 'convergence-status-pill running';
             pill.querySelector('.pill-text').textContent = `Solving (Iter ${data.latest_iteration})`;
@@ -1390,17 +1442,50 @@ class CFDApp {
         if (this.charts && data.series) {
           this.charts.updateForces(data.series);
         }
+      } else {
+        // No forces data yet (case generated or meshed but simpleFoam not executed)
+        if (this.charts) {
+          this.charts.clear();
+        }
+
+        this.setValText('kpi-downforce', '--');
+        this.setValText('kpi-downforce-variation', '±--% variation');
+        this.setValText('kpi-drag', '--');
+        this.setValText('kpi-drag-variation', '±--% variation');
+        this.setValText('kpi-ld', '--');
+        this.setValText('kpi-iter', '0');
+        if (statusSub) statusSub.textContent = `Status: ${data.stage || 'Ready'}`;
+
+        const stage = data.stage || 'Generated';
+        if (pill) {
+          pill.className = 'convergence-status-pill standby';
+          pill.querySelector('.pill-text').textContent = stage.toUpperCase();
+        }
+
+        if (forcesOverlay) forcesOverlay.style.display = 'flex';
+        if (residualsOverlay) residualsOverlay.style.display = 'flex';
+        if (emptyDesc) {
+          emptyDesc.textContent = `Case is in '${stage}' state. Run the OpenFOAM solver to stream live forces and residuals.`;
+        }
+        if (emptyAction) {
+          emptyAction.innerHTML = `<code>${data.run_command || `./Allrun.parallel  # In cases/${caseName}`}</code>`;
+        }
       }
-    } catch {}
+    } catch (err) {
+      console.error('Forces telemetry poll failed:', err);
+    }
 
     // 2. Fetch Residuals
     try {
       const res = await fetch(`/api/telemetry/residuals?case_name=${encodeURIComponent(caseName)}`);
       const resData = await res.json();
       if (resData.has_data && this.charts) {
+        if (residualsOverlay) residualsOverlay.style.display = 'none';
         this.charts.updateResiduals(resData.iterations, resData.residuals);
       }
-    } catch {}
+    } catch (err) {
+      console.error('Residuals telemetry poll failed:', err);
+    }
 
     // 3. Tail log
     this.fetchLogTail();
@@ -1416,9 +1501,18 @@ class CFDApp {
       const res = await fetch(`/api/telemetry/logs?case_name=${encodeURIComponent(caseName)}&log_type=${logType}&lines=60`);
       const data = await res.json();
       const consoleBox = document.getElementById('console-output');
+      const autoscroll = document.getElementById('chk-console-autoscroll')?.checked;
+
       if (consoleBox) {
-        consoleBox.textContent = data.content || 'Log file empty.';
-        consoleBox.scrollTop = consoleBox.scrollHeight;
+        consoleBox.textContent = data.content || `Log file (${logType}) is currently empty.`;
+        if (autoscroll) {
+          consoleBox.scrollTop = consoleBox.scrollHeight;
+        }
+      }
+
+      const logStatus = document.getElementById('console-log-status');
+      if (logStatus) {
+        logStatus.textContent = `File: ${data.log_file} • Size: ${data.size_bytes} bytes`;
       }
     } catch {}
   }
@@ -1426,6 +1520,26 @@ class CFDApp {
   // -------------------------------------------------------------
   // Cases Archive
   // -------------------------------------------------------------
+  bindCasesArchiveEvents() {
+    document.getElementById('btn-refresh-cases')?.addEventListener('click', () => this.loadCasesArchive());
+
+    const searchInput = document.getElementById('archive-search-input');
+    searchInput?.addEventListener('input', (e) => {
+      this.archiveSearchTerm = (e.target.value || '').toLowerCase().trim();
+      this.renderCasesArchiveTable();
+    });
+
+    const filterPills = document.querySelectorAll('.archive-filter-group .filter-pill');
+    filterPills.forEach((pill) => {
+      pill.addEventListener('click', () => {
+        filterPills.forEach((p) => p.classList.remove('active'));
+        pill.classList.add('active');
+        this.currentArchiveFilter = pill.dataset.filter || 'all';
+        this.renderCasesArchiveTable();
+      });
+    });
+  }
+
   async loadCasesArchive() {
     const tbody = document.getElementById('archive-tbody');
     const select = document.getElementById('telemetry-case-select');
@@ -1434,43 +1548,223 @@ class CFDApp {
     try {
       const res = await fetch('/api/cases');
       const cases = await res.json();
+      this.archiveCases = Array.isArray(cases) ? cases : [];
 
-      if (!cases || cases.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No simulation cases found.</td></tr>';
-        return;
-      }
+      // Update Summary Stat Cards
+      const total = this.archiveCases.length;
+      const converged = this.archiveCases.filter(c => c.converged || (c.status && c.status.toLowerCase() === 'converged')).length;
+      const solving = this.archiveCases.filter(c => c.status && (c.status.toLowerCase() === 'solving' || c.status.toLowerCase() === 'meshing')).length;
+      const ready = this.archiveCases.filter(c => !c.converged && c.status && !['solving', 'meshing', 'converged'].includes(c.status.toLowerCase())).length;
 
-      tbody.innerHTML = '';
-      if (select && select.options.length <= 1) {
-        cases.forEach((c) => {
+      this.setValText('stat-total-cases', total);
+      this.setValText('stat-converged-cases', converged);
+      this.setValText('stat-solving-cases', solving);
+      this.setValText('stat-ready-cases', ready);
+
+      // Populate Telemetry Case dropdown if cases exist
+      if (select) {
+        const currentVal = select.value;
+        select.innerHTML = '';
+        if (this.archiveCases.length === 0) {
           const opt = document.createElement('option');
-          opt.value = c.name;
-          opt.textContent = `${c.name} (${c.location})`;
+          opt.value = '';
+          opt.textContent = '-- No cases generated yet --';
           select.appendChild(opt);
-        });
+        } else {
+          this.archiveCases.forEach((c) => {
+            const opt = document.createElement('option');
+            opt.value = c.name;
+            const statusIcon = c.converged ? '✓' : (c.status && c.status.toLowerCase() === 'solving') ? '⚡' : '○';
+            opt.textContent = `${statusIcon} ${c.name} (${c.location})`;
+            select.appendChild(opt);
+          });
+          if (currentVal && this.archiveCases.some(c => c.name === currentVal)) {
+            select.value = currentVal;
+          } else {
+            select.value = this.archiveCases[0].name;
+          }
+        }
       }
 
-      cases.forEach((c) => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td><strong>${c.name}</strong></td>
-          <td><span class="badge">${c.location}</span></td>
-          <td>${c.modified}</td>
-          <td>
-            <button class="btn btn-outline btn-xs btn-inspect-case" data-name="${c.name}">Telemetry</button>
-          </td>
-        `;
+      this.renderCasesArchiveTable();
+    } catch (err) {
+      tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">Failed to load cases: ${err.message}</td></tr>`;
+    }
+  }
 
-        tr.querySelector('.btn-inspect-case').addEventListener('click', () => {
-          document.getElementById('tab-btn-telemetry')?.click();
-          this.addTelemetryCase(c.name);
-          this.pollTelemetry();
-        });
+  renderCasesArchiveTable() {
+    const tbody = document.getElementById('archive-tbody');
+    const countBadge = document.getElementById('archive-count-badge');
+    if (!tbody) return;
 
-        tbody.appendChild(tr);
+    let filtered = this.archiveCases;
+
+    // 1. Status Filter
+    if (this.currentArchiveFilter && this.currentArchiveFilter !== 'all') {
+      const f = this.currentArchiveFilter.toLowerCase();
+      filtered = filtered.filter(c => {
+        const s = (c.status || '').toLowerCase();
+        if (f === 'converged') return c.converged || s === 'converged';
+        if (f === 'completed') return s === 'completed' || c.converged || s === 'converged';
+        if (f === 'solving') return s === 'solving' || s === 'meshing';
+        if (f === 'generated') return s === 'generated' || s === 'meshed' || s === 'ready';
+        return s === f;
       });
-    } catch {
-      tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">Failed to load cases.</td></tr>';
+    }
+
+    // 2. Search Filter
+    if (this.archiveSearchTerm) {
+      const term = this.archiveSearchTerm;
+      filtered = filtered.filter(c => {
+        return (c.name && c.name.toLowerCase().includes(term)) ||
+               (c.location && c.location.toLowerCase().includes(term)) ||
+               (c.fidelity && c.fidelity.toLowerCase().includes(term)) ||
+               (c.stl_name && c.stl_name.toLowerCase().includes(term)) ||
+               (c.status && c.status.toLowerCase().includes(term));
+      });
+    }
+
+    if (countBadge) {
+      countBadge.textContent = `${filtered.length} of ${this.archiveCases.length} cases`;
+    }
+
+    if (filtered.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted" style="padding: 2.5rem;">No matching simulation cases found in archive.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = '';
+    filtered.forEach((c) => {
+      const tr = document.createElement('tr');
+
+      // Status Badge
+      const statusLower = (c.status || '').toLowerCase();
+      let badgeClass = 'status-ready';
+      let statusIcon = '○';
+      if (c.converged || statusLower === 'converged') {
+        badgeClass = 'status-converged';
+        statusIcon = '●';
+      } else if (statusLower === 'solving') {
+        badgeClass = 'status-solving';
+        statusIcon = '⚡';
+      } else if (statusLower === 'completed') {
+        badgeClass = 'status-completed';
+        statusIcon = '✓';
+      } else if (statusLower === 'meshing' || statusLower === 'meshed') {
+        badgeClass = 'status-meshed';
+        statusIcon = '⬡';
+      }
+      const statusBadge = `<span class="status-badge ${badgeClass}">${statusIcon} ${c.status || 'Ready'}</span>`;
+
+      // Flow conditions
+      let velDisplay = '--';
+      if (typeof c.velocity === 'number') {
+        velDisplay = `${(c.velocity * 3.6).toFixed(1)} km/h (${c.velocity.toFixed(1)} m/s)`;
+      } else if (c.velocity) {
+        velDisplay = c.velocity;
+      }
+      const flowHtml = `
+        <div class="flow-cell">
+          <span class="flow-vel">${velDisplay}</span>
+          <span class="flow-dir text-muted small">Dir: ${c.direction || '-z'}</span>
+        </div>
+      `;
+
+      // Aero Results (Fy, Fz, L/D)
+      let aeroHtml = '<span class="text-muted small">--</span>';
+      if (c.downforce !== null && c.downforce !== undefined && c.drag !== null && c.drag !== undefined) {
+        aeroHtml = `
+          <div class="aero-results-pills">
+            <span class="aero-pill downforce" title="Downforce (-Fy)">Fy: <strong>${c.downforce} N</strong></span>
+            <span class="aero-pill drag" title="Drag (-Fz)">Fz: <strong>${c.drag} N</strong></span>
+            <span class="aero-pill ld" title="Aero Efficiency (-Fy / -Fz)">L/D: <strong>${c.ld_ratio !== null ? c.ld_ratio : '--'}</strong></span>
+          </div>
+        `;
+      }
+
+      // Progress
+      const progressHtml = c.latest_iter > 0
+        ? `<span class="iter-count monospace"><strong>${c.latest_iter}</strong> iter</span>`
+        : `<span class="text-muted small">0 iter</span>`;
+
+      // Location & Date
+      const isCluster = c.location && c.location.includes('Cluster');
+      const locBadge = isCluster
+        ? '<span class="badge badge-hpc">Cluster</span>'
+        : '<span class="badge badge-local">Local</span>';
+      const locDateHtml = `
+        <div class="loc-date-cell">
+          <div>${locBadge}</div>
+          <div class="date-cell text-muted small">${c.modified}</div>
+        </div>
+      `;
+
+      // Case name & setup chips
+      const setupChips = `
+        <div class="case-spec-chips">
+          <span class="spec-chip fidelity-${(c.fidelity || 'standard').toLowerCase()}">${c.fidelity || 'standard'}</span>
+          ${c.n_procs ? `<span class="spec-chip">${c.n_procs}p</span>` : ''}
+          ${c.stl_name ? `<span class="spec-chip stl-chip-tag">${c.stl_name}</span>` : ''}
+        </div>
+      `;
+
+      tr.innerHTML = `
+        <td>
+          <div class="case-name-cell">
+            <strong class="case-title">${c.name}</strong>
+            ${setupChips}
+          </div>
+        </td>
+        <td>${statusBadge}</td>
+        <td>${flowHtml}</td>
+        <td>${aeroHtml}</td>
+        <td>${progressHtml}</td>
+        <td>${locDateHtml}</td>
+        <td>
+          <div class="action-btn-group">
+            <button class="btn btn-outline btn-xs btn-inspect-case" data-name="${c.name}" title="Inspect Live Telemetry">📊 Telemetry</button>
+            <button class="btn btn-outline btn-xs btn-load-setup" data-name="${c.name}" title="Load into Case Setup">⚙️ Setup</button>
+            <button class="btn btn-outline btn-xs btn-delete-case text-danger" data-name="${c.name}" title="Delete Case">🗑️</button>
+          </div>
+        </td>
+      `;
+
+      // Bind actions
+      tr.querySelector('.btn-inspect-case')?.addEventListener('click', () => {
+        document.querySelector('.nav-tab[data-tab="telemetry-tab"]')?.click();
+        this.addTelemetryCase(c.name);
+        this.pollTelemetry();
+      });
+
+      tr.querySelector('.btn-load-setup')?.addEventListener('click', async () => {
+        document.querySelector('.nav-tab[data-tab="config-tab"]')?.click();
+        await this.loadConfigFile(`${c.name}.json`, false);
+      });
+
+      tr.querySelector('.btn-delete-case')?.addEventListener('click', () => {
+        this.deleteCase(c.name);
+      });
+
+      tbody.appendChild(tr);
+    });
+  }
+
+  async deleteCase(caseName) {
+    if (!confirm(`Are you sure you want to permanently delete case '${caseName}'? This will remove all local mesh and solution files.`)) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/cases/${encodeURIComponent(caseName)}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Delete failed');
+
+      this.showToast(`Case '${caseName}' successfully deleted.`, 'success');
+      await this.loadCasesArchive();
+    } catch (err) {
+      this.showToast(`Delete failed: ${err.message}`, 'error');
     }
   }
 

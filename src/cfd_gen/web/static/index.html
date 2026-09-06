@@ -649,10 +649,14 @@
       <div class="telemetry-top-bar">
         <div class="case-picker">
           <label for="telemetry-case-select">Monitored Case:</label>
-          <select id="telemetry-case-select" class="input input-sm">
+          <select id="telemetry-case-select" class="input input-sm telemetry-case-dropdown">
             <option value="">(Select case)</option>
           </select>
-          <button class="btn btn-ghost btn-xs" id="btn-refresh-telemetry">Refresh</button>
+          <button class="btn btn-ghost btn-xs" id="btn-refresh-telemetry" title="Refresh convergence metrics">Refresh</button>
+          <button class="btn btn-outline btn-xs btn-live-toggle" id="btn-toggle-telemetry-polling" title="Toggle live telemetry polling">
+            <span class="live-dot active" id="telemetry-live-dot"></span>
+            <span id="telemetry-live-text">Live Sync (5s)</span>
+          </button>
         </div>
         
         <div class="convergence-status-pill" id="telemetry-convergence-pill">
@@ -666,21 +670,21 @@
         <div class="kpi-card">
           <div class="kpi-title">Downforce (-Fy)</div>
           <div class="kpi-val" id="kpi-downforce">-- <span class="kpi-unit">N</span></div>
-          <div class="kpi-sub" id="kpi-downforce-variation">±--%</div>
+          <div class="kpi-sub" id="kpi-downforce-variation">±--% variation</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-title">Drag (-Fz)</div>
           <div class="kpi-val" id="kpi-drag">-- <span class="kpi-unit">N</span></div>
-          <div class="kpi-sub" id="kpi-drag-variation">±--%</div>
+          <div class="kpi-sub" id="kpi-drag-variation">±--% variation</div>
         </div>
         <div class="kpi-card highlight">
           <div class="kpi-title">Aero Efficiency (-Fy / -Fz)</div>
           <div class="kpi-val" id="kpi-ld">--</div>
-          <div class="kpi-sub">Lift-to-Drag Ratio</div>
+          <div class="kpi-sub">Lift-to-Drag Ratio (L/D)</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-title">Solver Iteration</div>
-          <div class="kpi-val" id="kpi-iter">0</div>
+          <div class="kpi-val monospace" id="kpi-iter">0</div>
           <div class="kpi-sub" id="kpi-status-sub">Status: Standby</div>
         </div>
       </div>
@@ -689,19 +693,41 @@
       <div class="charts-grid">
         <div class="panel">
           <div class="panel-header">
-            <h3>Aerodynamic Force History</h3>
+            <div class="panel-title-group">
+              <h3>Aerodynamic Force History</h3>
+              <span class="panel-subtitle" id="chart-force-subtitle">Raw vs Smoothed (Moving Avg)</span>
+            </div>
+            <div class="panel-header-actions">
+              <span class="badge badge-subtle" id="chart-force-axes">Downforce: -y | Drag: -z</span>
+            </div>
           </div>
-          <div class="chart-container">
+          <div class="chart-container" id="chart-forces-container">
             <canvas id="chart-forces"></canvas>
+            <div class="chart-empty-overlay" id="forces-empty-overlay" style="display: none;">
+              <div class="empty-icon">📊</div>
+              <div class="empty-title" id="forces-empty-title">No Force Data Yet</div>
+              <div class="empty-desc" id="forces-empty-desc">Case is generated and ready to solve. Execute solver to stream live forces.</div>
+              <div class="empty-action" id="forces-empty-action">
+                <code>./Allrun.parallel</code>
+              </div>
+            </div>
           </div>
         </div>
 
         <div class="panel">
           <div class="panel-header">
-            <h3>Equation Residuals</h3>
+            <div class="panel-title-group">
+              <h3>Equation Residuals</h3>
+              <span class="panel-subtitle">Logarithmic Initial Residuals (p, U, k, ω)</span>
+            </div>
           </div>
-          <div class="chart-container">
+          <div class="chart-container" id="chart-residuals-container">
             <canvas id="chart-residuals"></canvas>
+            <div class="chart-empty-overlay" id="residuals-empty-overlay" style="display: none;">
+              <div class="empty-icon">📉</div>
+              <div class="empty-title">Residuals Awaiting Solver</div>
+              <div class="empty-desc">Convergence monitor will plot equation residuals as simpleFoam iterates.</div>
+            </div>
           </div>
         </div>
       </div>
@@ -709,13 +735,22 @@
       <!-- Live Terminal Console Log Tail -->
       <div class="panel console-panel">
         <div class="panel-header">
-          <h3>Solver Log Console</h3>
+          <div class="panel-title-group">
+            <h3>Solver & Meshing Log Console</h3>
+            <span class="panel-subtitle" id="console-log-status">Showing latest lines</span>
+          </div>
           <div class="panel-header-actions">
             <select id="select-log-type" class="input input-xs">
               <option value="simpleFoam">log.simpleFoam (Solver)</option>
+              <option value="snappyHexMesh">log.snappyHexMesh (Mesher)</option>
+              <option value="potentialFoam">log.potentialFoam (Init)</option>
+              <option value="blockMesh">log.blockMesh (Background)</option>
               <option value="convergenceMonitor">log.convergenceMonitor</option>
-              <option value="snappyHexMesh">log.snappyHexMesh</option>
             </select>
+            <label class="console-autoscroll-label">
+              <input type="checkbox" id="chk-console-autoscroll" checked> Auto-scroll
+            </label>
+            <button class="btn btn-secondary btn-xs" id="btn-copy-log" title="Copy console text">Copy</button>
             <button class="btn btn-ghost btn-xs" id="btn-tail-log">Tail Latest</button>
           </div>
         </div>
@@ -726,26 +761,77 @@
 
     <!-- TAB 4: CASE ARCHIVE & COMPARISONS -->
     <section class="tab-pane" id="cases-tab">
-      <div class="panel">
-        <div class="panel-header">
-          <h3>Case History & Results</h3>
-          <button class="btn btn-ghost btn-xs" id="btn-refresh-cases">Refresh</button>
+      <div class="archive-dashboard">
+        
+        <!-- Summary Stats Overview Cards -->
+        <div class="archive-stats-grid">
+          <div class="archive-stat-card">
+            <div class="stat-label">Total Cases</div>
+            <div class="stat-val" id="stat-total-cases">0</div>
+            <div class="stat-sub">Local & Cluster storage</div>
+          </div>
+          <div class="archive-stat-card stat-converged">
+            <div class="stat-label">Converged & Solved</div>
+            <div class="stat-val" id="stat-converged-cases">0</div>
+            <div class="stat-sub">Aerodynamic forces verified</div>
+          </div>
+          <div class="archive-stat-card stat-active">
+            <div class="stat-label">Active / Solving</div>
+            <div class="stat-val" id="stat-solving-cases">0</div>
+            <div class="stat-sub">Simulations running</div>
+          </div>
+          <div class="archive-stat-card stat-ready">
+            <div class="stat-label">Ready / Meshed</div>
+            <div class="stat-val" id="stat-ready-cases">0</div>
+            <div class="stat-sub">Awaiting simpleFoam solve</div>
+          </div>
         </div>
-        <div class="table-responsive">
-          <table class="data-table" id="archive-table">
-            <thead>
-              <tr>
-                <th>Case Name</th>
-                <th>Directory Path</th>
-                <th>Last Modified</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="archive-tbody">
-              <tr><td colspan="4" class="text-center text-muted">Loading cases...</td></tr>
-            </tbody>
-          </table>
+
+        <!-- Case Archive Table Panel -->
+        <div class="panel archive-table-panel">
+          <div class="panel-header archive-panel-header">
+            <div class="archive-header-left">
+              <h3>Simulation Cases Archive</h3>
+              <span class="badge" id="archive-count-badge">0 cases</span>
+            </div>
+            
+            <div class="archive-controls">
+              <div class="archive-search-wrap">
+                <input type="text" id="archive-search-input" class="input input-xs search-input" placeholder="Search cases by name, geometry, or status...">
+              </div>
+              
+              <div class="archive-filter-group">
+                <button class="filter-pill active" data-filter="all">All</button>
+                <button class="filter-pill" data-filter="converged">Converged</button>
+                <button class="filter-pill" data-filter="completed">Completed</button>
+                <button class="filter-pill" data-filter="solving">Solving</button>
+                <button class="filter-pill" data-filter="generated">Generated</button>
+              </div>
+
+              <button class="btn btn-ghost btn-xs" id="btn-refresh-cases" title="Refresh simulation cases list">Refresh</button>
+            </div>
+          </div>
+
+          <div class="table-responsive">
+            <table class="data-table archive-table" id="archive-table">
+              <thead>
+                <tr>
+                  <th>Case & Setup</th>
+                  <th>Status</th>
+                  <th>Flow Conditions</th>
+                  <th>Aerodynamic Results</th>
+                  <th>Progress</th>
+                  <th>Location & Modified</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="archive-tbody">
+                <tr><td colspan="7" class="text-center text-muted">Loading cases archive...</td></tr>
+              </tbody>
+            </table>
+          </div>
         </div>
+
       </div>
     </section>
 

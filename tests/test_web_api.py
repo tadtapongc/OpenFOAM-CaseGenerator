@@ -23,6 +23,8 @@ from cfd_gen.web.server import (
     api_telemetry_forces,
     api_telemetry_residuals,
     api_telemetry_logs,
+    api_list_cases,
+    api_case_delete,
 )
 from cfd_gen.web.ssh_client import ClusterSSHClient
 
@@ -317,6 +319,25 @@ class TestWebAPI(unittest.TestCase):
         self.assertEqual(res["lateral_axis"], "x")
         # (-0.8640 + 0.6266) / 2 = -0.2374 / 2 = -0.1187
         self.assertAlmostEqual(res["auto_symmetry_plane"], -0.1187, places=4)
+
+    def test_list_cases_and_delete(self):
+        """Test listing cases archive and deleting a case."""
+        # Create a dummy case in cases/
+        dummy_case = Path("cases/test_case_archive_dummy")
+        dummy_case.mkdir(parents=True, exist_ok=True)
+        (dummy_case / "case_config.json").write_text('{"case_name": "test_case_archive_dummy", "fidelity": "standard"}')
+
+        try:
+            cases = asyncio.run(api_list_cases())
+            self.assertTrue(any(c["name"] == "test_case_archive_dummy" for c in cases))
+            matching = next(c for c in cases if c["name"] == "test_case_archive_dummy")
+            self.assertEqual(matching["location"], "Local")
+            self.assertEqual(matching["status"], "Generated")
+            self.assertIn("modified", matching)
+        finally:
+            del_res = asyncio.run(api_case_delete("test_case_archive_dummy"))
+            self.assertTrue(del_res["success"])
+            self.assertFalse(dummy_case.exists())
 
 
 if __name__ == "__main__":

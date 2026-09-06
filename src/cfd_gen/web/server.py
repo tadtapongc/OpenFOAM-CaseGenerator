@@ -11,8 +11,10 @@ import math
 import os
 import re
 import shlex
+import shutil
 import sys
 import webbrowser
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
@@ -614,9 +616,24 @@ async def api_telemetry_forces(case_name: str) -> dict[str, Any]:
                 log.warning("Could not read local forces: %s", exc)
 
     if not times:
+        case_stage = "Generated"
+        has_mesh = False
+        if local_case.is_dir():
+            if (local_case / "constant" / "polyMesh" / "points").is_file():
+                has_mesh = True
+                case_stage = "Meshed"
+            if (local_case / "log.simpleFoam").is_file():
+                case_stage = "Solving"
+            elif (local_case / "log.snappyHexMesh").is_file():
+                case_stage = "Meshing"
+
         return {
             "has_data": False,
-            "message": f"No force.dat found yet for case '{case_name}'. (Solver may still be meshing or initializing).",
+            "case_name": case_name,
+            "stage": case_stage,
+            "has_mesh": has_mesh,
+            "run_command": "./Allrun.parallel",
+            "message": f"No force.dat found yet for case '{case_name}'. Current stage: {case_stage}.",
         }
 
     converged, d_pct, f_pct, d_avg, f_avg = check_convergence(drags, downforces)
@@ -754,40 +771,198 @@ async def api_telemetry_logs(case_name: str, log_type: str = "simpleFoam", lines
 
 @app.get("/api/cases")
 async def api_list_cases() -> list[dict[str, Any]]:
-    """List simulation cases from cluster and local directory."""
+    """List simulation cases from local directory and cluster with comprehensive metadata."""
     cases_dict: dict[str, dict[str, Any]] = {}
 
-    # Local cases
+    # 1. Local cases
     local_cases_dir = PROJECT_ROOT / "cases"
     if local_cases_dir.is_dir():
         for d in local_cases_dir.iterdir():
-            if d.is_dir() and not d.name.startswith("."):
-                cases_dict[d.name] = {
-                    "name": d.name,
-                    "location": "local",
-                    "modified": d.stat().st_mtime,
-                    "has_forces": (d / "postProcessing" / "forces").is_dir(),
-                }
+            if not d.is_dir() or d.name.startswith("."):
+                continue
 
-    # Remote cases if connected
+            case_name = d.name
+            st = d.stat()
+            mtime_dt = datetime.fromtimestamp(st.st_mtime)
+            mtime_str = mtime_dt.strftime("%Y-%m-%d %H:%M")
+
+            # Check case configuration
+            cfg_file = d / "case_config.json"
+            if not cfg_file.is_file():
+                cfg_file = PROJECT_ROOT / "configs" / f"{case_name}.json"
+
+            fidelity = "standard"
+            velocity = "16.67"
+            flow_dir = "-z"
+            n_procs = 32
+            stl_name = "--"
+            if cfg_file.is_file():
+                try:
+                    with open(cfg_file, encoding="utf-8") as cf:
+                        cd = json.load(cf)
+                        fidelity = cd.get("fidelity", "standard")
+                        v_val = cd.get("flow", {}).get("velocity", 16.67)
+                        velocity = f"{v_val:.1f}" if isinstance(v_val, (int, float)) else str(v_val)
+                        flow_dir = cd.get("flow", {}).get("direction", "-z")
+                        n_procs = cd.get("parallel", {}).get("n_procs", 32)
+                        stls = cd.get("stl_files", [])
+                        if stls:
+                            stl_name = Path(stls[0]).name
+                except Exception:
+                    pass
+
+            status = "Generated"
+            converged = False
+            has_forces = False
+            has_residuals = False
+            has_mesh = (d / "constant" / "polyMesh" / "points").is_file()
+            latest_iter: Optional[int] = None
+            downforce_val: Optional[float] = None
+            drag_val: Optional[float] = None
+            ld_val: Optional[float] = None
+
+            # Check forces
+            force_files = find_force_files(d)
+            if force_files:
+                has_forces = True
+                try:
+                    drag_idx, drag_sign, df_idx, df_sign, _, _ = load_axis_config(
+                        config_path=str(cfg_file) if cfg_file.is_file() else None,
+                        case_dir=d,
+                    )
+                    is_sym = is_symmetry_case(
+                        config_path=str(cfg_file) if cfg_file.is_file() else None,
+                        case_dir=d,
+                    )
+                    times, drags, downforces = read_forces(
+                        force_files, drag_idx, drag_sign, df_idx, df_sign
+                    )
+                    if is_sym:
+                        drags = [drv * 2.0 for drv in drags]
+                        downforces = [dfv * 2.0 for dfv in downforces]
+                    if times:
+                        latest_iter = int(times[-1])
+                        c_conv, _, _, d_avg, f_avg = check_convergence(drags, downforces)
+                        converged = c_conv
+                        downforce_val = round(f_avg, 2)
+                        drag_val = round(d_avg, 2)
+                        ld_val = round(f_avg / d_avg, 2) if abs(d_avg) > 1e-3 else None
+                        status = "Converged" if converged else "Solving"
+                except Exception:
+                    pass
+
+            # Check log.simpleFoam
+            log_simple = d / "log.simpleFoam"
+            if log_simple.is_file():
+                has_residuals = True
+                try:
+                    with open(log_simple, encoding="utf-8", errors="replace") as f:
+                        lines = f.readlines()
+                        tail = "".join(lines[-15:])
+                        if "End" in tail or "Finalising parallel run" in tail:
+                            status = "Completed" if not converged else "Converged"
+                        elif status != "Converged":
+                            status = "Solving"
+                except Exception:
+                    pass
+
+            # Check mesher stage if still generated
+            if status == "Generated":
+                log_snappy = d / "log.snappyHexMesh"
+                if log_snappy.is_file():
+                    try:
+                        with open(log_snappy, encoding="utf-8", errors="replace") as f:
+                            lines = f.readlines()
+                            tail = "".join(lines[-15:])
+                            if "End" in tail or "Finalising parallel run" in tail:
+                                status = "Meshed"
+                            else:
+                                status = "Meshing"
+                    except Exception:
+                        status = "Meshed"
+                elif has_mesh:
+                    status = "Meshed"
+
+            cases_dict[case_name] = {
+                "name": case_name,
+                "location": "Local",
+                "path": f"cases/{case_name}",
+                "modified": mtime_str,
+                "modified_ts": st.st_mtime,
+                "status": status,
+                "fidelity": fidelity,
+                "velocity": velocity,
+                "direction": flow_dir,
+                "n_procs": n_procs,
+                "stl_name": stl_name,
+                "has_forces": has_forces,
+                "has_residuals": has_residuals,
+                "has_mesh": has_mesh,
+                "latest_iter": latest_iter,
+                "converged": converged,
+                "downforce": downforce_val,
+                "drag": drag_val,
+                "ld_ratio": ld_val,
+            }
+
+    # 2. Remote cases if cluster connected
     if ssh_client.is_connected:
         try:
             remote_cases = await asyncio.to_thread(ssh_client.list_remote_cases)
             for rc in remote_cases:
                 cname = rc["name"]
                 if cname in cases_dict:
-                    cases_dict[cname]["location"] = "both"
+                    cases_dict[cname]["location"] = "Local & Cluster"
                 else:
                     cases_dict[cname] = {
                         "name": cname,
-                        "location": "cluster",
-                        "modified": rc.get("modified", ""),
+                        "location": "Cluster",
+                        "path": f"{ssh_client.remote_repo_path}/cases/{cname}",
+                        "modified": rc.get("modified", "--"),
+                        "modified_ts": 0.0,
+                        "status": "Cluster Job",
+                        "fidelity": "--",
+                        "velocity": "--",
+                        "direction": "--",
+                        "n_procs": "--",
+                        "stl_name": "--",
                         "has_forces": True,
+                        "has_residuals": True,
+                        "has_mesh": True,
+                        "latest_iter": None,
+                        "converged": False,
+                        "downforce": None,
+                        "drag": None,
+                        "ld_ratio": None,
                     }
-        except Exception:
-            pass
+        except Exception as exc:
+            log.warning("Could not list remote cases: %s", exc)
 
-    return sorted(cases_dict.values(), key=lambda x: str(x.get("modified", "")), reverse=True)
+    return sorted(cases_dict.values(), key=lambda x: x.get("modified_ts", 0.0), reverse=True)
+
+
+@app.delete("/api/cases/{case_name}")
+async def api_case_delete(case_name: str) -> dict[str, Any]:
+    """Delete a simulation case directory."""
+    if not CASE_NAME_REGEX.match(case_name):
+        raise HTTPException(status_code=400, detail="Invalid case_name")
+
+    target_dir = PROJECT_ROOT / "cases" / case_name
+    deleted = False
+    if target_dir.is_dir() and target_dir.resolve().is_relative_to(PROJECT_ROOT / "cases"):
+        shutil.rmtree(target_dir)
+        deleted = True
+
+    if ssh_client.is_connected:
+        quoted_remote = shlex.quote(f"{ssh_client.remote_repo_path}/cases/{case_name}")
+        code, _, _ = await asyncio.to_thread(ssh_client.run_command, f"rm -rf {quoted_remote}")
+        if code == 0:
+            deleted = True
+
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Case '{case_name}' not found")
+
+    return {"success": True, "case_name": case_name}
 
 
 # -------------------------------------------------------------
