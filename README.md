@@ -245,18 +245,17 @@ Check derived wind tunnel bounds, bounding box dimensions, and mesh parameters b
 python setup_case.py configs/config.json --dry-run
 ```
 
-Illustrative output (values depend on geometry and configuration):
+Example output reproduced using the preceding configuration and geometry with the bounds shown below (paths shortened). The geometry is not bundled with the repository:
 ```text
   Config: configs/config.json
-  ℹ  STL crosses symmetry plane: x_min (-0.118 m) — geometry will be cut at symmetry boundary
-  ℹ  Ground plane: y = 0.000 m (ground clearance: 35.0 mm)
+  ℹ  Ground plane: y = 0.035 m (ground clearance: 0.0 mm)
 
   Geometry bounds:
     min: (-0.118, 0.035, -1.450)
     max: (0.720, 1.180, 1.550)
   Domain box:
-    min: (-0.118, 0.000, -25.450)
-    max: (4.076, 5.760, 13.550)
+    min: (-0.118, 0.035, -25.450)
+    max: (4.074, 5.760, 13.550)
   Mesh:
     Base cell:      0.1 m
     Surface level:  [4, 5]
@@ -267,7 +266,7 @@ Illustrative output (values depend on geometry and configuration):
 
   DRY RUN — would generate: cases/RP14_FSAE
     Velocity:   16.67 m/s  U=(0 0 -16.67)
-    k=0.01042  ω=68.733  νt=0.0001516
+    k=0.010421  ω=68.739  νt=0.0001516
     Surfaces:   RP14
     Pipeline:   potentialFoam → simpleFoam (1500 iters, bounded Gauss limitedLinear 1)
 ```
@@ -381,7 +380,7 @@ Plotting requires `matplotlib`. With no case argument, single-case commands use 
 
 | Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `case_name` | `string` | *required* | Folder name created under `cases/<case_name>/` |
+| `case_name` | `string` | `"my_case"` | Folder name created under `cases/<case_name>/`; choose a new name for each study |
 | `stl_files` | `list[str]` | *required* | List of STL files in `stl/` (e.g. `["car.STL"]` or `["wing.stl", "body.stl"]`) |
 | `fidelity` | `string` | `"standard"` | Quality preset: `"fast"`, `"standard"`, or `"fine"` |
 | `flow.velocity` | `float` | `16.67` | Freestream velocity in m/s (16.67 m/s $\approx$ 60 km/h) |
@@ -604,7 +603,7 @@ This projection assumes the configured symmetry represents a physical half-model
 The scripts invoke the following tools to construct a hexahedral-dominant volume mesh. Inspect meshing logs, surface conformity, and layer coverage before using the mesh:
 
 ```text
-[ blockMesh ] ──► [ surfaceFeatureExtract ] ──► [ snappyHexMesh (Parallel) ]
+[ surfaceFeatureExtract ] ──► [ blockMesh ] ──► [ snappyHexMesh (Parallel) ]
                                                         │
 [ renumberMesh ] ◄── [ reconstructParMesh ] ◄── [ checkMesh (Parallel) ]
 ```
@@ -633,25 +632,16 @@ These settings define refinement distances from the surface. Their effect on tot
 
 ### Step 4: Two-Stage Wake Refinement Architecture
 
-The generator defines two downstream refinement boxes. The diagram shows the standard preset's nominal sizes; the far box ends before the outlet:
-
-```text
-                ┌──────────────────┐
-                │   nearWakeBox    │──────┐
-┌───────────┐   │ (High-Resolution)│      │     farWakeBox
-│  Vehicle  │──►│  Rear Wing & Diff│      ├──────────────────────────────► [ Outlet ]
-│    CAD    │   │  Level 3 (12.5mm)│      │  Downstream Refinement
-└───────────┘   └──────────────────┘      │  Level 1 (50.0mm)
- ◄── 1.0L ──►    ◄────── 1.2L ─────►      └──────────────────────────────►
-                                           ◄──────────── 3.5L ───────────►
-```
+The generator defines two refinement boxes using the streamwise geometry extent $L$. The standard preset requests the following nominal refinement sizes:
 
 1. **`nearWakeBox` (Level 3, 12.5 mm)**:
-   - Extends $1.2 \times L_{geometry}$ behind the car.
-   - Requests finer refinement immediately behind the geometry.
+   - Extends $\max(2\,\mathrm{m},\,1.2L)$ downstream of the geometry's trailing bound.
+   - Also overlaps the rearmost $0.4L$ of the geometry's bounding box.
 2. **`farWakeBox` (Level 1, 50.0 mm)**:
-   - Extends $3.5 \times L_{geometry}$ downstream toward the outlet.
+   - Starts at the trailing bound and extends $\max(4\,\mathrm{m},\,3.5L)$ downstream.
    - Requests coarser refinement farther downstream. Wake resolution needs to be assessed from the resulting solution.
+
+These minimum lengths can make a wake box reach or extend beyond the outlet for small geometries or shortened domains; the generated boxes are not clipped to the outlet. Only their overlap with the meshed domain is relevant. For example, with $L=0.5\,\mathrm{m}$ and standard domain padding, the far box and outlet are both 4 m downstream of the geometry's trailing bound.
 
 ### Step 5: Surface Snapping Controls
 
@@ -749,7 +739,7 @@ solvers
         solver                  GAMG;                    // Geometric-Algebraic Multigrid solver for elliptic pressure equation
         smoother                DICGaussSeidel;          // Diagonal incomplete-Cholesky Gauss-Seidel smoother
         tolerance               1e-7;                    // Absolute convergence target for pressure residual
-        relTol                  0.01;                    // Relative residual reduction per SIMPLE outer loop (1%)
+        relTol                  0.01;                    // Current/initial linear residual ratio threshold (1%)
         nPreSweeps              0;                       // Multigrid pre-smoothing sweeps
         nPostSweeps             2;                       // Multigrid post-smoothing sweeps
         cacheAgglomeration      true;                    // Reuses coarse grid hierarchy across iterations
@@ -763,11 +753,13 @@ solvers
         solver                  PBiCGStab;               // Preconditioned Bi-Conjugate Gradient Stabilized linear solver
         preconditioner          DILU;                    // Diagonal Incomplete LU decomposition preconditioner
         tolerance               1e-8;                    // Absolute convergence tolerance for momentum/turbulence
-        relTol                  0.01;                    // Relative residual reduction per iteration (1%)
+        relTol                  0.01;                    // Current/initial linear residual ratio threshold (1%)
         minIter                 1;                       // Minimum number of linear iterations per time step
     }
 }
 ```
+
+`relTol 0.01` permits a linear solve to stop when its current residual falls below 1% of that solve's initial residual. The absolute `tolerance` and iteration limits also affect termination; this is not a requirement for a 1% reduction between successive SIMPLE iterations. See [OpenFOAM solution control](https://www.openfoam.com/documentation/user-guide/6-solving/6.3-solution-and-algorithm-control).
 
 ### Turbulence Closure & Wall Functions ($k$-$\omega$ SST)
 
