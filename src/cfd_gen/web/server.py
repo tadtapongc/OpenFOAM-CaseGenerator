@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import io
 import json
 import logging
 import math
 import os
 import re
+import shlex
 import sys
 import webbrowser
 from pathlib import Path
@@ -30,7 +32,13 @@ from cfd_gen.geometry import (
     parse_axis,
     up_axis_index,
 )
-from cfd_gen.postproc.forces import check_convergence, find_force_files, read_forces
+from cfd_gen.postproc.forces import (
+    check_convergence,
+    find_force_files,
+    is_symmetry_case,
+    load_axis_config,
+    read_forces,
+)
 from cfd_gen.stl_utils import stl_info
 from cfd_gen.web.ssh_client import ClusterSSHClient
 
@@ -38,9 +46,10 @@ log = logging.getLogger("cfd_gen.web")
 
 app = FastAPI(title="OpenFOAM Case Generator Studio", version="1.0.0")
 
+# Restrict CORS to local origins only to protect credentials and SSH operations
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -49,6 +58,19 @@ app.add_middleware(
 ssh_client = ClusterSSHClient()
 CREDENTIALS_FILE = Path.home() / ".cfd_gen_cluster.json"
 PROJECT_ROOT = Path.cwd()
+
+CASE_NAME_REGEX = re.compile(r"^[A-Za-z0-9_-]+$")
+JOB_ID_REGEX = re.compile(r"^[0-9]+$")
+ALLOWED_LOG_TYPES = {
+    "simpleFoam",
+    "convergenceMonitor",
+    "snappyHexMesh",
+    "surfaceFeatureExtract",
+    "blockMesh",
+    "checkMesh",
+    "renumberMesh",
+    "potentialFoam",
+}
 
 
 def get_saved_cluster_config() -> dict[str, Any]:
@@ -71,7 +93,6 @@ def save_cluster_config(cfg: dict[str, Any]) -> None:
     """Save cluster credentials safely on user machine."""
     try:
         CREDENTIALS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        # Never store password if user opted out
         to_save = dict(cfg)
         if not to_save.get("save_password"):
             to_save.pop("password", None)
@@ -113,9 +134,10 @@ class DomainBoxRequest(BaseModel):
 
 class GenerateCaseRequest(BaseModel):
     config: dict[str, Any]
-    upload_to_cluster: bool = True
-    generate_remotely: bool = True
+    upload_to_cluster: bool = False
+    generate_remotely: bool = False
     submit_slurm: bool = False
+    generate_locally: bool = True
 
 
 # -------------------------------------------------------------
@@ -128,10 +150,6 @@ async def api_geometry_domain_box(req: DomainBoxRequest) -> dict[str, Any]:
     cfg = req.config
     merged = deep_merge(DEFAULT_CONFIG, {k: v for k, v in cfg.items() if not k.startswith("_")})
 
-    # If explicit domain_box coordinates are configured
-    if isinstance(cfg.get("domain_box"), dict) and "min" in cfg["domain_box"] and "max" in cfg["domain_box"]:
-        return {"domain_box": cfg["domain_box"]}
-
     bounds_tuple = None
     if req.bounds and "min" in req.bounds and "max" in req.bounds:
         bounds_tuple = (req.bounds["min"], req.bounds["max"])
@@ -141,7 +159,8 @@ async def api_geometry_domain_box(req: DomainBoxRequest) -> dict[str, Any]:
         all_min = [float("inf")] * 3
         all_max = [float("-inf")] * 3
         for sname in stl_files:
-            p = find_stl(PROJECT_ROOT / "stl", sname)
+            safe_sname = Path(sname).name
+            p = find_stl(PROJECT_ROOT / "stl", safe_sname)
             if p and p.is_file():
                 try:
                     _, _, b = stl_info(p)
@@ -157,7 +176,12 @@ async def api_geometry_domain_box(req: DomainBoxRequest) -> dict[str, Any]:
             bounds_tuple = ([-0.7, 0.035, -1.8], [0.7, 1.1, 1.2])
 
     try:
-        domain = compute_domain_box(merged, bounds_tuple)
+        # If explicit domain_box coordinates are configured, use them for domain
+        if isinstance(cfg.get("domain_box"), dict) and "min" in cfg["domain_box"] and "max" in cfg["domain_box"]:
+            domain = cfg["domain_box"]
+        else:
+            domain = compute_domain_box(merged, bounds_tuple)
+
         flow_idx, _ = flow_axis_index_sign(merged)
         up_idx = up_axis_index(merged)
         lateral_idx = next(i for i in range(3) if i != flow_idx and i != up_idx)
@@ -171,9 +195,10 @@ async def api_geometry_domain_box(req: DomainBoxRequest) -> dict[str, Any]:
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
+
 @app.get("/api/cluster/saved-config")
 async def api_get_saved_config() -> dict[str, Any]:
-    """Get cached connection settings (without exposing plain password unnecessarily)."""
+    """Get cached connection settings without exposing password in plaintext."""
     cfg = get_saved_cluster_config()
     return {
         "host": cfg.get("host", ""),
@@ -181,7 +206,6 @@ async def api_get_saved_config() -> dict[str, Any]:
         "username": cfg.get("username", ""),
         "remote_repo_path": cfg.get("remote_repo_path", ""),
         "has_saved_password": bool(cfg.get("password")),
-        "saved_password": cfg.get("password", ""),
         "key_path": cfg.get("key_path", ""),
     }
 
@@ -189,11 +213,19 @@ async def api_get_saved_config() -> dict[str, Any]:
 @app.post("/api/cluster/connect")
 async def api_cluster_connect(req: SSHConnectRequest) -> dict[str, Any]:
     """Connect to the remote HPC cluster and test the environment."""
+    saved_cfg = get_saved_cluster_config()
+    password_to_use = req.password
+    # If no password was provided but one is stored locally for this host/user, use it
+    if not password_to_use and saved_cfg.get("password"):
+        if (not req.host or req.host == saved_cfg.get("host")) and (not req.username or req.username == saved_cfg.get("username")):
+            password_to_use = saved_cfg.get("password")
+
     try:
-        res = ssh_client.connect(
+        res = await asyncio.to_thread(
+            ssh_client.connect,
             host=req.host,
             username=req.username,
-            password=req.password,
+            password=password_to_use,
             key_path=req.key_path,
             port=req.port,
             remote_repo_path=req.remote_repo_path,
@@ -202,7 +234,7 @@ async def api_cluster_connect(req: SSHConnectRequest) -> dict[str, Any]:
             "host": req.host,
             "port": req.port,
             "username": req.username,
-            "password": req.password if req.save_password else None,
+            "password": password_to_use if req.save_password else None,
             "key_path": req.key_path,
             "remote_repo_path": req.remote_repo_path,
             "save_password": req.save_password,
@@ -219,7 +251,7 @@ async def api_cluster_status() -> dict[str, Any]:
     jobs = []
     if connected:
         try:
-            jobs = ssh_client.get_slurm_queue()
+            jobs = await asyncio.to_thread(ssh_client.get_slurm_queue)
         except Exception:
             pass
 
@@ -235,7 +267,7 @@ async def api_cluster_status() -> dict[str, Any]:
 @app.post("/api/cluster/disconnect")
 async def api_cluster_disconnect() -> dict[str, Any]:
     """Disconnect SSH session."""
-    ssh_client.disconnect()
+    await asyncio.to_thread(ssh_client.disconnect)
     return {"connected": False}
 
 
@@ -279,15 +311,16 @@ async def api_config_templates() -> list[dict[str, Any]]:
 @app.get("/api/config/load-file")
 async def api_config_load_file(filename: str = "config.json") -> dict[str, Any]:
     """Load and return JSON content of a specific config file."""
-    path = PROJECT_ROOT / "configs" / filename
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail=f"Config file {filename} not found")
+    safe_filename = Path(filename).name
+    cfg_dir = (PROJECT_ROOT / "configs").resolve()
+    path = (cfg_dir / safe_filename).resolve()
+    if not path.is_relative_to(cfg_dir) or not path.is_file():
+        raise HTTPException(status_code=404, detail=f"Config file {safe_filename} not found")
     try:
         content = json.loads(path.read_text(encoding="utf-8"))
-        # Also compute merged config with defaults
         merged = deep_merge(DEFAULT_CONFIG, {k: v for k, v in content.items() if not k.startswith("_")})
         return {
-            "filename": filename,
+            "filename": safe_filename,
             "raw_config": content,
             "merged_config": merged,
         }
@@ -300,16 +333,21 @@ async def api_stl_list() -> list[dict[str, Any]]:
     """List local STL files with geometric bounds and metadata."""
     stl_dir = PROJECT_ROOT / "stl"
     stls = []
+    seen_paths = set()
     if stl_dir.is_dir():
-        for p in sorted(stl_dir.glob("*.stl")) + sorted(stl_dir.glob("*.STL")):
+        # Deduplicate paths (prevent duplicates on case-insensitive filesystems like Windows)
+        all_candidates = sorted(stl_dir.glob("*.stl")) + sorted(stl_dir.glob("*.STL"))
+        for p in all_candidates:
+            resolved = p.resolve()
+            if resolved in seen_paths:
+                continue
+            seen_paths.add(resolved)
             try:
                 fmt, n_facets, bounds = stl_info(p)
                 (xmin, ymin, zmin), (xmax, ymax, zmax) = bounds
                 dx = xmax - xmin
                 dy = ymax - ymin
                 dz = zmax - zmin
-                # Detect millimeter scale: FSAE car/wing is typically 0.2m - 3.5m.
-                # If bounding box is > 10m or > 200, it's almost certainly in millimeters!
                 is_likely_mm = max(dx, dy, dz) > 20.0
                 stls.append({
                     "filename": p.name,
@@ -328,20 +366,28 @@ async def api_stl_list() -> list[dict[str, Any]]:
 @app.get("/api/stl/file/{filename}")
 async def api_get_stl_file(filename: str):
     """Serve a local STL file by name."""
-    stl_dir = PROJECT_ROOT / "stl"
-    p = find_stl(stl_dir, filename)
-    if not p or not p.is_file():
-        raise HTTPException(status_code=404, detail=f"STL file '{filename}' not found")
+    safe_filename = Path(filename).name
+    stl_dir = (PROJECT_ROOT / "stl").resolve()
+    p = find_stl(stl_dir, safe_filename)
+    if not p or not p.is_file() or not p.resolve().is_relative_to(stl_dir):
+        raise HTTPException(status_code=404, detail=f"STL file '{safe_filename}' not found")
     return FileResponse(path=p, media_type="application/octet-stream", filename=p.name)
 
 
 @app.post("/api/stl/upload")
 async def api_stl_upload(file: UploadFile = File(...)) -> dict[str, Any]:
     """Upload an STL file to local stl/ directory and inspect its bounds."""
-    stl_dir = PROJECT_ROOT / "stl"
+    safe_name = Path(file.filename or "uploaded.stl").name
+    if not safe_name.lower().endswith(".stl"):
+        raise HTTPException(status_code=400, detail="Only .stl files are allowed")
+
+    stl_dir = (PROJECT_ROOT / "stl").resolve()
     stl_dir.mkdir(exist_ok=True)
 
-    dest = stl_dir / file.filename
+    dest = (stl_dir / safe_name).resolve()
+    if not dest.is_relative_to(stl_dir):
+        raise HTTPException(status_code=400, detail="Invalid destination path")
+
     content = await file.read()
     dest.write_bytes(content)
 
@@ -351,7 +397,7 @@ async def api_stl_upload(file: UploadFile = File(...)) -> dict[str, Any]:
         dx, dy, dz = xmax - xmin, ymax - ymin, zmax - zmin
         return {
             "success": True,
-            "filename": file.filename,
+            "filename": safe_name,
             "size_bytes": len(content),
             "format": fmt,
             "triangles": n_facets,
@@ -362,7 +408,7 @@ async def api_stl_upload(file: UploadFile = File(...)) -> dict[str, Any]:
     except Exception as exc:
         return {
             "success": True,
-            "filename": file.filename,
+            "filename": safe_name,
             "size_bytes": len(content),
             "warning": f"Uploaded, but geometry inspection failed: {exc}",
         }
@@ -370,11 +416,13 @@ async def api_stl_upload(file: UploadFile = File(...)) -> dict[str, Any]:
 
 @app.post("/api/case/generate-and-submit")
 async def api_case_generate_and_submit(req: GenerateCaseRequest) -> dict[str, Any]:
-    """Generate OpenFOAM case and optionally transfer to cluster and submit SLURM job."""
+    """Generate OpenFOAM case locally and/or on cluster, and optionally submit SLURM job."""
     cfg = req.config
     case_name = cfg.get("case_name", "").strip()
     if not case_name:
         raise HTTPException(status_code=400, detail="case_name is required")
+    if not CASE_NAME_REGEX.match(case_name):
+        raise HTTPException(status_code=400, detail="case_name must contain only alphanumeric characters, underscores, and hyphens")
 
     # 1. Validate config
     merged = deep_merge(DEFAULT_CONFIG, {k: v for k, v in cfg.items() if not k.startswith("_")})
@@ -388,9 +436,20 @@ async def api_case_generate_and_submit(req: GenerateCaseRequest) -> dict[str, An
     local_cfg_path = cfg_dir / f"{case_name}.json"
     local_cfg_path.write_text(json.dumps(cfg, indent=4) + "\n", encoding="utf-8")
 
+    local_actions: dict[str, Any] = {}
     cluster_actions: dict[str, Any] = {}
 
-    # 3. Cluster synchronization and execution
+    # 3. Generate locally if requested
+    if req.generate_locally:
+        from cfd_gen.cli import _do_generate
+        try:
+            await asyncio.to_thread(_do_generate, local_cfg_path, PROJECT_ROOT, dry_run=False)
+            local_actions["generated_locally"] = True
+            local_actions["case_path"] = str(PROJECT_ROOT / "cases" / case_name)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Local case generation failed: {exc}")
+
+    # 4. Cluster synchronization and remote execution
     if req.upload_to_cluster:
         if not ssh_client.is_connected:
             raise HTTPException(status_code=400, detail="Not connected to cluster. Please connect via SSH first.")
@@ -401,23 +460,24 @@ async def api_case_generate_and_submit(req: GenerateCaseRequest) -> dict[str, An
         stl_files = cfg.get("stl_files", [])
         uploaded_stls = []
         for sname in stl_files:
-            local_stl = find_stl(PROJECT_ROOT / "stl", sname)
+            safe_sname = Path(sname).name
+            local_stl = find_stl(PROJECT_ROOT / "stl", safe_sname)
             if local_stl and local_stl.is_file():
                 remote_stl = f"{remote_repo}/stl/{local_stl.name}"
-                ssh_client.upload_file(local_stl, remote_stl)
+                await asyncio.to_thread(ssh_client.upload_file, local_stl, remote_stl)
                 uploaded_stls.append(sname)
 
         cluster_actions["uploaded_stls"] = uploaded_stls
 
         # Upload config JSON
         remote_cfg = f"{remote_repo}/configs/{case_name}.json"
-        ssh_client.upload_text(json.dumps(cfg, indent=4) + "\n", remote_cfg)
+        await asyncio.to_thread(ssh_client.upload_text, json.dumps(cfg, indent=4) + "\n", remote_cfg)
         cluster_actions["uploaded_config"] = remote_cfg
 
         # Execute setup_case.py remotely
         if req.generate_remotely:
-            gen_cmd = f"cd '{remote_repo}' && python3 setup_case.py 'configs/{case_name}.json'"
-            code, out, err = ssh_client.run_command(gen_cmd, timeout=45)
+            gen_cmd = f"cd {shlex.quote(remote_repo)} && python3 setup_case.py {shlex.quote(f'configs/{case_name}.json')}"
+            code, out, err = await asyncio.to_thread(ssh_client.run_command, gen_cmd, timeout=45)
             cluster_actions["setup_exit_code"] = code
             cluster_actions["setup_output"] = out.strip()
             cluster_actions["setup_error"] = err.strip()
@@ -430,13 +490,14 @@ async def api_case_generate_and_submit(req: GenerateCaseRequest) -> dict[str, An
 
         # Submit SLURM job
         if req.submit_slurm:
-            submit_res = ssh_client.submit_job(case_name)
+            submit_res = await asyncio.to_thread(ssh_client.submit_job, case_name)
             cluster_actions["slurm_submit"] = submit_res
 
     return {
         "success": True,
         "case_name": case_name,
         "warnings": warnings,
+        "local_actions": local_actions,
         "cluster_actions": cluster_actions,
     }
 
@@ -444,9 +505,11 @@ async def api_case_generate_and_submit(req: GenerateCaseRequest) -> dict[str, An
 @app.post("/api/case/submit")
 async def api_case_submit(req: JobSubmitRequest) -> dict[str, Any]:
     """Submit sbatch for an existing case on the cluster."""
+    if not CASE_NAME_REGEX.match(req.case_name):
+        raise HTTPException(status_code=400, detail="Invalid case_name")
     if not ssh_client.is_connected:
         raise HTTPException(status_code=400, detail="Not connected to cluster")
-    res = ssh_client.submit_job(req.case_name)
+    res = await asyncio.to_thread(ssh_client.submit_job, req.case_name)
     if not res.get("success"):
         raise HTTPException(status_code=500, detail=res.get("error", "Failed to submit job"))
     return res
@@ -455,79 +518,106 @@ async def api_case_submit(req: JobSubmitRequest) -> dict[str, Any]:
 @app.post("/api/case/cancel")
 async def api_case_cancel(req: JobCancelRequest) -> dict[str, Any]:
     """Cancel a SLURM job."""
+    job_id = str(req.job_id).strip()
+    if not JOB_ID_REGEX.match(job_id):
+        raise HTTPException(status_code=400, detail="job_id must be numeric")
     if not ssh_client.is_connected:
         raise HTTPException(status_code=400, detail="Not connected to cluster")
-    res = ssh_client.cancel_job(req.job_id)
+    res = await asyncio.to_thread(ssh_client.cancel_job, job_id)
     return res
 
 
 @app.get("/api/telemetry/forces")
 async def api_telemetry_forces(case_name: str) -> dict[str, Any]:
-    """Fetch force convergence telemetry for a given case."""
-    force_content = ""
+    """Fetch force convergence telemetry with correct axes and symmetry doubling."""
+    if not CASE_NAME_REGEX.match(case_name):
+        raise HTTPException(status_code=400, detail="Invalid case_name")
 
-    # Check remote cluster first if connected
-    if ssh_client.is_connected:
-        remote_force_path = f"{ssh_client.remote_repo_path}/cases/{case_name}/postProcessing/forces/0/force.dat"
-        force_content = ssh_client.read_remote_text(remote_force_path)
-        if not force_content:
-            # Check other time subdirectories in postProcessing/forces/
-            cmd = f"ls '{ssh_client.remote_repo_path}/cases/{case_name}/postProcessing/forces/' 2>/dev/null | sort -n | tail -n 1"
-            code, out, _ = ssh_client.run_command(cmd, timeout=5)
-            last_dir = out.strip()
-            if last_dir:
-                remote_force_path = f"{ssh_client.remote_repo_path}/cases/{case_name}/postProcessing/forces/{last_dir}/force.dat"
-                force_content = ssh_client.read_remote_text(remote_force_path)
+    # 1. Resolve axis and symmetry configuration
+    local_case = PROJECT_ROOT / "cases" / case_name
+    local_cfg = PROJECT_ROOT / "configs" / f"{case_name}.json"
+    cfg_to_use = str(local_cfg) if local_cfg.is_file() else None
 
-    # Fall back to local case directory
-    if not force_content:
-        local_case = PROJECT_ROOT / "cases" / case_name
-        files = find_force_files(local_case)
-        if files:
-            try:
-                force_content = files[-1].read_text(encoding="utf-8", errors="replace")
-            except Exception:
-                pass
+    drag_idx, drag_sign, df_idx, df_sign, _, _ = load_axis_config(
+        config_path=cfg_to_use,
+        case_dir=local_case if local_case.is_dir() else None,
+    )
+    is_sym = is_symmetry_case(
+        config_path=cfg_to_use,
+        case_dir=local_case if local_case.is_dir() else None,
+    )
+    sym_scale = 2.0 if is_sym else 1.0
 
-    if not force_content:
-        return {
-            "has_data": False,
-            "message": f"No force.dat found yet for case '{case_name}'. (Solver may still be meshing or initializing).",
-        }
-
-    # Parse forces directly
-    lines = force_content.splitlines()
     times: list[float] = []
     drags: list[float] = []
     downforces: list[float] = []
 
-    # Default axis orientations for FSAE: flow along -z (drag), downforce along -y
-    # In OpenFOAM forces output:
-    # forces: total(x y z) pressure(x y z) viscous(x y z)
-    # Total drag is typically z component (-z), downforce is -y
-    for line in lines:
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        line_clean = line.replace("(", " ").replace(")", " ")
-        parts = line_clean.split()
-        if len(parts) >= 4:
+    # 2. Check remote cluster first if connected
+    if ssh_client.is_connected:
+        remote_forces_dir = f"{ssh_client.remote_repo_path}/cases/{case_name}/postProcessing/forces"
+        quoted_dir = shlex.quote(remote_forces_dir)
+        cmd = f"ls -1 {quoted_dir} 2>/dev/null | sort -n"
+        code, out, _ = await asyncio.to_thread(ssh_client.run_command, cmd, timeout=5)
+        if code == 0 and out.strip():
+            subdirs = [d.strip() for d in out.strip().splitlines() if d.strip()]
+            all_content = []
+            for subdir in subdirs:
+                if re.match(r"^[0-9\.]+$", subdir):
+                    fpath = f"{remote_forces_dir}/{subdir}/force.dat"
+                    c = await asyncio.to_thread(ssh_client.read_remote_text, fpath)
+                    if c:
+                        all_content.append(c)
+            if all_content:
+                samples: dict[float, tuple[float, float, float]] = {}
+                for fc in all_content:
+                    segment_started = False
+                    for line in fc.splitlines():
+                        line = line.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        parts = line.replace("(", " ").replace(")", " ").split()
+                        if len(parts) >= 10:
+                            try:
+                                vals = [float(v) for v in parts[:10]]
+                                if not all(math.isfinite(v) for v in vals):
+                                    continue
+                                t = vals[0]
+                                t_key = round(t, 8)
+                                if not segment_started:
+                                    samples = {k: s for k, s in samples.items() if k < t_key}
+                                    segment_started = True
+                                samples[t_key] = (
+                                    t,
+                                    vals[1 + drag_idx] * drag_sign * sym_scale,
+                                    vals[1 + df_idx] * df_sign * sym_scale,
+                                )
+                            except ValueError:
+                                continue
+                if samples:
+                    sorted_samples = sorted(samples.values())
+                    times = [s[0] for s in sorted_samples]
+                    drags = [s[1] for s in sorted_samples]
+                    downforces = [s[2] for s in sorted_samples]
+
+    # 3. Fall back to local case directory
+    if not times and local_case.is_dir():
+        files = find_force_files(local_case)
+        if files:
             try:
-                t = float(parts[0])
-                fx = float(parts[1])
-                fy = float(parts[2])
-                fz = float(parts[3])
-                # Downforce (-fy) and Drag (-fz)
-                drag = -fz
-                df = -fy
-                times.append(t)
-                drags.append(drag)
-                downforces.append(df)
-            except ValueError:
-                continue
+                times, drags, downforces = read_forces(
+                    files, drag_idx, drag_sign, df_idx, df_sign
+                )
+                if is_sym:
+                    drags = [d * 2.0 for d in drags]
+                    downforces = [df * 2.0 for df in downforces]
+            except Exception as exc:
+                log.warning("Could not read local forces: %s", exc)
 
     if not times:
-        return {"has_data": False, "message": "force.dat found but has no numeric rows yet."}
+        return {
+            "has_data": False,
+            "message": f"No force.dat found yet for case '{case_name}'. (Solver may still be meshing or initializing).",
+        }
 
     converged, d_pct, f_pct, d_avg, f_avg = check_convergence(drags, downforces)
     ld_ratio = (f_avg / d_avg) if abs(d_avg) > 1e-3 else 0.0
@@ -547,6 +637,7 @@ async def api_telemetry_forces(case_name: str) -> dict[str, Any]:
     return {
         "has_data": True,
         "case_name": case_name,
+        "is_symmetry": is_sym,
         "total_iterations": len(times),
         "latest_iteration": times[-1] if times else 0,
         "converged": converged,
@@ -565,34 +656,35 @@ async def api_telemetry_forces(case_name: str) -> dict[str, Any]:
 
 @app.get("/api/telemetry/residuals")
 async def api_telemetry_residuals(case_name: str) -> dict[str, Any]:
-    """Parse solver residuals from log.simpleFoam or solverInfo.dat."""
+    """Parse solver residuals from log.simpleFoam or solverInfo.dat with aligned iterations."""
+    if not CASE_NAME_REGEX.match(case_name):
+        raise HTTPException(status_code=400, detail="Invalid case_name")
+
     log_content = ""
     if ssh_client.is_connected:
         remote_log = f"{ssh_client.remote_repo_path}/cases/{case_name}/log.simpleFoam"
-        log_content = ssh_client.read_remote_text(remote_log, max_lines=600)
+        log_content = await asyncio.to_thread(ssh_client.read_remote_text, remote_log, max_lines=1200)
 
     if not log_content:
         local_log = PROJECT_ROOT / "cases" / case_name / "log.simpleFoam"
         if local_log.is_file():
             try:
                 with open(local_log, encoding="utf-8", errors="replace") as f:
-                    lines = f.readlines()
-                    log_content = "".join(lines[-600:])
+                    raw_lines = f.readlines()
+                    log_content = "".join(raw_lines[-1200:])
             except Exception:
                 pass
 
     if not log_content:
         return {"has_data": False, "message": "No log.simpleFoam found."}
 
-    # Extract initial residuals using regex
-    # Pattern: Solving for Ux, Initial residual = 0.04523, ...
+    # Extract initial residuals using regex and store strictly aligned by iteration
     pattern = re.compile(
         r"Solving for (p|Ux|Uy|Uz|k|omega),\s+Initial residual\s+=\s+([0-9\.eE\+\-]+)",
         re.IGNORECASE,
     )
-    residuals_map: dict[str, list[float]] = {"p": [], "Ux": [], "Uy": [], "Uz": [], "k": [], "omega": []}
+    iter_data: dict[int, dict[str, float]] = {}
     current_iter = 0
-    iter_list: list[int] = []
 
     for line in log_content.splitlines():
         if "Time = " in line:
@@ -601,32 +693,47 @@ async def api_telemetry_residuals(case_name: str) -> dict[str, Any]:
             except ValueError:
                 pass
         match = pattern.search(line)
-        if match:
-            var, val_str = match.groups()
-            try:
-                val = float(val_str)
-                residuals_map[var].append(val)
-                if var == "p":
-                    iter_list.append(current_iter)
-            except ValueError:
-                pass
+        if match and current_iter > 0:
+            var = match.group(1)
+            if current_iter not in iter_data:
+                iter_data[current_iter] = {}
+            # Keep the FIRST residual for each variable in this time-step (initial residual)
+            if var not in iter_data[current_iter]:
+                try:
+                    iter_data[current_iter][var] = float(match.group(2))
+                except ValueError:
+                    pass
+
+    sorted_iters = sorted(iter_data.keys())[-150:]
+    all_vars = ["p", "Ux", "Uy", "Uz", "k", "omega"]
+    residuals_aligned: dict[str, list[Optional[float]]] = {v: [] for v in all_vars}
+    for it in sorted_iters:
+        d = iter_data[it]
+        for v in all_vars:
+            residuals_aligned[v].append(d.get(v))
 
     return {
-        "has_data": len(iter_list) > 0,
-        "iterations": iter_list[-150:],
-        "residuals": {k: v[-150:] for k, v in residuals_map.items()},
+        "has_data": len(sorted_iters) > 0,
+        "iterations": sorted_iters,
+        "residuals": residuals_aligned,
     }
 
 
 @app.get("/api/telemetry/logs")
 async def api_telemetry_logs(case_name: str, log_type: str = "simpleFoam", lines: int = 100) -> dict[str, Any]:
-    """Tail log files (e.g. simpleFoam, snappyHexMesh, convergenceMonitor)."""
+    """Tail log files with strict type whitelisting and length limits."""
+    if not CASE_NAME_REGEX.match(case_name):
+        raise HTTPException(status_code=400, detail="Invalid case_name")
+    if log_type not in ALLOWED_LOG_TYPES:
+        raise HTTPException(status_code=400, detail=f"Unsupported log_type: {log_type}")
+
+    safe_lines = max(1, min(int(lines), 2000))
     filename = f"log.{log_type}"
     content = ""
 
     if ssh_client.is_connected:
         remote_path = f"{ssh_client.remote_repo_path}/cases/{case_name}/{filename}"
-        content = ssh_client.read_remote_text(remote_path, max_lines=lines)
+        content = await asyncio.to_thread(ssh_client.read_remote_text, remote_path, max_lines=safe_lines)
 
     if not content:
         local_file = PROJECT_ROOT / "cases" / case_name / filename
@@ -634,7 +741,7 @@ async def api_telemetry_logs(case_name: str, log_type: str = "simpleFoam", lines
             try:
                 with open(local_file, encoding="utf-8", errors="replace") as f:
                     raw_lines = f.readlines()
-                    content = "".join(raw_lines[-lines:])
+                    content = "".join(raw_lines[-safe_lines:])
             except Exception:
                 pass
 
@@ -665,7 +772,7 @@ async def api_list_cases() -> list[dict[str, Any]]:
     # Remote cases if connected
     if ssh_client.is_connected:
         try:
-            remote_cases = ssh_client.list_remote_cases()
+            remote_cases = await asyncio.to_thread(ssh_client.list_remote_cases)
             for rc in remote_cases:
                 cname = rc["name"]
                 if cname in cases_dict:
@@ -721,7 +828,6 @@ def main() -> None:
 
     target_port = args.port
     if is_port_in_use(target_port, args.host):
-        # Check if an existing instance of CFD Studio is already running on this port
         try:
             req = urllib.request.urlopen(f"http://{args.host}:{target_port}/api/config/schema-defaults", timeout=1)
             if req.status == 200:
@@ -736,7 +842,6 @@ def main() -> None:
         except Exception:
             pass
 
-        # If port is occupied by another application, switch to the next available port
         while is_port_in_use(target_port, args.host):
             target_port += 1
         print(f"[*] Port {args.port} was busy. Switched to next available port: {target_port}")

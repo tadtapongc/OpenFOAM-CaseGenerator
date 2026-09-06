@@ -257,6 +257,10 @@ class ProjectTest(unittest.TestCase):
         self.assertEqual(len(triangles), 1)
 
     def test_plotting_headless_manager_none(self):
+        try:
+            import matplotlib
+        except ImportError:
+            self.skipTest("matplotlib not installed")
         from cfd_gen.postproc.plotting import live_monitor
         with patch("matplotlib.pyplot.show"), patch(
             "cfd_gen.postproc.forces.load_axis_config", return_value=(2, -1, 1, -1, "-z", "-y")

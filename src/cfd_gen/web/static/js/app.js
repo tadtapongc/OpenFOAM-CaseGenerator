@@ -88,9 +88,9 @@ class CFDApp {
     await this.loadLocalClusterConfig();
     await this.checkClusterStatus();
     await this.loadTemplatesList();
+    await this.loadExistingSTLs();
     // Automatically load configs/config.json as the default config
     await this.loadConfigFile('config.json', true);
-    await this.loadExistingSTLs();
     await this.loadCasesArchive();
 
     // 5. Start background queue polling
@@ -236,6 +236,7 @@ class CFDApp {
     // Action buttons
     document.getElementById('btn-validate-config')?.addEventListener('click', () => this.validateCurrentConfig());
     document.getElementById('btn-save-config')?.addEventListener('click', () => this.saveCurrentConfig(false));
+    document.getElementById('btn-generate-local')?.addEventListener('click', () => this.generateCaseLocally());
     document.getElementById('btn-submit-case')?.addEventListener('click', () => this.saveCurrentConfig(true));
     document.getElementById('btn-quick-run')?.addEventListener('click', () => this.saveCurrentConfig(true));
 
@@ -386,12 +387,24 @@ class CFDApp {
       if (meshParams.far_wake_level !== undefined) this.setVal('cfg-override-farwake', meshParams.far_wake_level);
     }
 
-    // Render active STL chips
+    // Render active STL chips (reconcile placeholders with available server geometries)
     const newStls = cfg.stl_files || [];
-    this.renderActiveSTLChips(newStls);
-    if (newStls.length > 0 && newStls[0] !== this.currentSTLName) {
-      this.currentSTLName = newStls[0];
-      this.loadSTLGeometryFromServer(newStls[0]);
+    if (this.availableSTLs && this.availableSTLs.length > 0) {
+      const availableNames = new Set(this.availableSTLs.map((s) => s.filename));
+      const validActive = newStls.filter((f) => availableNames.has(f));
+      if (validActive.length > 0) {
+        this.activeConfig.stl_files = validActive;
+      } else {
+        // Fall back to first available geometry if config uses a generic placeholder (e.g. geometry.stl)
+        this.activeConfig.stl_files = [this.availableSTLs[0].filename];
+      }
+    } else {
+      this.activeConfig.stl_files = newStls;
+    }
+    this.renderActiveSTLChips(this.activeConfig.stl_files);
+    if (this.activeConfig.stl_files.length > 0 && this.activeConfig.stl_files[0] !== this.currentSTLName) {
+      this.currentSTLName = this.activeConfig.stl_files[0];
+      this.loadSTLGeometryFromServer(this.activeConfig.stl_files[0]);
     }
   }
 
@@ -531,13 +544,6 @@ class CFDApp {
         },
       };
     }
-
-    // Clean up any default dictionary keys so JSON remains minimal and clean
-    delete cfg.fluid;
-    delete cfg.turbulence;
-    delete cfg.solver;
-    delete cfg.force_refs;
-    delete cfg.layers;
 
     this.activeConfig = cfg;
     this.syncConfigToJsonDrawer();
@@ -697,6 +703,11 @@ class CFDApp {
       btnFitDomain?.classList.remove('active');
     });
 
+    // Camera Reset / Recenter
+    document.getElementById('btn-reset-camera')?.addEventListener('click', () => {
+      this.viewer.resetCamera();
+    });
+
     // Camera angle presets (Iso, Top, Side, Front)
     document.querySelectorAll('.btn-view-angle').forEach((btn) => {
       btn.addEventListener('click', (e) => {
@@ -802,7 +813,11 @@ class CFDApp {
       if (!res.ok) return;
       const data = await res.json();
       if (data.domain_box && data.domain_box.min && data.domain_box.max) {
-        const sym = this.activeConfig.symmetry_plane !== undefined ? this.activeConfig.symmetry_plane : 0.0;
+        const faces = this.activeConfig.domain_faces || {};
+        const hasSymmetry = Object.values(faces).some((f) => String(f).toLowerCase().includes('symmetry'));
+        const sym = (hasSymmetry && this.activeConfig.symmetry_plane !== undefined && this.activeConfig.symmetry_plane !== null)
+          ? Number(this.activeConfig.symmetry_plane)
+          : null;
         const flowDir = this.activeConfig.flow?.direction || '-z';
         this.viewer.updateDomainBox(data.domain_box.min, data.domain_box.max, sym, flowDir);
         if (autoFit) {
@@ -908,13 +923,22 @@ class CFDApp {
     try {
       const res = await fetch('/api/stl/list');
       const stls = await res.json();
+      this.availableSTLs = stls || [];
       if (stls && stls.length > 0) {
-        // If no STL is active, pick the first one
-        if (!this.activeConfig.stl_files || this.activeConfig.stl_files.length === 0) {
+        const availableNames = new Set(stls.map((s) => s.filename));
+        const validActive = (this.activeConfig?.stl_files || []).filter((f) => availableNames.has(f));
+        if (validActive.length > 0) {
+          this.activeConfig.stl_files = validActive;
+        } else {
           this.activeConfig.stl_files = [stls[0].filename];
-          this.renderActiveSTLChips(this.activeConfig.stl_files);
-          await this.loadSTLGeometryFromServer(stls[0].filename);
         }
+        this.renderActiveSTLChips(this.activeConfig.stl_files);
+        await this.loadSTLGeometryFromServer(this.activeConfig.stl_files[0]);
+      } else {
+        // No STLs available in stl/ directory
+        this.activeConfig.stl_files = [];
+        this.renderActiveSTLChips([]);
+        await this.updateDomainBoxVisualization(true);
       }
     } catch {}
   }
@@ -990,6 +1014,39 @@ class CFDApp {
     }
   }
 
+  async generateCaseLocally() {
+    this.buildConfigFromVisualForm();
+    const btnGenLocal = document.getElementById('btn-generate-local');
+    if (btnGenLocal) {
+      btnGenLocal.disabled = true;
+      btnGenLocal.textContent = 'Generating...';
+    }
+    try {
+      const res = await fetch('/api/case/generate-and-submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          config: this.activeConfig,
+          upload_to_cluster: false,
+          generate_remotely: false,
+          submit_slurm: false,
+          generate_locally: true,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Generation failed');
+      this.showToast(`Case '${data.case_name}' generated locally in cases/`, 'success');
+      await this.loadCasesArchive();
+    } catch (err) {
+      this.showToast(`Generation error: ${err.message}`, 'error');
+    } finally {
+      if (btnGenLocal) {
+        btnGenLocal.disabled = false;
+        btnGenLocal.textContent = 'Generate Locally';
+      }
+    }
+  }
+
   async saveCurrentConfig(submitToCluster = false) {
     this.buildConfigFromVisualForm();
 
@@ -1014,6 +1071,7 @@ class CFDApp {
           upload_to_cluster: submitToCluster,
           generate_remotely: submitToCluster,
           submit_slurm: submitToCluster,
+          generate_locally: !submitToCluster,
         }),
       });
       const data = await res.json();
@@ -1066,27 +1124,12 @@ class CFDApp {
 
   async loadLocalClusterConfig() {
     let cfg = null;
-
-    // 1. First check browser localStorage for credentials saved on this machine
     try {
-      const stored = localStorage.getItem('cfd_cluster_config');
-      if (stored) {
-        cfg = JSON.parse(stored);
+      const res = await fetch('/api/cluster/saved-config');
+      if (res.ok) {
+        cfg = await res.json();
       }
     } catch {}
-
-    // 2. Fallback or sync with server-side saved config (~/.cfd_gen_cluster.json)
-    if (!cfg || !cfg.host) {
-      try {
-        const res = await fetch('/api/cluster/saved-config');
-        if (res.ok) {
-          const serverCfg = await res.json();
-          if (serverCfg && serverCfg.host) {
-            cfg = serverCfg;
-          }
-        }
-      } catch {}
-    }
 
     if (cfg) {
       if (cfg.host) this.setValText('disp-cluster-host', cfg.host);
@@ -1097,8 +1140,10 @@ class CFDApp {
       this.setVal('ssh-username', cfg.username || '');
       this.setVal('ssh-remotepath', cfg.remote_repo_path || '');
       this.setVal('ssh-keypath', cfg.key_path || '');
-      if (cfg.saved_password) {
-        this.setVal('ssh-password', cfg.saved_password);
+
+      const pwHint = document.getElementById('ssh-saved-pw-hint');
+      if (pwHint) {
+        pwHint.style.display = cfg.has_saved_password ? 'block' : 'none';
       }
     } else {
       this.setValText('disp-cluster-host', 'Not Configured');
@@ -1112,7 +1157,6 @@ class CFDApp {
     const modal = document.getElementById('ssh-modal');
     if (!modal) return;
 
-    // Load saved settings from local storage or server
     await this.loadLocalClusterConfig();
 
     document.getElementById('ssh-error-alert').style.display = 'none';
@@ -1141,19 +1185,6 @@ class CFDApp {
     succAlert.style.display = 'none';
     submitBtn.disabled = true;
     submitBtn.textContent = 'Connecting...';
-
-    // Persist credentials locally in localStorage
-    try {
-      const localCfg = {
-        host,
-        username,
-        key_path: keyPath || '',
-        remote_repo_path: remoteRepo,
-        saved_password: savePw ? (password || '') : '',
-        save_password: savePw,
-      };
-      localStorage.setItem('cfd_cluster_config', JSON.stringify(localCfg));
-    } catch {}
 
     // Update display metrics immediately
     if (host) this.setValText('disp-cluster-host', host);

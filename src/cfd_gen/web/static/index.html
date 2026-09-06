@@ -555,6 +555,7 @@
           <div class="config-actions-bar">
             <button class="btn btn-outline" id="btn-validate-config">Validate</button>
             <button class="btn btn-secondary" id="btn-save-config">Save Config</button>
+            <button class="btn btn-secondary" id="btn-generate-local">Generate Locally</button>
             <button class="btn btn-primary" id="btn-submit-case">Launch Simulation on Cluster</button>
           </div>
 
@@ -774,7 +775,8 @@
 
           <div class="form-group">
             <label for="ssh-password">Password</label>
-            <input type="password" id="ssh-password" class="input" placeholder="Enter password">
+            <input type="password" id="ssh-password" class="input" placeholder="Enter password (leave blank to use saved session)">
+            <span class="field-hint" id="ssh-saved-pw-hint" style="display:none; color: #38bdf8; font-weight: 500;">✓ Saved password available in local session</span>
           </div>
 
           <div class="form-group">

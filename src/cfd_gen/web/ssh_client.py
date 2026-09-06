@@ -5,6 +5,8 @@ from __future__ import annotations
 import io
 import logging
 import os
+import re
+import shlex
 from pathlib import Path
 from typing import Any, Optional
 
@@ -148,12 +150,13 @@ class ClusterSSHClient:
         if not self.is_connected:
             return {"connected": False, "error": "Not connected"}
 
-        # Run environment checks
+        # Run environment checks with safely quoted paths
+        quoted_repo = shlex.quote(self.remote_repo_path)
         cmd = (
             f"echo 'HOSTNAME='$(hostname) && "
             f"which sbatch >/dev/null 2>&1 && echo 'SLURM=available' || echo 'SLURM=missing' && "
             f"which python3 >/dev/null 2>&1 && echo 'PYTHON='$(which python3) || echo 'PYTHON=missing' && "
-            f"[ -d '{self.remote_repo_path}' ] && echo 'REPO=exists' || echo 'REPO=missing'"
+            f"[ -d {quoted_repo} ] && echo 'REPO=exists' || echo 'REPO=missing'"
         )
         code, out, err = self.run_command(cmd, timeout=15)
         lines = dict(item.split("=", 1) for item in out.strip().splitlines() if "=" in item)
@@ -215,8 +218,10 @@ class ClusterSSHClient:
 
     def read_remote_text(self, remote_path: str, max_lines: Optional[int] = None) -> str:
         """Read a remote text file via SFTP or tail command."""
-        if max_lines:
-            cmd = f"tail -n {max_lines} '{remote_path}'"
+        if max_lines is not None:
+            safe_lines = max(1, min(int(max_lines), 2000))
+            quoted_path = shlex.quote(remote_path)
+            cmd = f"tail -n {safe_lines} {quoted_path}"
             code, out, err = self.run_command(cmd, timeout=10)
             if code == 0:
                 return out
@@ -234,7 +239,11 @@ class ClusterSSHClient:
     def get_slurm_queue(self, username: Optional[str] = None) -> list[dict[str, str]]:
         """Query SLURM squeue for user jobs."""
         user = username or self.username
-        cmd = f"squeue -u {user} --format='%i|%j|%P|%T|%M|%l|%D|%R' --noheader"
+        if not user or not re.match(r"^[A-Za-z0-9_.-]+$", user):
+            return []
+
+        quoted_user = shlex.quote(user)
+        cmd = f"squeue -u {quoted_user} --format='%i|%j|%P|%T|%M|%l|%D|%R' --noheader"
         code, out, err = self.run_command(cmd, timeout=15)
         if code != 0:
             return []
@@ -260,8 +269,12 @@ class ClusterSSHClient:
 
     def submit_job(self, case_name: str) -> dict[str, Any]:
         """Submit sbatch run.sh for a case on the cluster."""
+        if not re.match(r"^[A-Za-z0-9_-]+$", case_name):
+            return {"success": False, "error": f"Invalid case name: {case_name}"}
+
         remote_case_dir = f"{self.remote_repo_path}/cases/{case_name}"
-        cmd = f"cd '{remote_case_dir}' && sbatch run.sh"
+        quoted_case_dir = shlex.quote(remote_case_dir)
+        cmd = f"cd {quoted_case_dir} && sbatch run.sh"
         code, out, err = self.run_command(cmd, timeout=20)
         if code != 0:
             return {"success": False, "error": err or out or "Failed to execute sbatch"}
@@ -282,19 +295,25 @@ class ClusterSSHClient:
 
     def cancel_job(self, job_id: str) -> dict[str, Any]:
         """Cancel a SLURM job."""
-        cmd = f"scancel {job_id}"
+        job_id_str = str(job_id).strip()
+        if not re.match(r"^[0-9]+$", job_id_str):
+            return {"success": False, "job_id": job_id_str, "error": "Job ID must be numeric"}
+
+        cmd = f"scancel {shlex.quote(job_id_str)}"
         code, out, err = self.run_command(cmd, timeout=15)
         return {
             "success": code == 0,
-            "job_id": job_id,
+            "job_id": job_id_str,
             "error": err if code != 0 else None,
         }
 
     def list_remote_cases(self) -> list[dict[str, Any]]:
         """List cases in cases/ folder on the cluster."""
+        cases_dir = f"{self.remote_repo_path}/cases"
+        quoted_dir = shlex.quote(cases_dir)
         cmd = (
-            f"[ -d '{self.remote_repo_path}/cases' ] && "
-            f"ls -l --time-style=+%Y-%m-%d\\ %H:%M:%S '{self.remote_repo_path}/cases' || echo ''"
+            f"[ -d {quoted_dir} ] && "
+            f"ls -l --time-style=+%Y-%m-%d\\ %H:%M:%S {quoted_dir} || echo ''"
         )
         code, out, err = self.run_command(cmd, timeout=15)
         cases: list[dict[str, Any]] = []

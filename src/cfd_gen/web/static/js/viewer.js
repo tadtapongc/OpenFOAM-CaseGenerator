@@ -73,15 +73,18 @@ class STLViewer {
     }
 
     // 5. Lighting (Studio Aero lighting)
-    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x1e293b, 0.9);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.45);
+    this.scene.add(ambientLight);
+
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x1e293b, 0.75);
     this.scene.add(hemiLight);
 
-    const dirLight1 = new THREE.DirectionalLight(0x00d2ff, 0.7);
-    dirLight1.position.set(10, 20, 15);
+    const dirLight1 = new THREE.DirectionalLight(0x00d2ff, 0.65);
+    dirLight1.position.set(20, 30, 25);
     this.scene.add(dirLight1);
 
-    const dirLight2 = new THREE.DirectionalLight(0xffffff, 0.6);
-    dirLight2.position.set(-10, -10, -15);
+    const dirLight2 = new THREE.DirectionalLight(0xffffff, 0.55);
+    dirLight2.position.set(-20, 15, -25);
     this.scene.add(dirLight2);
 
     // 6. Ground Grid (Spans 60m to encompass complete wind tunnel)
@@ -105,6 +108,34 @@ class STLViewer {
 
     // Animation Loop
     this.animate();
+  }
+
+  disposeObject(obj) {
+    if (!obj) return;
+    if (obj.geometry) {
+      obj.geometry.dispose();
+    }
+    if (obj.material) {
+      if (Array.isArray(obj.material)) {
+        obj.material.forEach((m) => {
+          if (m.map) m.map.dispose();
+          m.dispose();
+        });
+      } else {
+        if (obj.material.map) obj.material.map.dispose();
+        obj.material.dispose();
+      }
+    }
+  }
+
+  disposeGroup(group) {
+    if (!group) return;
+    group.traverse((child) => {
+      this.disposeObject(child);
+    });
+    while (group.children && group.children.length > 0) {
+      group.remove(group.children[0]);
+    }
   }
 
   createGroundGrid() {
@@ -145,7 +176,7 @@ class STLViewer {
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.minFilter = THREE.LinearFilter;
-    const spriteMat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
+    const spriteMat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: true, depthWrite: false });
     const sprite = new THREE.Sprite(spriteMat);
     sprite.scale.set(3.8, 0.95, 1.0);
     return sprite;
@@ -184,19 +215,22 @@ class STLViewer {
 
       if (this.currentMesh) {
         this.scene.remove(this.currentMesh);
-        if (this.currentMesh.geometry) this.currentMesh.geometry.dispose();
+        this.disposeObject(this.currentMesh);
+        this.currentMesh = null;
       }
       if (this.bboxHelper) {
         this.scene.remove(this.bboxHelper);
+        this.disposeObject(this.bboxHelper);
         this.bboxHelper = null;
       }
 
-      // Material: Sleek aerodynamic metallic finish
+      // Material: Sleek aerodynamic metallic finish with DoubleSide for thin aero surfaces
       const material = new THREE.MeshStandardMaterial({
         color: 0x38bdf8,
         metalness: 0.35,
         roughness: 0.35,
         flatShading: false,
+        side: THREE.DoubleSide,
       });
 
       this.currentMesh = new THREE.Mesh(geometry, material);
@@ -218,6 +252,11 @@ class STLViewer {
       const warnEl = document.getElementById('scale-warning');
       if (warnEl) {
         warnEl.style.display = maxDim > 20.0 ? 'block' : 'none';
+      }
+
+      // If domain not yet set, place ground grid at model bottom
+      if (!this.domainMin && this.groundGrid) {
+        this.groundGrid.position.set(0, bbox.min.y, 0);
       }
 
       // Proportional origin axes scale
@@ -247,6 +286,7 @@ class STLViewer {
   fitView(target = 'domain') {
     this.currentFocusTarget = target;
     const fov = this.camera.fov * (Math.PI / 180);
+    this.camera.up.set(0, 1, 0);
 
     if (target === 'domain' && this.domainMin && this.domainMax) {
       const minVec = new THREE.Vector3(...this.domainMin);
@@ -320,13 +360,17 @@ class STLViewer {
     }
 
     if (angle === 'top') {
-      this.camera.position.set(center.x, center.y + dist * 1.25, center.z + 0.001);
-    } else if (angle === 'side') {
-      this.camera.position.set(center.x + dist * 1.25, center.y, center.z);
-    } else if (angle === 'front') {
-      this.camera.position.set(center.x, center.y, center.z + dist * 1.25);
-    } else { // iso
-      this.camera.position.set(center.x + dist * 0.75, center.y + dist * 0.48, center.z + dist * 0.85);
+      this.camera.up.set(0, 0, -1);
+      this.camera.position.set(center.x, center.y + dist * 1.25, center.z);
+    } else {
+      this.camera.up.set(0, 1, 0);
+      if (angle === 'side') {
+        this.camera.position.set(center.x + dist * 1.25, center.y, center.z);
+      } else if (angle === 'front') {
+        this.camera.position.set(center.x, center.y, center.z + dist * 1.25);
+      } else { // iso
+        this.camera.position.set(center.x + dist * 0.75, center.y + dist * 0.48, center.z + dist * 0.85);
+      }
     }
 
     this.camera.lookAt(center);
@@ -339,6 +383,7 @@ class STLViewer {
   updateDomainBox(domainMin, domainMax, symPlane = null, flowDirection = '-z') {
     if (this.domainBoxGroup) {
       this.scene.remove(this.domainBoxGroup);
+      this.disposeGroup(this.domainBoxGroup);
       this.domainBoxGroup = null;
     }
 
@@ -398,12 +443,40 @@ class STLViewer {
     boxMesh.position.copy(center);
     this.domainBoxGroup.add(boxMesh);
 
-    // 4. Dedicated Inlet Face (Electric Blue with badge)
-    const isInletAtMaxZ = this.flowDirection.includes('-z');
-    const inletZ = isInletAtMaxZ ? maxVec.z : minVec.z;
-    const outletZ = isInletAtMaxZ ? minVec.z : maxVec.z;
+    // 4. Dedicated Inlet and Outlet Faces aligned with active flow direction
+    const flowVec = this.parseFlowDirectionVector(this.flowDirection);
+    let flowAxis = 'z';
+    let flowSign = -1;
+    if (Math.abs(flowVec.x) > 0) { flowAxis = 'x'; flowSign = Math.sign(flowVec.x); }
+    else if (Math.abs(flowVec.y) > 0) { flowAxis = 'y'; flowSign = Math.sign(flowVec.y); }
+    else { flowAxis = 'z'; flowSign = Math.sign(flowVec.z); }
 
-    const inletPlaneGeo = new THREE.PlaneGeometry(size.x, size.y);
+    let inletPos = new THREE.Vector3().copy(center);
+    let outletPos = new THREE.Vector3().copy(center);
+    let faceWidth = size.x, faceHeight = size.y;
+    let planeRotation = new THREE.Euler(0, 0, 0);
+
+    if (flowAxis === 'x') {
+      faceWidth = size.z;
+      faceHeight = size.y;
+      planeRotation = new THREE.Euler(0, Math.PI / 2, 0);
+      inletPos.x = flowSign < 0 ? maxVec.x : minVec.x;
+      outletPos.x = flowSign < 0 ? minVec.x : maxVec.x;
+    } else if (flowAxis === 'y') {
+      faceWidth = size.x;
+      faceHeight = size.z;
+      planeRotation = new THREE.Euler(-Math.PI / 2, 0, 0);
+      inletPos.y = flowSign < 0 ? maxVec.y : minVec.y;
+      outletPos.y = flowSign < 0 ? minVec.y : maxVec.y;
+    } else { // z
+      faceWidth = size.x;
+      faceHeight = size.y;
+      planeRotation = new THREE.Euler(0, 0, 0);
+      inletPos.z = flowSign < 0 ? maxVec.z : minVec.z;
+      outletPos.z = flowSign < 0 ? minVec.z : maxVec.z;
+    }
+
+    const inletPlaneGeo = new THREE.PlaneGeometry(faceWidth, faceHeight);
     const inletMat = new THREE.MeshBasicMaterial({
       color: 0x0284c7,
       transparent: true,
@@ -412,15 +485,18 @@ class STLViewer {
       depthWrite: false,
     });
     const inletMesh = new THREE.Mesh(inletPlaneGeo, inletMat);
-    inletMesh.position.set(center.x, center.y, inletZ);
+    inletMesh.rotation.copy(planeRotation);
+    inletMesh.position.copy(inletPos);
     this.domainBoxGroup.add(inletMesh);
 
     const inletBadge = this.createCanvasTextSprite('INLET  ➔', '#00f0ff', 'rgba(15, 23, 42, 0.9)');
-    inletBadge.position.set(center.x, center.y, inletZ + (isInletAtMaxZ ? 0.2 : -0.2));
+    inletBadge.position.copy(inletPos);
+    if (flowAxis === 'z') inletBadge.position.z += (flowSign < 0 ? 0.2 : -0.2);
+    else if (flowAxis === 'x') inletBadge.position.x += (flowSign < 0 ? 0.2 : -0.2);
+    else if (flowAxis === 'y') inletBadge.position.y += (flowSign < 0 ? 0.2 : -0.2);
     this.domainBoxGroup.add(inletBadge);
 
-    // 5. Dedicated Outlet Face (Warm Orange with badge)
-    const outletPlaneGeo = new THREE.PlaneGeometry(size.x, size.y);
+    const outletPlaneGeo = new THREE.PlaneGeometry(faceWidth, faceHeight);
     const outletMat = new THREE.MeshBasicMaterial({
       color: 0xea580c,
       transparent: true,
@@ -429,11 +505,15 @@ class STLViewer {
       depthWrite: false,
     });
     const outletMesh = new THREE.Mesh(outletPlaneGeo, outletMat);
-    outletMesh.position.set(center.x, center.y, outletZ);
+    outletMesh.rotation.copy(planeRotation);
+    outletMesh.position.copy(outletPos);
     this.domainBoxGroup.add(outletMesh);
 
     const outletBadge = this.createCanvasTextSprite('➔  OUTLET', '#f97316', 'rgba(30, 20, 15, 0.9)');
-    outletBadge.position.set(center.x, center.y, outletZ + (isInletAtMaxZ ? -0.2 : 0.2));
+    outletBadge.position.copy(outletPos);
+    if (flowAxis === 'z') outletBadge.position.z += (flowSign < 0 ? -0.2 : 0.2);
+    else if (flowAxis === 'x') outletBadge.position.x += (flowSign < 0 ? -0.2 : 0.2);
+    else if (flowAxis === 'y') outletBadge.position.y += (flowSign < 0 ? -0.2 : 0.2);
     this.domainBoxGroup.add(outletBadge);
 
     // 6. Ground Face (Dark road surface at domainMin.y)
@@ -476,9 +556,10 @@ class STLViewer {
     }
 
     // 8. Update Flow Arrow position to point into wind tunnel from inlet
-    const flowOrigin = new THREE.Vector3(center.x, center.y, isInletAtMaxZ ? maxVec.z - 0.6 : minVec.z + 0.6);
     const flowDirVec = this.parseFlowDirectionVector(this.flowDirection);
-    this.updateFlowArrow(flowDirVec, flowOrigin, Math.min(3.5, size.z * 0.12));
+    const flowArrowLen = Math.min(3.5, Math.max(1.0, (flowAxis === 'x' ? size.x : flowAxis === 'y' ? size.y : size.z) * 0.1));
+    const flowOrigin = inletPos.clone().addScaledVector(flowDirVec, flowArrowLen * 0.2);
+    this.updateFlowArrow(flowDirVec, flowOrigin, flowArrowLen);
 
     this.domainBoxGroup.visible = this.showDomain;
     this.scene.add(this.domainBoxGroup);
@@ -736,6 +817,9 @@ class STLViewer {
 
   animate() {
     requestAnimationFrame(() => this.animate());
+    if (!this.container || this.container.clientWidth <= 0 || this.container.clientHeight <= 0) {
+      return; // Skip rendering when tab is hidden or 0 size
+    }
     if (this.controls) this.controls.update();
 
     if (this.renderer && this.scene && this.camera) {
