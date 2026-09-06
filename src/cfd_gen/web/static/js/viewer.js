@@ -16,11 +16,15 @@ class STLViewer {
     this.domainBoxGroup = null;
     this.groundGrid = null;
     this.flowArrow = null;
+    this.originAxesGroup = null;
+    this.gizmoScene = null;
+    this.gizmoCamera = null;
 
     this.showBounds = true;
     this.showDomain = true;
     this.showGround = true;
     this.showFlow = true;
+    this.showAxes = true;
 
     this.currentFocusTarget = 'domain'; // 'domain' or 'model'
     this.domainMin = null;
@@ -53,6 +57,7 @@ class STLViewer {
     this.renderer.setSize(width, height);
     this.renderer.setPixelRatio(window.devicePixelRatio);
     this.renderer.shadowMap.enabled = true;
+    this.renderer.autoClear = false;
 
     // Clean container and attach
     const emptyMsg = document.getElementById('viewer-empty-msg');
@@ -84,6 +89,12 @@ class STLViewer {
 
     // 7. Flow Vector Arrow (default -Z)
     this.updateFlowArrow(new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, 1.2, 8.0), 3.0);
+
+    // 8. 3D Origin Axes Triad (at CAD origin 0,0,0)
+    this.createOriginAxes(1.5);
+
+    // 9. Corner Orientation Trihedron Gizmo (synchronous camera tracking)
+    this.initGizmo();
 
     // Handle Resize (window and container observer)
     window.addEventListener('resize', () => this.onResize());
@@ -208,6 +219,9 @@ class STLViewer {
       if (warnEl) {
         warnEl.style.display = maxDim > 20.0 ? 'block' : 'none';
       }
+
+      // Proportional origin axes scale
+      this.updateOriginAxesScale(maxDim);
 
       // Camera auto-framing
       if (this.domainMin && this.domainMax) {
@@ -343,6 +357,9 @@ class STLViewer {
 
     const size = new THREE.Vector3().subVectors(maxVec, minVec);
     const center = new THREE.Vector3().addVectors(minVec, maxVec).multiplyScalar(0.5);
+
+    // Update origin axes scale according to domain scale
+    this.updateOriginAxesScale(Math.max(size.x, size.y, size.z));
 
     // 1. Vibrant Neon Cyan Domain Wireframe Cage
     const wireHelper = new THREE.Box3Helper(box3, 0x00f0ff);
@@ -498,6 +515,215 @@ class STLViewer {
     if (this.flowArrow) this.flowArrow.visible = show;
   }
 
+  toggleAxes(show) {
+    this.showAxes = show;
+    if (this.originAxesGroup) this.originAxesGroup.visible = show;
+    const legend = document.getElementById('viewer-axes-legend');
+    if (legend) legend.style.display = show ? 'flex' : 'none';
+  }
+
+  createAxisLabel(text, color, scale = 0.35, isSceneAxis = false) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+
+    // Circular dark slate badge background
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.92)';
+    ctx.beginPath();
+    ctx.arc(64, 64, 54, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Colored perimeter rim
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 6;
+    ctx.stroke();
+
+    // Bold crisp typography
+    ctx.font = 'bold 64px "JetBrains Mono", ui-monospace, monospace, sans-serif';
+    ctx.fillStyle = color;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 64, 66);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.minFilter = THREE.LinearFilter;
+    texture.needsUpdate = true;
+
+    const spriteMat = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: isSceneAxis ? true : false,
+      depthWrite: false,
+    });
+    const sprite = new THREE.Sprite(spriteMat);
+    sprite.scale.set(scale, scale, 1.0);
+    return sprite;
+  }
+
+  createGizmoAxis(dir, hexColor, cssColor, label, shaftRadius, shaftLength, headRadius, headLength, labelScale = 0.45, isSceneAxis = false) {
+    const group = new THREE.Group();
+    const mat = new THREE.MeshLambertMaterial({ color: hexColor });
+
+    const shaftGeo = new THREE.CylinderGeometry(shaftRadius, shaftRadius, shaftLength, 16);
+    const shaft = new THREE.Mesh(shaftGeo, mat);
+
+    const headGeo = new THREE.ConeGeometry(headRadius, headLength, 16);
+    const head = new THREE.Mesh(headGeo, mat);
+
+    if (dir.x !== 0) {
+      const s = Math.sign(dir.x);
+      shaft.rotation.z = -Math.PI / 2 * s;
+      shaft.position.x = (shaftLength / 2) * s;
+      head.rotation.z = -Math.PI / 2 * s;
+      head.position.x = (shaftLength + headLength / 2) * s;
+    } else if (dir.y !== 0) {
+      const s = Math.sign(dir.y);
+      shaft.position.y = (shaftLength / 2) * s;
+      head.position.y = (shaftLength + headLength / 2) * s;
+      if (s < 0) {
+        shaft.rotation.z = Math.PI;
+        head.rotation.z = Math.PI;
+      }
+    } else if (dir.z !== 0) {
+      const s = Math.sign(dir.z);
+      shaft.rotation.x = Math.PI / 2 * s;
+      shaft.position.z = (shaftLength / 2) * s;
+      head.rotation.x = Math.PI / 2 * s;
+      head.position.z = (shaftLength + headLength / 2) * s;
+    }
+
+    group.add(shaft);
+    group.add(head);
+
+    // Label sprite at arrow tip
+    const labelSprite = this.createAxisLabel(label, cssColor, labelScale, isSceneAxis);
+    const labelDist = shaftLength + headLength + (isSceneAxis ? headLength * 0.5 : 0.22);
+    labelSprite.position.set(dir.x * labelDist, dir.y * labelDist, dir.z * labelDist);
+    group.add(labelSprite);
+
+    return group;
+  }
+
+  createOriginAxes(axisLength = 1.5) {
+    if (this.originAxesGroup) {
+      this.scene.remove(this.originAxesGroup);
+      this.originAxesGroup = null;
+    }
+
+    this.originAxesGroup = new THREE.Group();
+
+    // Center origin sphere at (0, 0, 0)
+    const centerGeo = new THREE.SphereGeometry(axisLength * 0.035, 16, 16);
+    const centerMat = new THREE.MeshLambertMaterial({ color: 0x94a3b8 });
+    const centerMesh = new THREE.Mesh(centerGeo, centerMat);
+    this.originAxesGroup.add(centerMesh);
+
+    // Origin (0,0,0) subtle badge
+    const originBadge = this.createAxisLabel('0', '#94a3b8', axisLength * 0.18, true);
+    originBadge.position.set(-axisLength * 0.08, -axisLength * 0.08, -axisLength * 0.08);
+    this.originAxesGroup.add(originBadge);
+
+    const shaftRadius = axisLength * 0.016;
+    const headRadius = axisLength * 0.045;
+    const headLength = axisLength * 0.18;
+    const shaftLength = axisLength - headLength;
+
+    // +X (Red - Lateral)
+    const xGroup = this.createGizmoAxis(
+      new THREE.Vector3(1, 0, 0),
+      0xef4444,
+      '#ef4444',
+      'X',
+      shaftRadius,
+      shaftLength,
+      headRadius,
+      headLength,
+      axisLength * 0.26,
+      true
+    );
+    this.originAxesGroup.add(xGroup);
+
+    // +Y (Green - Elevation)
+    const yGroup = this.createGizmoAxis(
+      new THREE.Vector3(0, 1, 0),
+      0x10b981,
+      '#10b981',
+      'Y',
+      shaftRadius,
+      shaftLength,
+      headRadius,
+      headLength,
+      axisLength * 0.26,
+      true
+    );
+    this.originAxesGroup.add(yGroup);
+
+    // +Z (Blue - Streamwise)
+    const zGroup = this.createGizmoAxis(
+      new THREE.Vector3(0, 0, 1),
+      0x3b82f6,
+      '#3b82f6',
+      'Z',
+      shaftRadius,
+      shaftLength,
+      headRadius,
+      headLength,
+      axisLength * 0.26,
+      true
+    );
+    this.originAxesGroup.add(zGroup);
+
+    this.originAxesGroup.visible = this.showAxes;
+    this.scene.add(this.originAxesGroup);
+  }
+
+  initGizmo() {
+    this.gizmoScene = new THREE.Scene();
+    this.gizmoCamera = new THREE.OrthographicCamera(-1.8, 1.8, 1.8, -1.8, 0.1, 50);
+
+    const ambient = new THREE.AmbientLight(0xffffff, 0.85);
+    this.gizmoScene.add(ambient);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
+    dirLight.position.set(2, 4, 3);
+    this.gizmoScene.add(dirLight);
+
+    // Central hub
+    const hubGeo = new THREE.SphereGeometry(0.12, 16, 16);
+    const hubMat = new THREE.MeshLambertMaterial({ color: 0x64748b });
+    const hub = new THREE.Mesh(hubGeo, hubMat);
+    this.gizmoScene.add(hub);
+
+    const length = 1.0;
+    const shaftRadius = 0.045;
+    const headRadius = 0.11;
+    const headLength = 0.28;
+    const shaftLength = length - headLength;
+
+    // +X (Red)
+    this.gizmoScene.add(this.createGizmoAxis(new THREE.Vector3(1, 0, 0), 0xef4444, '#ef4444', 'X', shaftRadius, shaftLength, headRadius, headLength, 0.45, false));
+    // +Y (Green)
+    this.gizmoScene.add(this.createGizmoAxis(new THREE.Vector3(0, 1, 0), 0x10b981, '#10b981', 'Y', shaftRadius, shaftLength, headRadius, headLength, 0.45, false));
+    // +Z (Blue)
+    this.gizmoScene.add(this.createGizmoAxis(new THREE.Vector3(0, 0, 1), 0x3b82f6, '#3b82f6', 'Z', shaftRadius, shaftLength, headRadius, headLength, 0.45, false));
+
+    // Subtle negative axis lines (-X, -Y, -Z) for 3D depth perception
+    const negMat = new THREE.LineBasicMaterial({ color: 0x334155, transparent: true, opacity: 0.5 });
+    const negGeoX = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(-0.45, 0, 0)]);
+    const negGeoY = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, -0.45, 0)]);
+    const negGeoZ = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -0.45)]);
+    this.gizmoScene.add(new THREE.Line(negGeoX, negMat));
+    this.gizmoScene.add(new THREE.Line(negGeoY, negMat));
+    this.gizmoScene.add(new THREE.Line(negGeoZ, negMat));
+  }
+
+  updateOriginAxesScale(dim) {
+    if (!this.originAxesGroup || !dim || dim <= 0) return;
+    const targetLength = Math.max(0.6, Math.min(4.5, dim * 0.22));
+    const scale = targetLength / 1.5;
+    this.originAxesGroup.scale.set(scale, scale, scale);
+  }
+
   onResize() {
     if (!this.container || !this.renderer || !this.camera) return;
     const width = this.container.clientWidth;
@@ -511,8 +737,46 @@ class STLViewer {
   animate() {
     requestAnimationFrame(() => this.animate());
     if (this.controls) this.controls.update();
+
     if (this.renderer && this.scene && this.camera) {
+      const width = this.container.clientWidth || 600;
+      const height = this.container.clientHeight || 480;
+
+      // 1. Clear and render main 3D wind tunnel scene
+      this.renderer.setViewport(0, 0, width, height);
+      this.renderer.clear();
       this.renderer.render(this.scene, this.camera);
+
+      // 2. Render Corner Orientation Trihedron Gizmo (synchronous camera tracking)
+      if (this.showAxes && this.gizmoScene && this.gizmoCamera) {
+        const dir = new THREE.Vector3();
+        if (this.controls && this.controls.target) {
+          dir.copy(this.camera.position).sub(this.controls.target);
+        } else {
+          dir.copy(this.camera.position);
+        }
+        dir.normalize().multiplyScalar(3.2);
+
+        this.gizmoCamera.position.copy(dir);
+        this.gizmoCamera.up.copy(this.camera.up);
+        this.gizmoCamera.lookAt(0, 0, 0);
+
+        // Position in bottom-right corner of the 3D viewport
+        const gizmoSize = 80;
+        const gizmoMargin = 10;
+        const gizmoX = width - gizmoSize - gizmoMargin;
+        const gizmoY = gizmoMargin; // WebGL Y is from bottom
+
+        if (gizmoX > 0 && width > 140) {
+          this.renderer.clearDepth();
+          this.renderer.setScissorTest(true);
+          this.renderer.setScissor(gizmoX, gizmoY, gizmoSize, gizmoSize);
+          this.renderer.setViewport(gizmoX, gizmoY, gizmoSize, gizmoSize);
+          this.renderer.render(this.gizmoScene, this.gizmoCamera);
+          this.renderer.setScissorTest(false);
+          this.renderer.setViewport(0, 0, width, height);
+        }
+      }
     }
   }
 }

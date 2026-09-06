@@ -98,21 +98,30 @@
           <div class="viewer-container" id="stl-viewer-container">
             <div class="viewer-overlay-tools">
               <div class="view-toggles">
-                <label><input type="checkbox" id="chk-show-domain" checked> Domain Box</label>
-                <label><input type="checkbox" id="chk-show-bounds" checked> Model Bounds</label>
-                <label><input type="checkbox" id="chk-show-ground" checked> Ground</label>
-                <label><input type="checkbox" id="chk-show-flow" checked> Flow Vector</label>
+                <label title="Toggle 3D coordinate axes"><input type="checkbox" id="chk-show-axes" checked> Axes</label>
+                <label title="Toggle wind tunnel domain box"><input type="checkbox" id="chk-show-domain" checked> Domain</label>
+                <label title="Toggle model bounding box"><input type="checkbox" id="chk-show-bounds" checked> Bounds</label>
+                <label title="Toggle ground reference plane"><input type="checkbox" id="chk-show-ground" checked> Ground</label>
+                <label title="Toggle freestream flow vector"><input type="checkbox" id="chk-show-flow" checked> Flow</label>
               </div>
-              <div class="view-framing">
-                <button class="btn-frame active" id="btn-fit-domain" title="Fit Entire Wind Tunnel Domain Box">Fit Domain</button>
-                <button class="btn-frame" id="btn-fit-model" title="Fit Model Geometry">Fit Model</button>
+              <div class="view-camera-group">
+                <div class="view-framing">
+                  <button class="btn-frame active" id="btn-fit-domain" title="Fit Entire Wind Tunnel Domain Box">Domain</button>
+                  <button class="btn-frame" id="btn-fit-model" title="Fit Model Geometry">Model</button>
+                </div>
+                <div class="view-tool-divider"></div>
+                <div class="view-angles">
+                  <button class="btn-view-angle" data-angle="iso" title="Isometric View">Iso</button>
+                  <button class="btn-view-angle" data-angle="top" title="Top View">Top</button>
+                  <button class="btn-view-angle" data-angle="side" title="Side View">Side</button>
+                  <button class="btn-view-angle" data-angle="front" title="Front View">Front</button>
+                </div>
               </div>
-              <div class="view-angles">
-                <button class="btn-view-angle" data-angle="iso" title="Isometric View">Iso</button>
-                <button class="btn-view-angle" data-angle="top" title="Top View">Top</button>
-                <button class="btn-view-angle" data-angle="side" title="Side View">Side</button>
-                <button class="btn-view-angle" data-angle="front" title="Front View">Front</button>
-              </div>
+            </div>
+            <div class="viewer-axes-legend" id="viewer-axes-legend" title="Cartesian Axes: +X (Lateral), +Y (Elevation), +Z (Freestream)">
+              <span class="axis-item axis-x"><span class="axis-dot"></span>+X</span>
+              <span class="axis-item axis-y"><span class="axis-dot"></span>+Y</span>
+              <span class="axis-item axis-z"><span class="axis-dot"></span>+Z</span>
             </div>
             <div class="viewer-domain-info" id="viewer-domain-badge" style="display: none;">
               <span class="badge-title">Domain Bounds:</span>

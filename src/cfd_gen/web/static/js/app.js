@@ -664,6 +664,9 @@ class CFDApp {
     });
 
     // 3D Viewer overlay tool checkboxes
+    document.getElementById('chk-show-axes')?.addEventListener('change', (e) => {
+      this.viewer.toggleAxes(e.target.checked);
+    });
     document.getElementById('chk-show-domain')?.addEventListener('change', (e) => {
       this.viewer.toggleDomain(e.target.checked);
     });
