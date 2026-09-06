@@ -190,7 +190,7 @@ def write_scripts(cfg: dict[str, Any], case_dir: Path) -> None:
     end_time = cfg["solver"]["end_time"]
 
     # ----- SLURM settings with good defaults for CU e-Science -----
-    qos = slurm.get("qos", "cu_long")
+    qos = slurm.get("qos", "cu_hpc")
     partition = slurm.get("partition", "cpu")
     nodes = slurm.get("nodes", 1)
     time_limit = slurm.get("time", "04:00:00")

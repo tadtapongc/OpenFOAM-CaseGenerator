@@ -63,7 +63,7 @@
     "_section_slurm": "--- 6. SLURM Cluster Configuration ---",
     "slurm": {
         "_comment": "SLURM cluster configuration for HPC / compute cluster",
-        "qos": "standard",
+        "qos": "cu_hpc",
         "partition": "cpu",
         "nodes": 1,
         "time": "08:00:00",
