@@ -20,7 +20,10 @@ The repository includes regression tests for generation, parsing, and script beh
 3. [OpenFOAM Studio (Interactive Web GUI)](#openfoam-studio-interactive-web-gui)
    - [Launching the Studio](#launching-the-studio)
    - [Interactive 3D WebGL Viewport & Coordinate System](#interactive-3d-webgl-viewport--coordinate-system)
+   - [Multi-STL Assembly Visualization & Component Management](#multi-stl-assembly-visualization--component-management)
    - [Visual Configuration Builder](#visual-configuration-builder)
+   - [Live Telemetry & Convergence Dashboard (Tab 3)](#live-telemetry--convergence-dashboard-tab-3)
+   - [Simulation Cases Archive & Lifecycle Manager (Tab 4)](#simulation-cases-archive--lifecycle-manager-tab-4)
    - [Remote HPC Cluster & SLURM Integration](#remote-hpc-cluster--slurm-integration)
    - [Credential Security & Local Persistence](#credential-security--local-persistence)
 4. [Case Anatomy & Directory Structure](#case-anatomy--directory-structure)
@@ -190,14 +193,39 @@ The 3D scene adheres strictly to OpenFOAM and SAE vehicle aerodynamics coordinat
    A visible coordinate triad located at the absolute origin `(0, 0, 0)` with labeled directional arrows to verify where your CAD coordinates and symmetry plane lie relative to OpenFOAM space.
 3. **Live Virtual Wind Tunnel Bounding Cage**:
    A dynamic wireframe bounding box that renders the exact computational domain ($x_{min} \dots x_{max}, y_{min} \dots y_{max}, z_{min} \dots z_{max}$) computed from geometry bounds and padding settings. Any change in the configuration (e.g., domain padding, ground height, or symmetry plane offset) recalculates and updates the cage geometry in real time.
-4. **Ground Plane Grid**:
+4. **Boundary Face Identification Labels**:
+   World-space badges (`INLET ➔`, `➔ OUTLET`, `SYMMETRY`) positioned at the domain extremities with depth-tested materials, occluding behind geometry in foreground angles while remaining visible when panning around boundaries.
+5. **Ground Plane Grid**:
    A reference ground grid positioned exactly at the active ground plane coordinate (`y = ground_plane`), providing visual feedback for ride height and ground clearance.
-5. **Low-Profile Viewport HUD**:
+6. **Studio Aero Lighting & Double-Sided Rendering**:
+   Balanced ambient and directional lighting with double-sided metallic materials, ensuring thin aerodynamic surfaces (splitters, endplates, multi-element wing profiles) never disappear or invert.
+7. **Low-Profile Viewport HUD & Angle Presets**:
    A streamlined floating HUD provides instant controls for:
-   - **Reset Camera**: Re-center and re-frame the camera on geometry bounds.
-   - **Wireframe Mode**: Toggle between solid surface rendering and triangle wireframe mesh.
-   - **Domain Cage Toggle**: Show or hide the virtual wind tunnel bounding box.
-   - **Maximize Viewport**: Expand the 3D canvas to a full-window view (or restore the default 60% viewport / 40% configuration split).
+   - **Camera Presets**: One-click alignment to `Iso`, `Top` (gimbal-lock-free), `Side`, and `Front` orthographic-style perspectives.
+   - **Fit Framing**: Toggle camera framing between **Fit Domain** (encompassing the full 40-50m wind tunnel) and **Fit Model** (tight zoom on vehicle geometry).
+   - **Diagnostic Overlays**: Independent checkboxes for Origin Axes, Domain Wireframe, Geometry Bounding Box, Ground Plane, and Freestream Flow Vector.
+   - **Maximize Viewport**: Expand the 3D canvas to a full-window view (or restore the split layout).
+
+---
+
+### Multi-STL Assembly Visualization & Component Management
+
+Real-world aerodynamic packages (especially in FSAE, GT, and sports car racing) consist of multiple discrete CAD solid files—such as chassis, front wing assembly, rear wing multi-elements, suspension links, and underbody diffusers.
+
+OpenFOAM Studio provides native multi-STL assembly inspection and management:
+
+- **Simultaneous Multi-Component Rendering**:
+  Load and view multiple independent STL files simultaneously in the virtual wind tunnel without geometry overwriting or ghosting.
+- **Harmonious 8-Color Component Palette**:
+  Each added STL component is assigned a distinct, high-contrast metallic color from a curated aerodynamic palette (`Sky Cyan`, `Mint Emerald`, `Rose Pink`, `Lavender`, `Amber Gold`, `Marine Teal`, `Coral Red`, `Electric Blue`), allowing instant visual identification of different wings, flaps, and body panels.
+- **Interactive Component Chip Bar**:
+  - **Color Dot Indicators**: Every component in the active setup list displays a color dot matching its 3D mesh in the viewport.
+  - **Click to Highlight**: Clicking any component chip flashes an emissive cyan highlight on that part in the 3D scene.
+  - **One-Click Part Removal (`×`)**: Removing an STL chip instantly deletes the corresponding mesh from the 3D scene, removes it from the configuration, and recalculates the domain bounds.
+- **Union Bounding Box & Domain Integration**:
+  The bounding box helper and automatic wind tunnel domain generator compute the **union bounding box** across all active components, ensuring adequate upstream/downstream domain sizing and ground clearance for the full assembly.
+- **Batch Uploading**:
+  Select or drag-and-drop multiple `.stl` files at once. The studio previews all parts locally in Three.js and uploads them concurrently to the server's `stl/` repository.
 
 ---
 
@@ -210,16 +238,71 @@ The web interface eliminates manual JSON editing errors with form-based paramete
   - *Full-Car Moving Ground* (full vehicle with road velocity matching freestream).
   - *Airfoil / Aircraft Free-Air* (six-sided far-field boundaries without road interaction).
   - *Coarse Fast Test* (low mesh resolution for quick pipeline verification).
-- **Geometry & Mesh Sizing Preview**:
-  - Live inspection of STL bounding boxes ($L \times W \times H$) and surface area.
-  - Interactive selection of fidelity presets (`fast`, `standard`, `fine`), instantly showing the derived background hex cell size, surface refinement levels, and boundary layer parameters.
+- **Fidelity Presets**:
+  Select between `fast` (~2-4M cells), `standard` (~6-9M cells), or `fine` (~12-16M cells), with real-time estimates of cell count, runtime, and background cell size.
 - **Physical & Boundary Setup**:
-  - Freestream velocity (m/s or km/h), air kinematic viscosity, and turbulence intensity ($I$ and $\mu_t/\mu$).
+  - Dual-sync velocity control (interactive slider synchronized between km/h and m/s).
   - Ground clearance adjustment with options for absolute coordinates or relative offsets.
   - Interactive face boundary assignment (`inlet`, `outlet`, `symmetry`, `ground`, `farField`).
-- **Bidirectional JSON Sync**:
-  - The Raw JSON tab allows advanced users to inspect and directly edit the full `config.json`.
-  - Edits in the visual forms reflect in the JSON editor instantly, and changes made in the JSON editor update the visual controls and 3D domain cage seamlessly.
+  - Automatic symmetry plane centering button based on the lateral geometry mid-plane.
+- **SLURM Cluster & MPI Controls**:
+  Configure parallel decomposition core count (8, 16, 32, 48, 64 cores), partition, walltime limit, memory per core, and OpenFOAM environment module source scripts.
+- **Dictionary Overrides**:
+  Optional expert overrides for base cell size, surface min/max levels, edge refinement, and two-stage wake boxes (`nearWakeBox`, `farWakeBox`).
+- **Bidirectional JSON Drawer**:
+  A slide-out Monaco/code editor allows inspecting and directly editing the active `config.json`. Form changes update JSON in real time, and JSON edits instantly refresh the visual controls and 3D visualizer.
+
+---
+
+### Live Telemetry & Convergence Dashboard (Tab 3)
+
+The Telemetry Dashboard provides live aerodynamic tracking, convergence verification, and solver log monitoring:
+
+- **Monitored Case Picker**:
+  Select any generated case from the dropdown to monitor its solution progress.
+- **Live Polling Toggle**:
+  Toggle automatic 5-second polling on and off with the `● Live Sync (5s)` / `⏸ Paused` button, featuring a pulsing green live indicator.
+- **Aerodynamic KPI Cards**:
+  - **Downforce ($-F_y$)**: Average downforce in Newtons ($N$) with rolling variation percentage ($\pm\%$).
+  - **Drag ($-F_z$)**: Average drag force in Newtons ($N$) with rolling variation percentage ($\pm\%$).
+  - **Aero Efficiency ($L/D$)**: Real-time lift-to-drag ratio ($-F_y / -F_z$).
+  - **Solver Iteration & Status**: Active iteration count and convergence state.
+- **Dual Real-Time Convergence Charts**:
+  - **Force History Chart**: Displays raw iteration forces alongside a **35-iteration smoothed moving average** trend line, making it easy to distinguish physical oscillations from numerical noise.
+  - **Residuals Chart**: Plots equation residuals ($p$, $U$, $k$, $\omega$) on a logarithmic scale with clean scientific notation formatting.
+- **Smart Standby & Empty State Handling**:
+  When monitoring cases that are newly generated or meshed, clean overlays indicate the current stage (`Generated`, `Meshing`, `Meshed`) and present the exact command to execute (`./Allrun.parallel`), avoiding frozen or ghosted curves.
+- **Solver & Meshing Log Console**:
+  - Switch between `log.simpleFoam`, `log.snappyHexMesh`, `log.potentialFoam`, and `log.blockMesh`.
+  - Auto-scroll toggle for tracking real-time solver output.
+  - Displays current log file name and byte size.
+  - **One-Click Copy**: Copy complete terminal log outputs to the clipboard.
+
+---
+
+### Simulation Cases Archive & Lifecycle Manager (Tab 4)
+
+The Cases Archive provides a centralized view of all simulation cases residing on local storage and connected HPC clusters:
+
+- **Summary Stat Cards**:
+  At-a-glance KPI metrics showing:
+  - **Total Cases**: Total count across local storage and remote clusters.
+  - **Converged & Solved**: Simulations that satisfied the $\pm 1.5\%$ force convergence stability threshold.
+  - **Active / Solving**: Simulations currently running or meshing.
+  - **Ready / Meshed**: Cases generated and awaiting execution.
+- **Real-Time Search & Status Filter Pills**:
+  Filter cases instantly by name, geometry filename, fidelity preset, or status using the search bar and filter pills (`All`, `Converged`, `Completed`, `Solving`, `Generated`).
+- **Comprehensive Case Data Table**:
+  - **Case & Setup**: Case name, fidelity badge (`standard`, `fast`, `fine`), MPI core count (`32p`), and geometry tags.
+  - **Status Badges**: Color-coded badges (`● CONVERGED`, `⚡ SOLVING`, `✓ COMPLETED`, `⬡ MESHED`, `○ GENERATED`).
+  - **Flow Conditions**: Freestream velocity in km/h and m/s, along with flow direction vector.
+  - **Aerodynamic Results**: Color-coded badges displaying final $F_y$ (downforce), $F_z$ (drag), and $L/D$ (aero efficiency).
+  - **Progress**: Current solver iteration count.
+  - **Location & Modified**: `Local` vs `Cluster` indicator with formatted timestamp (`YYYY-MM-DD HH:MM`).
+- **Lifecycle Actions**:
+  - **📊 Telemetry**: One-click jump to the Telemetry tab with the selected case loaded.
+  - **⚙️ Setup**: Load the case configuration back into Tab 1 for inspection or modification.
+  - **🗑️ Delete**: Permanently remove local case directories and mesh solutions with confirmation safeguards (`DELETE /api/cases/{case_name}`).
 
 ---
 
@@ -231,9 +314,7 @@ OpenFOAM Studio includes an integrated SSH and SLURM manager to bridge local CAD
 - **One-Click Case Deployment**: Generates and transfers case files to the remote cluster scratch filesystem.
 - **Job Dispatching**: Submits the generated `run.sh` SLURM batch script (`sbatch run.sh`) configured with your specified partition, node count, and default QoS (`cu_hpc` or custom).
 - **Live Job Queue Monitoring**: Real-time table display of running, pending, and completed SLURM jobs (`squeue -u <user>`).
-- **Real-Time Telemetry & Log Streaming**:
-  - Streams execution logs (`log.snappyHexMesh`, `log.simpleFoam`) with live auto-scrolling.
-  - Plots aerodynamic convergence metrics ($C_d$, $C_l$, residuals) in real-time charts directly in the browser.
+- **Job Cancellation**: One-click job termination directly from the queue table (`scancel <job_id>`).
 
 ---
 
