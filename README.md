@@ -92,23 +92,23 @@ The repository includes regression tests for generation, parsing, and script beh
 
 ### Getting Started (Run from the Repository)
 
-Simply clone the repository and run:
+Clone the repository; the Python scripts run directly without installing this project as a package:
 
 ```bash
 git clone https://github.com/tadtapongc/OpenFOAM-CaseGenerator.git
 cd OpenFOAM-CaseGenerator
 ```
 
-With Python installed, you can run the scripts directly without installing this project as a package. Supply your own STL geometry and update the example configuration before generating a case:
-- `python setup_case.py configs/config.json`: Generates the OpenFOAM case.
-- `python setup_case.py configs/config.json --dry-run`: Previews domain and mesh sizing without generating files.
-- `python setup_case.py --init`: Generates starter template directories (`configs/`, `stl/`, `cases/`).
-- `python read_forces.py`: Analyzes forces, plots convergence, and compares cases.
+Place your ASCII STL in `stl/`, then edit `configs/config.json` to set its filename, a new case name, flow settings, and an appropriate MPI rank count. Preview and generate from the repository root:
 
-*(Optional)* If you want real-time animated GUI plots:
 ```bash
-pip install matplotlib
+python setup_case.py configs/config.json --dry-run
+python setup_case.py configs/config.json
 ```
+
+With OpenFOAM loaded in your shell, follow [Step 5](#step-5-run-simulation-standard-openfoam-commands) to run the generated case and [Step 6](#step-6-post-process-aerodynamic-forces) to inspect its forces. Plotting additionally requires `python -m pip install matplotlib`.
+
+`python setup_case.py --init` creates starter directories and an example configuration; it does not supply geometry or overwrite an existing example.
 
 ---
 
@@ -162,10 +162,12 @@ cases/<case_name>/
 ├── postProcessing/
 │   ├── forces/0/force.dat              # Force vectors; CLI projects onto drag/downforce axes
 │   ├── forces/0/moment.dat             # Moment vectors about CofR
-│   ├── forceCoeffs/0/forceCoeffs.dat   # Force coefficients (Cd, Cl, Cs, Cm)
+│   ├── forceCoeffs/0/coefficient.dat   # Integrated force and moment coefficients (OpenCFD)
 │   └── residuals/0/solverInfo.dat      # Solver convergence residuals for p, U, k, omega
 └── VTK/                                # (Optional) Converted ParaView visualization files
 ```
+
+The coefficient filename shown follows the [OpenCFD output specification](https://api.openfoam.com/2606/classFoam_1_1functionObjects_1_1forceCoeffs.html). Check filenames and column headers for your installed release.
 
 ---
 
@@ -347,21 +349,29 @@ To wipe mesh and solver output files back to initial state:
 
 ### Step 6: Post-Process Aerodynamic Forces
 
-Run the standard post-processing script from the project root:
+Run the post-processing script from the project root. Replace `cases/RP14_FSAE` with the case you want to inspect:
 
 ```bash
-# 1. Print formatted aerodynamic force summary table:
-python read_forces.py
+# Print the force summary for a specific case:
+python read_forces.py cases/RP14_FSAE
 
-# 2. Open interactive real-time convergence dashboard:
-python read_forces.py --live
+# Open the live dashboard:
+python read_forces.py cases/RP14_FSAE --live
 
-# 3. Plot force convergence history to an image/figure:
-python read_forces.py --plot
+# Display a force-history plot:
+python read_forces.py cases/RP14_FSAE --plot
 
-# 4. Compare aerodynamic forces across all cases in cases/:
+# Save force_convergence.png in the current working directory:
+python read_forces.py cases/RP14_FSAE --save
+
+# Check force stability (exit 0 if the criterion passes, 1 otherwise):
+python read_forces.py cases/RP14_FSAE --check
+
+# Compare cases under cases/:
 python read_forces.py --compare
 ```
+
+Plotting requires `matplotlib`. With no case argument, single-case commands use the current directory if it looks like a case; otherwise they select the most recently modified case directory under `cases/`. Use an explicit path to track a particular study. `--compare` scans `cases/` independently of the case argument. `--check` uses the [CLI stability criterion](#automated-convergence-monitor--clean-auto-stop), which has a shorter minimum history than auto-stop.
 
 ---
 
@@ -381,7 +391,7 @@ python read_forces.py --compare
 | `outputs.downforce_axis`| `string` | `"-y"` | Direction along which downforce (negative lift) is calculated |
 | `domain_box` | `string / dict` | `"auto"` | `"auto"` derives bounds from STL; or supply `{"min": [...], "max": [...]}` |
 | `domain_faces` | `dict[str, str]`| *auto* | Mapping of 6 box faces (`"-x"`, `"+x"`, etc.) to boundary types |
-| `parallel.n_procs` | `int` | `32` | Number of CPU cores for MPI parallel meshing and solving |
+| `parallel.n_procs` | `int` | `10` | Number of MPI ranks; `configs/config.json` explicitly selects `32` |
 
 ### Ground Plane & Ride Height Styles
 
@@ -566,14 +576,15 @@ If your CAD was exported with flow along `-x` and up along `+z`, set `"direction
 
 ### Road & Moving Ground Boundary Condition
 
-The moving-road option sets the road velocity equal to the freestream velocity in the vehicle frame:
+For faces assigned the `ground` role, the mesh patch type is `wall` regardless of `flow.ground`. The flag selects the field boundary conditions:
 
 - When `"ground": true`:
-  - Patch type: `wall`.
   - Velocity ($U$): `fixedValue uniform (x y z)` matching the freestream velocity vector.
-  - Turbulence ($k, \omega, \nu_t$): Continuous wall functions applied to moving road.
+  - Turbulence: `kqRWallFunction` for $k$, `omegaWallFunction` for $\omega$, and `nutUSpaldingWallFunction` for $\nu_t$ by default.
 - When `"ground": false`:
-  - Patch type: `patch` with `slip` velocity and `zeroGradient` pressure.
+  - Velocity: `slip`; pressure, $k$, and $\omega$: `zeroGradient`; $\nu_t$: `calculated`.
+
+Pressure uses `zeroGradient` in both cases. To remove the ground role from a free-air domain, assign that face to `farField` as in the aircraft example; setting `flow.ground=false` alone does not change its mesh patch type or domain placement.
 
 ### Symmetry Clipping & Force Projection
 
@@ -581,7 +592,7 @@ When simulating a half-model:
 1. The domain boundary limits the modeled region; the copied STL is not geometrically trimmed by the generator. Inspect how `snappyHexMesh` handles surfaces crossing that boundary.
 2. The `locationInMesh` seed point is placed near an upstream outer corner. Verify that it lies in the intended fluid region, especially for unusual geometry or manual domain bounds.
 3. Wake boxes (`nearWakeBox` and `farWakeBox`) are automatically clipped so their inner lateral face aligns exactly with the symmetry plane coordinate.
-4. `python read_forces.py` queries `system/blockMeshDict` for symmetry boundaries. If detected, it computes both simulated half-forces and full-car projected forces:
+4. `python read_forces.py` checks `domain_faces` in the selected configuration or `case_config.json`, then falls back to symmetry patch types in `constant/polyMesh/boundary`. If detected, it computes both simulated half-forces and full-car projected forces:
    $$F_{\text{full car}} = 2 \times F_{\text{half car}}$$
 
 This projection assumes the configured symmetry represents a physical half-model. It does not verify that the geometry or flow is symmetric.
@@ -646,7 +657,7 @@ The generator defines two downstream refinement boxes. The diagram shows the sta
 
 `snapControls` morph cell vertices onto the CAD triangles:
 - `explicitFeatureSnap true;` pulls cell vertices directly onto `.eMesh` sharp lines.
-- `implicitFeatureSnap true;` snaps vertices to surface curvature.
+- `implicitFeatureSnap true;` detects geometric features by sampling the surface. This is feature detection, distinct from the general surface-snapping step; see the [OpenFOAM snappyHexMesh guide](https://www.openfoam.com/documentation/user-guide/4-mesh-generation-and-conversion/4.4-mesh-generation-with-the-snappyhexmesh-utility).
 - `nSolveIter 200;` and `tolerance 2.0;` are the standard preset's snapping controls. Inspect the resulting surface conformity.
 
 ### Step 6: Boundary Layer Inflation (`addLayersControls`)
@@ -828,13 +839,18 @@ Each component also has a `moment.dat` file alongside `force.dat`, containing mo
 
 ### Automated Convergence Monitor & Clean Auto-Stop
 
-The convergence monitor evaluates stability over a rolling window of 200 iterations using the coefficient of variation (relative standard deviation):
+The force-stability checks use relative sample standard deviation:
 
-$$\text{Variation} = \frac{\sigma_F}{|\mu_F|} \times 100\% \le 0.5\%$$
+$$\text{Variation} = \frac{s_F}{|\bar F|} \times 100\% < 0.5\%.$$
 
-where $\sigma_F$ is the standard deviation and $\mu_F$ is the mean of force $F$ over the last 200 iterations.
+Here $s_F$ is the sample standard deviation and $\bar F$ is the mean over the selected force-history window. Both drag and downforce must pass; a zero mean does not pass. The minimum history differs by tool:
 
-When both Drag and Downforce vary by less than **0.5%** over the last 200 iterations (after a minimum of 300 iterations):
+- **Auto-stop monitor**: Waits for at least 300 samples, then checks the latest 200 samples with the default settings.
+- **CLI summary, `--check`, comparison, and dashboard summary**: Can report convergence after 20 samples, using all available samples up to a 200-sample window. These reports do not impose the monitor's 300-sample minimum.
+
+The counts refer to parsed force samples; with the generated one-sample-per-iteration output they correspond to solver iterations. A CLI `CONVERGED` result can therefore appear before auto-stop is eligible.
+
+When the auto-stop criterion passes:
 1. The monitor dynamically rewrites `system/controlDict`:
    ```openfoam
    stopAt writeNow;
