@@ -1484,7 +1484,6 @@ class CFDApp {
 
       if (data.has_data) {
         if (forcesOverlay) forcesOverlay.style.display = 'none';
-        if (residualsOverlay) residualsOverlay.style.display = 'none';
 
         this.setValText('kpi-downforce', data.downforce_avg);
         this.setValText('kpi-downforce-variation', `±${data.downforce_pct}% variation`);
@@ -1547,6 +1546,13 @@ class CFDApp {
       if (resData.has_data && this.charts) {
         if (residualsOverlay) residualsOverlay.style.display = 'none';
         this.charts.updateResiduals(resData.iterations, resData.residuals);
+      } else {
+        if (residualsOverlay) residualsOverlay.style.display = 'flex';
+        if (this.charts && this.charts.residualsChart) {
+          this.charts.residualsChart.data.labels = [];
+          this.charts.residualsChart.data.datasets.forEach(ds => { ds.data = []; });
+          this.charts.residualsChart.update('none');
+        }
       }
     } catch (err) {
       console.error('Residuals telemetry poll failed:', err);

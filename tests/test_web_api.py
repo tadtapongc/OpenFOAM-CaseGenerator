@@ -241,6 +241,28 @@ class TestWebAPI(unittest.TestCase):
         # Ensure initial residual for p was captured (0.02), not the second corrector (0.005)
         self.assertAlmostEqual(res["residuals"]["p"][0], 0.02)
 
+    def test_telemetry_residuals_solver_info(self):
+        """Test telemetry residuals reading from postProcessing/residuals/0/solverInfo.dat."""
+        case_name = "test_case_solver_info"
+        case_dir = Path(f"cases/{case_name}")
+        res_dir = case_dir / "postProcessing" / "residuals" / "0"
+        res_dir.mkdir(parents=True, exist_ok=True)
+        self.addCleanup(lambda: shutil.rmtree(case_dir, ignore_errors=True))
+
+        header = "# Time\tUx_initial\tUy_initial\tUz_initial\tp_initial\tk_initial\tomega_initial\n"
+        lines = [header]
+        for it in range(1, 21):
+            lines.append(f"{it}\t{0.01/it}\t{0.02/it}\t{0.03/it}\t{1.0/it}\t{0.5/it}\t{0.001/it}\n")
+        (res_dir / "solverInfo.dat").write_text("".join(lines))
+
+        res = asyncio.run(api_telemetry_residuals(case_name))
+        self.assertTrue(res["has_data"])
+        self.assertEqual(res["total_iterations"], 20)
+        self.assertEqual(res["latest_iteration"], 20)
+        self.assertAlmostEqual(res["residuals"]["p"][0], 1.0)
+        self.assertAlmostEqual(res["residuals"]["Ux"][0], 0.01)
+        self.assertAlmostEqual(res["residuals"]["omega"][0], 0.001)
+
     def test_ssh_client_parse_squeue(self):
         """Test SLURM squeue parsing logic."""
         c = ClusterSSHClient()

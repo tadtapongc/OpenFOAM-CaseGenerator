@@ -41,6 +41,7 @@ from cfd_gen.postproc.forces import (
     load_axis_config,
     read_forces,
 )
+from cfd_gen.postproc.residuals import find_residual_files, read_residuals
 from cfd_gen.stl_utils import stl_info
 from cfd_gen.web.ssh_client import ClusterSSHClient
 
@@ -671,68 +672,211 @@ async def api_telemetry_forces(case_name: str) -> dict[str, Any]:
     }
 
 
+def parse_residuals_from_log(log_text: str) -> dict[float, dict[str, float]]:
+    """Extract initial residuals from OpenFOAM solver log text."""
+    pattern = re.compile(
+        r"Solving for (p|Ux|Uy|Uz|k|omega|epsilon|nuTilda),\s+Initial residual\s+=\s+([0-9\.eE\+\-]+)",
+        re.IGNORECASE,
+    )
+    rows: dict[float, dict[str, float]] = {}
+    current_iter: Optional[float] = None
+    for line in log_text.splitlines():
+        if "Time = " in line:
+            try:
+                current_iter = float(line.split("Time = ")[-1].strip())
+            except ValueError:
+                pass
+        if current_iter is not None and current_iter > 0:
+            match = pattern.search(line)
+            if match:
+                raw_var = match.group(1)
+                v_lower = raw_var.lower()
+                if v_lower == "p":
+                    var = "p"
+                elif v_lower == "ux":
+                    var = "Ux"
+                elif v_lower == "uy":
+                    var = "Uy"
+                elif v_lower == "uz":
+                    var = "Uz"
+                elif v_lower == "k":
+                    var = "k"
+                else:
+                    var = "omega"
+                t_key = round(current_iter, 8)
+                if t_key not in rows:
+                    rows[t_key] = {}
+                # Keep the FIRST residual for each variable in this time-step (initial residual)
+                if var not in rows[t_key]:
+                    try:
+                        val = float(match.group(2))
+                        if math.isfinite(val) and val > 0:
+                            rows[t_key][var] = val
+                    except ValueError:
+                        pass
+    return rows
+
+
+def parse_solver_info_text(content: str) -> dict[float, dict[str, float]]:
+    """Parse tabulated residuals from solverInfo.dat or residuals.dat."""
+    headers: list[str] = []
+    rows: dict[float, dict[str, float]] = {}
+    segment_started = False
+    for line in content.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            if "Time" in line:
+                headers = line.strip("# \t\r\n").split()
+            continue
+        if not headers:
+            continue
+        parts = line.split()
+        if not parts:
+            continue
+        try:
+            t = float(parts[0])
+        except ValueError:
+            continue
+        t_key = round(t, 8)
+        if not segment_started:
+            rows = {k: v for k, v in rows.items() if k < t_key}
+            segment_started = True
+        row: dict[str, float] = {}
+        for i, h in enumerate(headers):
+            if i < len(parts):
+                try:
+                    val = float(parts[i])
+                    if math.isfinite(val) and val > 0:
+                        row[h] = val
+                except ValueError:
+                    pass
+        rows[t_key] = row
+    return rows
+
+
 @app.get("/api/telemetry/residuals")
 async def api_telemetry_residuals(case_name: str) -> dict[str, Any]:
-    """Parse solver residuals from log.simpleFoam or solverInfo.dat with aligned iterations."""
+    """Parse solver residuals from solverInfo.dat or log.simpleFoam with aligned iterations."""
     if not CASE_NAME_REGEX.match(case_name):
         raise HTTPException(status_code=400, detail="Invalid case_name")
 
-    log_content = ""
+    rows: dict[float, dict[str, float]] = {}
+
+    # 1. Check remote cluster first if connected
     if ssh_client.is_connected:
-        remote_log = f"{ssh_client.remote_repo_path}/cases/{case_name}/log.simpleFoam"
-        log_content = await asyncio.to_thread(ssh_client.read_remote_text, remote_log, max_lines=1200)
+        find_cmd = (
+            f"cd {shlex.quote(ssh_client.remote_repo_path)} && "
+            f"find cases/{shlex.quote(case_name)}/postProcessing/residuals "
+            f"cases/{shlex.quote(case_name)}/processor*/postProcessing/residuals "
+            f"\\( -name 'solverInfo.dat' -o -name 'residuals.dat' \\) 2>/dev/null | sort -V"
+        )
+        code, out, _ = await asyncio.to_thread(ssh_client.run_command, find_cmd, timeout=5)
+        if code == 0 and out.strip():
+            remote_files = [f.strip() for f in out.strip().splitlines() if f.strip()]
+            if remote_files:
+                target_path = f"{ssh_client.remote_repo_path}/{remote_files[-1]}"
+                cat_code, content, _ = await asyncio.to_thread(
+                    ssh_client.run_command, f"cat {shlex.quote(target_path)}", timeout=10
+                )
+                if cat_code == 0 and content.strip():
+                    rows = parse_solver_info_text(content)
 
-    if not log_content:
-        local_log = PROJECT_ROOT / "cases" / case_name / "log.simpleFoam"
-        if local_log.is_file():
+        # Fallback to grep on remote log.simpleFoam if no solverInfo.dat
+        if not rows:
+            grep_cmd = (
+                f"cd {shlex.quote(ssh_client.remote_repo_path)} && "
+                f"grep -E 'Time = |Solving for ' cases/{shlex.quote(case_name)}/log.simpleFoam 2>/dev/null | tail -n 5000"
+            )
+            code, out, _ = await asyncio.to_thread(ssh_client.run_command, grep_cmd, timeout=10)
+            if code == 0 and out.strip():
+                rows = parse_residuals_from_log(out)
+
+    # 2. Check local case directory if no rows yet
+    local_case = PROJECT_ROOT / "cases" / case_name
+    if not rows and local_case.is_dir():
+        res_files = find_residual_files(local_case)
+        if res_files:
             try:
-                with open(local_log, encoding="utf-8", errors="replace") as f:
-                    raw_lines = f.readlines()
-                    log_content = "".join(raw_lines[-1200:])
-            except Exception:
-                pass
+                data_dict, headers = read_residuals(res_files)
+                times = data_dict.get("Time", [])
+                for idx, t in enumerate(times):
+                    if t is not None:
+                        t_key = round(float(t), 8)
+                        row = {}
+                        for h in headers:
+                            val = data_dict.get(h, [])[idx] if idx < len(data_dict.get(h, [])) else None
+                            if val is not None and math.isfinite(val) and val > 0:
+                                row[h] = float(val)
+                        rows[t_key] = row
+            except Exception as exc:
+                log.warning("Could not read local residual files: %s", exc)
 
-    if not log_content:
-        return {"has_data": False, "message": "No log.simpleFoam found."}
-
-    # Extract initial residuals using regex and store strictly aligned by iteration
-    pattern = re.compile(
-        r"Solving for (p|Ux|Uy|Uz|k|omega),\s+Initial residual\s+=\s+([0-9\.eE\+\-]+)",
-        re.IGNORECASE,
-    )
-    iter_data: dict[int, dict[str, float]] = {}
-    current_iter = 0
-
-    for line in log_content.splitlines():
-        if "Time = " in line:
-            try:
-                current_iter = int(line.split("Time = ")[-1].strip())
-            except ValueError:
-                pass
-        match = pattern.search(line)
-        if match and current_iter > 0:
-            var = match.group(1)
-            if current_iter not in iter_data:
-                iter_data[current_iter] = {}
-            # Keep the FIRST residual for each variable in this time-step (initial residual)
-            if var not in iter_data[current_iter]:
+        # Fallback to local log.simpleFoam
+        if not rows:
+            local_log = local_case / "log.simpleFoam"
+            if local_log.is_file():
                 try:
-                    iter_data[current_iter][var] = float(match.group(2))
-                except ValueError:
-                    pass
+                    with open(local_log, encoding="utf-8", errors="replace") as f:
+                        lines = f.readlines()
+                        log_content = "".join(lines[-5000:])
+                        rows = parse_residuals_from_log(log_content)
+                except Exception as exc:
+                    log.warning("Could not read local log.simpleFoam: %s", exc)
 
-    sorted_iters = sorted(iter_data.keys())[-150:]
+    if not rows:
+        return {
+            "has_data": False,
+            "message": f"No residual data or log.simpleFoam found for case '{case_name}'.",
+        }
+
+    sorted_iters = sorted(rows.keys())
+    if not sorted_iters:
+        return {"has_data": False, "message": "No iterations found in residual data."}
+
+    var_candidates = {
+        "p": ["p_initial", "p"],
+        "Ux": ["Ux_initial", "Ux"],
+        "Uy": ["Uy_initial", "Uy"],
+        "Uz": ["Uz_initial", "Uz"],
+        "k": ["k_initial", "k"],
+        "omega": ["omega_initial", "omega", "epsilon_initial", "epsilon", "nuTilda_initial", "nuTilda"],
+    }
+
     all_vars = ["p", "Ux", "Uy", "Uz", "k", "omega"]
     residuals_aligned: dict[str, list[Optional[float]]] = {v: [] for v in all_vars}
+
     for it in sorted_iters:
-        d = iter_data[it]
+        row = rows[it]
         for v in all_vars:
-            residuals_aligned[v].append(d.get(v))
+            val = None
+            for cand in var_candidates[v]:
+                if cand in row and row[cand] is not None:
+                    val = round(row[cand], 8)
+                    break
+            residuals_aligned[v].append(val)
+
+    # Downsample if iterations > 400 to keep UI rendering fast while showing entire run
+    max_pts = 400
+    if len(sorted_iters) > max_pts:
+        step = math.ceil(len(sorted_iters) / max_pts)
+        sub_indices = list(range(0, len(sorted_iters), step))
+        if (len(sorted_iters) - 1) not in sub_indices:
+            sub_indices.append(len(sorted_iters) - 1)
+
+        iters_sub = [int(sorted_iters[i]) for i in sub_indices]
+        residuals_sub = {v: [residuals_aligned[v][i] for i in sub_indices] for v in all_vars}
+    else:
+        iters_sub = [int(it) for it in sorted_iters]
+        residuals_sub = residuals_aligned
 
     return {
-        "has_data": len(sorted_iters) > 0,
-        "iterations": sorted_iters,
-        "residuals": residuals_aligned,
+        "has_data": True,
+        "total_iterations": len(sorted_iters),
+        "latest_iteration": int(sorted_iters[-1]),
+        "iterations": iters_sub,
+        "residuals": residuals_sub,
     }
 
 

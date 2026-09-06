@@ -154,12 +154,12 @@ class TelemetryCharts {
       data: {
         labels: [],
         datasets: [
-          { label: 'p', data: [], borderColor: '#38bdf8', borderWidth: 1.8, pointRadius: 0 },
-          { label: 'Ux', data: [], borderColor: '#a855f7', borderWidth: 1.8, pointRadius: 0 },
-          { label: 'Uy', data: [], borderColor: '#10b981', borderWidth: 1.8, pointRadius: 0 },
-          { label: 'Uz', data: [], borderColor: '#f59e0b', borderWidth: 1.8, pointRadius: 0 },
-          { label: 'k', data: [], borderColor: '#ec4899', borderWidth: 1.8, pointRadius: 0 },
-          { label: 'omega', data: [], borderColor: '#6366f1', borderWidth: 1.8, pointRadius: 0 },
+          { label: 'p', data: [], borderColor: '#38bdf8', borderWidth: 1.8, pointRadius: 0, spanGaps: true },
+          { label: 'Ux', data: [], borderColor: '#a855f7', borderWidth: 1.8, pointRadius: 0, spanGaps: true },
+          { label: 'Uy', data: [], borderColor: '#10b981', borderWidth: 1.8, pointRadius: 0, spanGaps: true },
+          { label: 'Uz', data: [], borderColor: '#f59e0b', borderWidth: 1.8, pointRadius: 0, spanGaps: true },
+          { label: 'k', data: [], borderColor: '#ec4899', borderWidth: 1.8, pointRadius: 0, spanGaps: true },
+          { label: 'omega', data: [], borderColor: '#6366f1', borderWidth: 1.8, pointRadius: 0, spanGaps: true },
         ],
       },
       options: {
@@ -190,7 +190,7 @@ class TelemetryCharts {
               label: (context) => {
                 const label = context.dataset.label || '';
                 const val = context.parsed.y;
-                return `${label}: ${val !== null ? val.toExponential(3) : '--'}`;
+                return `${label}: ${val !== null && val !== undefined ? val.toExponential(3) : '--'}`;
               },
             },
           },
@@ -203,7 +203,8 @@ class TelemetryCharts {
           },
           y: {
             type: 'logarithmic',
-            min: 1e-7,
+            suggestedMin: 1e-6,
+            suggestedMax: 1.0,
             title: { display: true, text: 'Initial Residual', color: '#94a3b8', font: { size: 10 } },
             ticks: {
               color: '#64748b',
