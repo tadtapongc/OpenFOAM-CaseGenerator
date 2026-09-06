@@ -14,15 +14,24 @@ The repository includes regression tests for generation, parsing, and script beh
 
 1. [Key Features](#key-features)
 2. [Quick Start & Requirements](#quick-start--requirements)
-3. [Case Anatomy & Directory Structure](#case-anatomy--directory-structure)
-4. [Standard Command Workflow](#standard-command-workflow)
+   - [System Requirements](#system-requirements)
+   - [Workflow A: OpenFOAM Studio (Interactive Web GUI)](#workflow-a-openfoam-studio-interactive-web-gui)
+   - [Workflow B: Standard Command-Line Interface (CLI)](#workflow-b-standard-command-line-interface-cli)
+3. [OpenFOAM Studio (Interactive Web GUI)](#openfoam-studio-interactive-web-gui)
+   - [Launching the Studio](#launching-the-studio)
+   - [Interactive 3D WebGL Viewport & Coordinate System](#interactive-3d-webgl-viewport--coordinate-system)
+   - [Visual Configuration Builder](#visual-configuration-builder)
+   - [Remote HPC Cluster & SLURM Integration](#remote-hpc-cluster--slurm-integration)
+   - [Credential Security & Local Persistence](#credential-security--local-persistence)
+4. [Case Anatomy & Directory Structure](#case-anatomy--directory-structure)
+5. [Standard Command Workflow](#standard-command-workflow)
    - [Step 1: Place STL Geometry](#step-1-place-stl-geometry)
    - [Step 2: Configure Case (`configs/config.json`)](#step-2-configure-case-configsconfigjson)
    - [Step 3: Preview Case (Dry Run)](#step-3-preview-case-dry-run)
    - [Step 4: Generate OpenFOAM Case](#step-4-generate-openfoam-case)
    - [Step 5: Run Simulation (Standard OpenFOAM Commands)](#step-5-run-simulation-standard-openfoam-commands)
    - [Step 6: Post-Process Aerodynamic Forces](#step-6-post-process-aerodynamic-forces)
-5. [Configuration Guide (`config.json`)](#configuration-guide-configjson)
+6. [Configuration Guide (`config.json`)](#configuration-guide-configjson)
    - [Essential Settings](#essential-settings)
    - [Ground Plane & Ride Height Styles](#ground-plane--ride-height-styles)
    - [Symmetry Plane & Half-Car Simulation](#symmetry-plane--half-car-simulation)
@@ -31,13 +40,13 @@ The repository includes regression tests for generation, parsing, and script beh
    - [Turbulence Specification](#turbulence-specification)
    - [Parallel & SLURM Cluster Settings](#parallel--slurm-cluster-settings)
    - [Expert Overrides](#expert-overrides)
-6. [Fidelity Presets & Mesh Sizing](#fidelity-presets--mesh-sizing)
-7. [Geometry, Domain & Boundary Physics Deep Dive](#geometry-domain--boundary-physics-deep-dive)
+7. [Fidelity Presets & Mesh Sizing](#fidelity-presets--mesh-sizing)
+8. [Geometry, Domain & Boundary Physics Deep Dive](#geometry-domain--boundary-physics-deep-dive)
    - [Automatic Domain Sizing Mathematics](#automatic-domain-sizing-mathematics)
    - [Coordinate Transformations & Orientation](#coordinate-transformations--orientation)
    - [Road & Moving Ground Boundary Condition](#road--moving-ground-boundary-condition)
    - [Symmetry Clipping & Force Projection](#symmetry-clipping--force-projection)
-8. [Meshing Pipeline & `snappyHexMesh` Architecture](#meshing-pipeline--snappyhexmesh-architecture)
+9. [Meshing Pipeline & `snappyHexMesh` Architecture](#meshing-pipeline--snappyhexmesh-architecture)
    - [Step 1: Feature Extraction (`surfaceFeatureExtract`)](#step-1-feature-extraction-surfacefeatureextract)
    - [Step 2: Background Hexahedral Grid (`blockMesh`)](#step-2-background-hexahedral-grid-blockmesh)
    - [Step 3: Conforming Distance-Based Refinement Shells](#step-3-conforming-distance-based-refinement-shells)
@@ -46,29 +55,30 @@ The repository includes regression tests for generation, parsing, and script beh
    - [Step 6: Boundary Layer Inflation (`addLayersControls`)](#step-6-boundary-layer-inflation-addlayerscontrols)
    - [Step 7: Parallel Quality Verification (`checkMesh`)](#step-7-parallel-quality-verification-checkmesh)
    - [Step 8: Cell Renumbering (`renumberMesh`)](#step-8-cell-renumbering-renumbermesh)
-9. [Numerical Physics, Schemes & Solver Coupling](#numerical-physics-schemes--solver-coupling)
-   - [Pre-Initialization with `potentialFoam`](#pre-initialization-with-potentialfoam)
-   - [SIMPLEC Pressure-Velocity Coupling](#simplec-pressure-velocity-coupling)
-   - [Spatial Discretization Schemes (`fvSchemes`)](#spatial-discretization-schemes-fvschemes)
-   - [Linear Solvers & Multigrid Acceleration (`fvSolution`)](#linear-solvers--multigrid-acceleration-fvsolution)
-   - [Turbulence Closure & Wall Functions ($k$-$\omega$ SST)](#turbulence-closure--wall-functions-k-omega-sst)
-10. [Post-Processing, Force Analysis & Live Monitoring](#post-processing-force-analysis--live-monitoring)
+10. [Numerical Physics, Schemes & Solver Coupling](#numerical-physics-schemes--solver-coupling)
+    - [Pre-Initialization with `potentialFoam`](#pre-initialization-with-potentialfoam)
+    - [SIMPLEC Pressure-Velocity Coupling](#simplec-pressure-velocity-coupling)
+    - [Spatial Discretization Schemes (`fvSchemes`)](#spatial-discretization-schemes-fvschemes)
+    - [Linear Solvers & Multigrid Acceleration (`fvSolution`)](#linear-solvers--multigrid-acceleration-fvsolution)
+    - [Turbulence Closure & Wall Functions ($k$-$\omega$ SST)](#turbulence-closure--wall-functions-k-omega-sst)
+11. [Post-Processing, Force Analysis & Live Monitoring](#post-processing-force-analysis--live-monitoring)
     - [Force Extraction & Decomposition](#force-extraction--decomposition)
     - [Multi-Part Force Accounting](#multi-part-force-accounting)
     - [Automated Convergence Monitor & Clean Auto-Stop](#automated-convergence-monitor--clean-auto-stop)
     - [Real-Time Animated Live Dashboard](#real-time-animated-live-dashboard)
     - [Multi-Case Tabular Comparison](#multi-case-tabular-comparison)
-11. [HPC Cluster Execution & Fault Recovery](#hpc-cluster-execution--fault-recovery)
-12. [Performance-Related Implementation Choices](#performance-related-implementation-choices)
-13. [FSAE & Aerodynamics Study Considerations](#fsae--aerodynamics-study-considerations)
-14. [Troubleshooting & FAQ](#troubleshooting--faq)
-15. [Automated Regression Tests](#automated-regression-tests)
+12. [HPC Cluster Execution & Fault Recovery](#hpc-cluster-execution--fault-recovery)
+13. [Performance-Related Implementation Choices](#performance-related-implementation-choices)
+14. [FSAE & Aerodynamics Study Considerations](#fsae--aerodynamics-study-considerations)
+15. [Troubleshooting & FAQ](#troubleshooting--faq)
+16. [Automated Regression Tests](#automated-regression-tests)
 
 ---
 
 ## Key Features
 
 - **Standard Commands Only**: No custom CLI binary installation needed. Run directly with standard `python setup_case.py`, standard OpenFOAM commands (`blockMesh`, `snappyHexMesh`, `simpleFoam`), and standard `python read_forces.py`.
+- **OpenFOAM Studio Web Application**: Includes an interactive browser-based UI (`run_app.sh` / `run_app.bat`) featuring a 3D geometry viewer, real-time 3D coordinate axes trihedron, live wind tunnel domain box visualization, bidirectional visual config synchronization, and direct remote SSH/SLURM cluster dispatching with local credential security.
 - **Vehicle-Oriented Defaults**: Configurable domain padding, refinement levels, boundary layers, and wake regions.
 - **Two Wake Refinement Boxes**: A `nearWakeBox` and a coarser `farWakeBox`, with dimensions derived from geometry bounds.
 - **Distance Refinement Shells**: Refinement based on distance from the STL surface (e.g. 25 mm $\rightarrow$ Level 4, 80 mm $\rightarrow$ Level 3 for the standard preset).
@@ -88,16 +98,41 @@ The repository includes regression tests for generation, parsing, and script beh
 
 - **Operating System**: Case generation uses Python. Generated execution scripts target a Linux/Bash environment with OpenFOAM; parallel runs also require MPI. Native Windows Python can generate files, but cannot run these scripts by itself.
 - **OpenFOAM**: The templates use OpenCFD-style dictionaries and the `simpleFoam` workflow. Compatibility across releases and with Foundation editions has not been established by the repository's tests. Check generated dictionaries and commands against your installation.
-- **Python**: Python $\ge$ 3.9 (standard library only for case generation; `matplotlib` optional for GUI plots).
+- **Python**: Python $\ge$ 3.9 (standard library only for case generation; `matplotlib` optional for CLI plots; `fastapi`, `uvicorn`, `paramiko` for Web Studio).
 
-### Getting Started (Run from the Repository)
+### Getting Started
 
-Clone the repository; the Python scripts run directly without installing this project as a package:
+Clone the repository; the scripts run directly without installing this project as a package:
 
 ```bash
 git clone https://github.com/tadtapongc/OpenFOAM-CaseGenerator.git
 cd OpenFOAM-CaseGenerator
 ```
+
+#### Workflow A: OpenFOAM Studio (Interactive Web GUI)
+
+For a visual, interactive experience with 3D CAD visualization, wind tunnel cage inspection, real-time config editing, and remote cluster submission, run the 1-click launcher:
+
+- **Linux / macOS**:
+  ```bash
+  chmod +x run_app.sh
+  ./run_app.sh
+  ```
+- **Windows**:
+  Double-click `run_app.bat` or run in Command Prompt / PowerShell:
+  ```cmd
+  run_app.bat
+  ```
+- **Cross-Platform / Manual**:
+  ```bash
+  pip install -e ".[web]"
+  python -m cfd_gen.web.server
+  ```
+The studio will automatically open your default web browser to `http://127.0.0.1:8000`.
+
+#### Workflow B: Standard Command-Line Interface (CLI)
+
+For headless, automated, or scripted workflows, you only need Python standard library:
 
 Place your ASCII STL in `stl/`, then edit `configs/config.json` to set its filename, a new case name, flow settings, and an appropriate MPI rank count. Preview and generate from the repository root:
 
@@ -109,6 +144,105 @@ python setup_case.py configs/config.json
 With OpenFOAM loaded in your shell, follow [Step 5](#step-5-run-simulation-standard-openfoam-commands) to run the generated case and [Step 6](#step-6-post-process-aerodynamic-forces) to inspect its forces. Plotting additionally requires `python -m pip install matplotlib`.
 
 `python setup_case.py --init` creates starter directories and an example configuration; it does not supply geometry or overwrite an existing example.
+
+---
+
+## OpenFOAM Studio (Interactive Web GUI)
+
+OpenFOAM Studio is a local web application providing an intuitive visual environment for setting up CFD cases, inspecting 3D geometries, validating domain bounds, and dispatching simulations to remote HPC clusters.
+
+### Launching the Studio
+
+You can launch OpenFOAM Studio via the automated runner scripts or standard Python:
+
+```bash
+# Linux / macOS (creates .venv, installs dependencies, launches server)
+./run_app.sh
+
+# Windows (creates .venv, installs dependencies, launches server)
+run_app.bat
+
+# Or direct Python invocation:
+python -m cfd_gen.web.server --port 8000
+```
+
+Key CLI arguments for `cfd_gen.web.server`:
+- `--host <ip>`: Bind address (default: `127.0.0.1`).
+- `--port <port>`: Port to listen on (default: `8000`; automatically increments to next available port if busy).
+- `--no-browser`: Do not automatically open the default web browser on launch.
+
+---
+
+### Interactive 3D WebGL Viewport & Coordinate System
+
+The studio features a high-performance 3D viewport powered by Three.js with full OrbitControls support (left-click to rotate, right-click to pan, scroll to zoom).
+
+#### Coordinate System & Color Conventions
+The 3D scene adheres strictly to OpenFOAM and SAE vehicle aerodynamics coordinate standards:
+- **+X Axis (Red)**: Lateral / symmetry spanwise direction (points toward driver's right).
+- **+Y Axis (Green)**: Elevation / vertical height direction (points upwards from the ground plane).
+- **+Z Axis (Blue)**: Longitudinal / freestream flow direction (freestream air flows along $-Z$ towards the outlet).
+
+#### Viewport Elements & Diagnostic Overlays
+1. **Interactive 3D Trihedron (Bottom-Right)**:
+   A dedicated screen-fixed 3D orientation indicator with labeled axes ($X$, $Y$, $Z$) in the lower-right corner. It mirrors scene camera rotations dynamically in real time, ensuring you never lose spatial orientation.
+2. **In-Scene CAD Origin Triad**:
+   A visible coordinate triad located at the absolute origin `(0, 0, 0)` with labeled directional arrows to verify where your CAD coordinates and symmetry plane lie relative to OpenFOAM space.
+3. **Live Virtual Wind Tunnel Bounding Cage**:
+   A dynamic wireframe bounding box that renders the exact computational domain ($x_{min} \dots x_{max}, y_{min} \dots y_{max}, z_{min} \dots z_{max}$) computed from geometry bounds and padding settings. Any change in the configuration (e.g., domain padding, ground height, or symmetry plane offset) recalculates and updates the cage geometry in real time.
+4. **Ground Plane Grid**:
+   A reference ground grid positioned exactly at the active ground plane coordinate (`y = ground_plane`), providing visual feedback for ride height and ground clearance.
+5. **Low-Profile Viewport HUD**:
+   A streamlined floating HUD provides instant controls for:
+   - **Reset Camera**: Re-center and re-frame the camera on geometry bounds.
+   - **Wireframe Mode**: Toggle between solid surface rendering and triangle wireframe mesh.
+   - **Domain Cage Toggle**: Show or hide the virtual wind tunnel bounding box.
+   - **Maximize Viewport**: Expand the 3D canvas to a full-window view (or restore the default 60% viewport / 40% configuration split).
+
+---
+
+### Visual Configuration Builder
+
+The web interface eliminates manual JSON editing errors with form-based parameter management and bidirectional synchronization:
+
+- **Template Selection**: One-click configuration templates for:
+  - *Standard Vehicle Half-Car* (symmetry plane at $x=0$, moving ground, auto-sized tunnel).
+  - *Full-Car Moving Ground* (full vehicle with road velocity matching freestream).
+  - *Airfoil / Aircraft Free-Air* (six-sided far-field boundaries without road interaction).
+  - *Coarse Fast Test* (low mesh resolution for quick pipeline verification).
+- **Geometry & Mesh Sizing Preview**:
+  - Live inspection of STL bounding boxes ($L \times W \times H$) and surface area.
+  - Interactive selection of fidelity presets (`fast`, `standard`, `fine`), instantly showing the derived background hex cell size, surface refinement levels, and boundary layer parameters.
+- **Physical & Boundary Setup**:
+  - Freestream velocity (m/s or km/h), air kinematic viscosity, and turbulence intensity ($I$ and $\mu_t/\mu$).
+  - Ground clearance adjustment with options for absolute coordinates or relative offsets.
+  - Interactive face boundary assignment (`inlet`, `outlet`, `symmetry`, `ground`, `farField`).
+- **Bidirectional JSON Sync**:
+  - The Raw JSON tab allows advanced users to inspect and directly edit the full `config.json`.
+  - Edits in the visual forms reflect in the JSON editor instantly, and changes made in the JSON editor update the visual controls and 3D domain cage seamlessly.
+
+---
+
+### Remote HPC Cluster & SLURM Integration
+
+OpenFOAM Studio includes an integrated SSH and SLURM manager to bridge local CAD preparation with remote cluster computation:
+
+- **Secure SSH Connection**: Connects to remote compute clusters using SSH key pairs or password authentication via Paramiko.
+- **One-Click Case Deployment**: Generates and transfers case files to the remote cluster scratch filesystem.
+- **Job Dispatching**: Submits the generated `run.sh` SLURM batch script (`sbatch run.sh`) configured with your specified partition, node count, and default QoS (`cu_hpc` or custom).
+- **Live Job Queue Monitoring**: Real-time table display of running, pending, and completed SLURM jobs (`squeue -u <user>`).
+- **Real-Time Telemetry & Log Streaming**:
+  - Streams execution logs (`log.snappyHexMesh`, `log.simpleFoam`) with live auto-scrolling.
+  - Plots aerodynamic convergence metrics ($C_d$, $C_l$, residuals) in real-time charts directly in the browser.
+
+---
+
+### Credential Security & Local Persistence
+
+To ensure zero risk of committing sensitive cluster credentials to Git:
+- **No Hardcoded Defaults**: Target cluster hostname, SSH username, and remote paths are never hardcoded in repository files.
+- **Browser LocalStorage**: Form fields automatically persist connection settings in your browser's private `localStorage` (`cfd_cluster_config`), so your host, user, and remote paths are remembered across sessions without touching the codebase.
+- **User-Home Configuration**: Backend caching stores credentials strictly in `~/.cfd_gen_cluster.json` located in your user profile home directory, completely isolated from git repositories and shared environments.
 
 ---
 
