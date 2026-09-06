@@ -12,8 +12,8 @@ class CFDApp {
     this.currentSTLName = null;
 
     this.activeConfig = {
-      case_name: "RP14_FSAE",
-      stl_files: ["RP14.STL"],
+      case_name: "my_case",
+      stl_files: ["geometry.stl"],
       stl_dir: "stl",
       case_dir: "cases",
       fidelity: "standard",
@@ -27,7 +27,7 @@ class CFDApp {
         downforce_axis: "-y",
       },
       domain_box: "auto",
-      symmetry_plane: -0.1185,
+      symmetry_plane: 0.0,
       ground_clearance: 0.035,
       domain_faces: {
         "-x": "symmetry",
@@ -261,7 +261,7 @@ class CFDApp {
     if (!cfg) return;
 
     // General
-    this.setVal('cfg-case-name', cfg.case_name || 'RP14_FSAE');
+    this.setVal('cfg-case-name', cfg.case_name || 'my_case');
 
     const fidelity = cfg.fidelity || 'standard';
     document.querySelectorAll('.fidelity-card').forEach((card) => {
@@ -297,7 +297,7 @@ class CFDApp {
       document.getElementById('custom-domain-container').style.display = 'none';
     }
 
-    const sym = cfg.symmetry_plane !== undefined ? cfg.symmetry_plane : (cfg._symmetry_plane !== undefined ? cfg._symmetry_plane : -0.1185);
+    const sym = cfg.symmetry_plane !== undefined ? cfg.symmetry_plane : (cfg._symmetry_plane !== undefined ? cfg._symmetry_plane : 0.0);
     this.setVal('cfg-symmetry-plane', sym);
 
     // Ground Level Specification (2 + 1 Styles)
@@ -394,7 +394,7 @@ class CFDApp {
     const cfg = { ...this.activeConfig };
 
     // General
-    cfg.case_name = this.getVal('cfg-case-name') || 'RP14_FSAE';
+    cfg.case_name = this.getVal('cfg-case-name') || 'my_case';
 
     const selectedFidelityCard = document.querySelector('.fidelity-card.selected');
     cfg.fidelity = selectedFidelityCard ? selectedFidelityCard.dataset.fidelity : 'standard';
@@ -793,7 +793,7 @@ class CFDApp {
       if (!res.ok) return;
       const data = await res.json();
       if (data.domain_box && data.domain_box.min && data.domain_box.max) {
-        const sym = this.activeConfig.symmetry_plane !== undefined ? this.activeConfig.symmetry_plane : -0.1185;
+        const sym = this.activeConfig.symmetry_plane !== undefined ? this.activeConfig.symmetry_plane : 0.0;
         const flowDir = this.activeConfig.flow?.direction || '-z';
         this.viewer.updateDomainBox(data.domain_box.min, data.domain_box.max, sym, flowDir);
         if (autoFit) {

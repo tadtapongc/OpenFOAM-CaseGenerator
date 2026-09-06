@@ -153,7 +153,7 @@ async def api_geometry_domain_box(req: DomainBoxRequest) -> dict[str, Any]:
         if all_min[0] != float("inf"):
             bounds_tuple = (all_min, all_max)
         else:
-            # Default FSAE reference geometry bounds (RP14 half-car)
+            # Default reference geometry bounds (half-model)
             bounds_tuple = ([-0.7, 0.035, -1.8], [0.7, 1.1, 1.2])
 
     try:

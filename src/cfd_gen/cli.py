@@ -25,9 +25,9 @@ def setup_main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 Examples:
-    python setup_case.py --init                    Create starter project structure
-    python setup_case.py configs/example.json      Generate case
-    python setup_case.py configs/example.json -n   Preview only (dry run)
+    python setup_case.py --init                   Create starter project structure
+    python setup_case.py configs/config.json      Generate case
+    python setup_case.py configs/config.json -n   Preview only (dry run)
 """,
     )
     parser.add_argument("config", nargs="?", help="JSON config file")
@@ -64,7 +64,7 @@ def _do_init(project_dir: Path) -> None:
     cfg_dir = project_dir / "configs"
     cfg_dir.mkdir(exist_ok=True)
 
-    # Write minimal example config
+    # Write minimal config
     example = {
         "case_name": "my_wing",
         "stl_files": ["my_geometry.STL"],
@@ -78,7 +78,7 @@ def _do_init(project_dir: Path) -> None:
             "downforce_axis": "-y",
         },
     }
-    out_path = cfg_dir / "example.json"
+    out_path = cfg_dir / "config.json"
     if not out_path.exists():
         out_path.write_text(json.dumps(example, indent=4) + "\n")
         print(f"\n  ✓ Created: {out_path}")
@@ -91,8 +91,8 @@ def _do_init(project_dir: Path) -> None:
     print(f"  ✓ Created: stl/ and cases/")
     print(f"\n  Next steps:")
     print(f"    1. Place STL files in stl/")
-    print(f"    2. Edit configs/example.json")
-    print(f"    3. python setup_case.py configs/example.json")
+    print(f"    2. Edit configs/config.json")
+    print(f"    3. python setup_case.py configs/config.json")
 
 
 def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> None:

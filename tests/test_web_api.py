@@ -21,6 +21,31 @@ from cfd_gen.web.ssh_client import ClusterSSHClient
 
 
 class TestWebAPI(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.sample_stl = Path("stl/sample_wing.stl")
+        if not cls.sample_stl.exists():
+            cls.sample_stl.parent.mkdir(parents=True, exist_ok=True)
+            cls.sample_stl.write_text(
+                "solid sample_wing\n"
+                "  facet normal 0 0 1\n"
+                "    outer loop\n"
+                "      vertex 0 0 0\n"
+                "      vertex 1 0 0\n"
+                "      vertex 0 1 0\n"
+                "    endloop\n"
+                "  endfacet\n"
+                "endsolid sample_wing\n"
+            )
+            cls.created_stl = True
+        else:
+            cls.created_stl = False
+
+    @classmethod
+    def tearDownClass(cls):
+        if getattr(cls, "created_stl", False) and cls.sample_stl.exists():
+            cls.sample_stl.unlink(missing_ok=True)
+
     def test_saved_cluster_config(self):
         """Test retrieving cached cluster config."""
         res = asyncio.run(api_get_saved_config())
@@ -47,7 +72,7 @@ class TestWebAPI(unittest.TestCase):
         res = asyncio.run(api_config_load_file("config.json"))
         self.assertEqual(res["filename"], "config.json")
         self.assertIn("raw_config", res)
-        self.assertEqual(res["raw_config"]["case_name"], "RP14_FSAE")
+        self.assertEqual(res["raw_config"]["case_name"], "my_case")
 
     def test_stl_list(self):
         """Test listing STLs in stl/ directory."""
@@ -87,14 +112,14 @@ class TestWebAPI(unittest.TestCase):
         """Test SLURM squeue parsing logic."""
         c = ClusterSSHClient()
         mock_squeue_output = (
-            "1234567|RP14_sim|cpu|RUNNING|00:15:22|08:00:00|1|None\n"
+            "1234567|aero_sim|cpu|RUNNING|00:15:22|08:00:00|1|None\n"
             "1234568|Wing_V2|cpu|PENDING|00:00:00|04:00:00|1|Priority\n"
         )
         with patch.object(c, "run_command", return_value=(0, mock_squeue_output, "")):
             jobs = c.get_slurm_queue("testuser")
             self.assertEqual(len(jobs), 2)
             self.assertEqual(jobs[0]["job_id"], "1234567")
-            self.assertEqual(jobs[0]["name"], "RP14_sim")
+            self.assertEqual(jobs[0]["name"], "aero_sim")
             self.assertEqual(jobs[0]["state"], "RUNNING")
             self.assertEqual(jobs[1]["state"], "PENDING")
 
@@ -151,7 +176,7 @@ class TestWebAPI(unittest.TestCase):
 
     def test_auto_symmetry_plane_calculation(self):
         """Test calculation of auto symmetry plane from geometry bounds."""
-        # bounds with X min = -0.8639691, max = 0.6265309 (like RP14)
+        # bounds with asymmetric X min = -0.8639691, max = 0.6265309
         bounds = {"min": [-0.8640, 0.0, -1.71], "max": [0.6266, 1.0, 1.44]}
         cfg = {
             "flow": {"velocity": 16.67, "direction": "-z", "ground": True},

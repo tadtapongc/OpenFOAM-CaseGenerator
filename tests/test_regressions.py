@@ -104,8 +104,8 @@ class ProjectTest(unittest.TestCase):
         self.assertEqual(namespace["WINDOW"], 200)
         self.assertEqual(namespace["THRESHOLD"], 0.5)
 
-    def test_init_preserves_existing_example(self):
-        path = self.root / "configs/example.json"
+    def test_init_preserves_existing_config(self):
+        path = self.root / "configs/config.json"
         path.parent.mkdir()
         path.write_text("my configuration")
         with contextlib.redirect_stdout(io.StringIO()):

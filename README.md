@@ -204,8 +204,8 @@ Edit `configs/config.json` with standard JSON. The annotated examples below and 
 
 ```jsonc
 {
-    "case_name": "RP14_FSAE",            // Case output folder created under cases/<case_name>/
-    "stl_files": ["RP14.STL"],           // ASCII STL geometry filename(s) in stl/ directory
+    "case_name": "my_case",              // Case output folder created under cases/<case_name>/
+    "stl_files": ["geometry.stl"],       // ASCII STL geometry filename(s) in stl/ directory
     "fidelity": "standard",              // Mesh and solver preset: "fast", "standard", or "fine"
 
     "flow": {
@@ -220,7 +220,7 @@ Edit `configs/config.json` with standard JSON. The annotated examples below and 
     },
 
     "domain_box": "auto",                // "auto" derives 4L upstream, 8L downstream, 4H top virtual wind tunnel
-    "symmetry_plane": -0.1185,           // Lateral centerline coordinate if car is offset from origin (omit or 0.0 if centered)
+    "symmetry_plane": 0.0,               // Lateral centerline coordinate if geometry uses symmetry (omit or 0.0 if centered)
 
     "domain_faces": {
         "-x": "symmetry",                // Inner car centerline: symmetry boundary condition
@@ -264,10 +264,10 @@ Example output reproduced using the preceding configuration and geometry with th
     Region nearWakeBox: Level 3
     Region farWakeBox: Level 1
 
-  DRY RUN — would generate: cases/RP14_FSAE
+  DRY RUN — would generate: cases/my_case
     Velocity:   16.67 m/s  U=(0 0 -16.67)
     k=0.010421  ω=68.739  νt=0.0001516
-    Surfaces:   RP14
+    Surfaces:   geometry
     Pipeline:   potentialFoam → simpleFoam (1500 iters, bounded Gauss limitedLinear 1)
 ```
 
@@ -286,7 +286,7 @@ Re-running generation with the same case name overwrites dictionaries, `0/`, `0.
 Navigate into the generated case directory:
 
 ```bash
-cd cases/RP14_FSAE
+cd cases/my_case
 ```
 
 You can run the simulation using **Method A (Automated Script)**, **Method B (Direct Standard OpenFOAM Commands)**, or **Method C (SLURM Cluster)**:
@@ -348,23 +348,23 @@ To wipe mesh and solver output files back to initial state:
 
 ### Step 6: Post-Process Aerodynamic Forces
 
-Run the post-processing script from the project root. Replace `cases/RP14_FSAE` with the case you want to inspect:
+Run the post-processing script from the project root. Replace `cases/my_case` with the case you want to inspect:
 
 ```bash
 # Print the force summary for a specific case:
-python read_forces.py cases/RP14_FSAE
+python read_forces.py cases/my_case
 
 # Open the live dashboard:
-python read_forces.py cases/RP14_FSAE --live
+python read_forces.py cases/my_case --live
 
 # Display a force-history plot:
-python read_forces.py cases/RP14_FSAE --plot
+python read_forces.py cases/my_case --plot
 
 # Save force_convergence.png in the current working directory:
-python read_forces.py cases/RP14_FSAE --save
+python read_forces.py cases/my_case --save
 
 # Check force stability (exit 0 if the criterion passes, 1 otherwise):
-python read_forces.py cases/RP14_FSAE --check
+python read_forces.py cases/my_case --check
 
 # Compare cases under cases/:
 python read_forces.py --compare

@@ -12,6 +12,10 @@ stl/*
 *.stl
 *.STL
 
+# Configuration files (ignore custom configs, keep default template)
+configs/*
+!configs/config.json
+
 # ============================================================
 # OpenFOAM generated files (safety net)
 # ============================================================

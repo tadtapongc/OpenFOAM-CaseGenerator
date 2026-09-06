@@ -1,42 +1,50 @@
 {
-    "_README": "=== OpenFOAM FSAE Aerodynamics Case Configuration ===",
-    "_README2": "Optimized for Formula Student / FSAE CFD. Change only case_name & stl_files when testing new models.",
+    "_README": "=== OpenFOAM Case Configuration (Full Example) ===",
+    "_README_COMMENTS": "Keys starting with '_' are comments/documentation and are ignored by the generator.",
+    "_README_USAGE": "Edit case_name, stl_files, and flow conditions. All other fields use robust built-in defaults.",
 
+    "_section_case": "--- 1. Case & Geometry Setup ---",
     "_case_name": "Folder name created under cases/<case_name>/",
-    "case_name": "RP14_FSAE",
+    "case_name": "my_case",
 
-    "_stl_files": "ASCII STL geometry files located in stl/ directory",
-    "stl_files": ["RP14.STL"],
+    "_stl_files": "ASCII STL geometry files located in the stl/ directory",
+    "stl_files": ["geometry.stl"],
 
-    "_fidelity": "Presets: 'fast' (~2-4M cells, 10 min), 'standard' (~6-9M cells, 45 min, RECOMMENDED for FSAE), 'fine' (~12-16M cells)",
+    "_fidelity": "Presets: 'fast' (~2-4M cells, 10 min), 'standard' (~6-9M cells, 45 min, RECOMMENDED for general aerodynamics), 'fine' (~12-16M cells, 2-4 hrs)",
     "fidelity": "standard",
 
+    "_section_flow": "--- 2. Flow & Operating Conditions ---",
     "flow": {
-        "_comment": "Flow conditions: velocity in m/s (16.67 m/s ≈ 60 km/h); ground=true enables moving road",
+        "_velocity_comment": "Freestream air velocity in m/s (16.67 m/s ≈ 60 km/h, 20.0 m/s = 72 km/h)",
         "velocity": 16.67,
+        "_direction_comment": "Flow direction vector: +x, -x, +y, -y, +z, -z (direction the air travels)",
         "direction": "-z",
+        "_ground_comment": "true = moving ground wall at freestream velocity; false = slip wall (free-air aero)",
         "ground": true
     },
 
+    "_section_outputs": "--- 3. Aerodynamic Force Reporting Axes ---",
     "outputs": {
-        "_comment": "Axis projection: drag along flow (-z) and downforce towards ground (-y)",
+        "_drag_axis_comment": "Axis along which aerodynamic drag is reported (direction of freestream flow)",
         "drag_axis": "-z",
+        "_downforce_axis_comment": "Axis along which downforce (-lift) is reported (-y = toward ground, +y = aircraft lift)",
         "downforce_axis": "-y"
     },
 
-    "_domain_box_comment": "'auto' automatically fits wind tunnel around STL bounds and aligns ground/symmetry. Or provide explicit {'min': [...], 'max': [...]}.",
+    "_section_domain": "--- 4. Virtual Wind Tunnel Domain ---",
+    "_domain_box_comment": "'auto' automatically fits wind tunnel around STL (4L upstream, 8L downstream, 4H top, 4W lateral). Or provide explicit {'min': [x, y, z], 'max': [x, y, z]}.",
     "domain_box": "auto",
 
-    "_symmetry_plane_comment": "Centerline coordinate if car symmetry plane is NOT at 0.0 (e.g. -0.1185 for RP14). Omit or set 0.0 if centered at 0.",
-    "symmetry_plane": -0.1185,
+    "_symmetry_plane_comment": "Centerline coordinate if model uses a symmetry plane (0.0 if centered at origin, or specify offset if origin is shifted). Omit if full 3D model.",
+    "symmetry_plane": 0.0,
 
-    "_ground_comment": "Optional ground level (delete leading '_' from either key to activate):",
+    "_ground_position_comment": "Optional ground elevation control (delete leading '_' from ONE key below to activate; omit both to snap to lowest STL vertex):",
     "_ground_clearance": 0.035,
-    "_ground_clearance_desc": "Style 1 (Relative): Gap in meters below lowest STL point (e.g. 0.035 = 35mm front wing ride height)",
+    "_ground_clearance_desc": "Style 1 (Relative): Gap in meters below lowest STL point (e.g. 0.035 = 35mm ground clearance / ride height)",
     "_ground_plane": 0.0,
-    "_ground_plane_desc": "Style 2 (Absolute): Fixed CAD coordinate of road (e.g. 0.0 if wing is in car assembly coordinates)",
+    "_ground_plane_desc": "Style 2 (Absolute): Fixed CAD coordinate of ground / road elevation (e.g. 0.0 if geometry is positioned relative to origin)",
 
-    "_domain_faces": "Boundary types for the 6 outer box faces: inlet, outlet, ground, farField, symmetry",
+    "_domain_faces_comment": "Boundary types for the 6 outer box faces (-x, +x, -y, +y, -z, +z). Available types: inlet, outlet, ground, farField, symmetry.",
     "domain_faces": {
         "-x": "symmetry",
         "+x": "farField",
@@ -46,14 +54,16 @@
         "-z": "outlet"
     },
 
+    "_section_parallel": "--- 5. Parallel Computing ---",
     "parallel": {
-        "_comment": "Number of CPU cores for MPI decomposition, meshing, and solving",
+        "_comment": "Number of CPU cores for MPI decomposition, snappyHexMesh meshing, and simpleFoam solving",
         "n_procs": 32
     },
 
+    "_section_slurm": "--- 6. SLURM Cluster Configuration ---",
     "slurm": {
-        "_comment": "SLURM cluster configuration for CU e-Science cluster",
-        "qos": "cu_hpc",
+        "_comment": "SLURM cluster configuration for HPC / compute cluster",
+        "qos": "standard",
         "partition": "cpu",
         "nodes": 1,
         "time": "08:00:00",
@@ -68,7 +78,8 @@
         "sync_interval": 15
     },
 
-    "_comment_overrides": "Expert overrides — all fields below have built-in FSAE defaults in fidelity presets. Uncomment only if manual tuning is needed.",
+    "_section_overrides": "--- 7. Expert Overrides (Optional) ---",
+    "_overrides_note": "All fields below have built-in defaults in fidelity presets. Uncomment only if manual tuning is needed.",
     "_optional_overrides_example": {
         "mesh_params": {
             "_base_cell_size": 0.10,
@@ -76,6 +87,25 @@
             "_edge_level": 6,
             "_near_wake_level": 3,
             "_far_wake_level": 1
+        },
+        "fluid": {
+            "_nu": 1.516e-5,
+            "_rho": 1.225
+        },
+        "turbulence": {
+            "_model": "kOmegaSST",
+            "_intensity": 0.005,
+            "_nut_ratio": 10
+        },
+        "solver": {
+            "_end_time": 800,
+            "_write_interval": 400,
+            "_purge_write": 2
+        },
+        "force_refs": {
+            "_lRef": 1.0,
+            "_Aref": 1.0,
+            "_CofR": [0.0, 0.0, 0.0]
         }
     }
 }
