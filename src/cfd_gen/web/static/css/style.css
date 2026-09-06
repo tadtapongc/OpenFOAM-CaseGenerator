@@ -1953,6 +1953,24 @@ body.dark-theme {
   border: 1px solid var(--border-default);
 }
 
+.status-badge.status-queued {
+  background: rgba(234, 179, 8, 0.12);
+  color: #eab308;
+  border: 1px solid rgba(234, 179, 8, 0.3);
+}
+
+.status-badge.status-completing {
+  background: rgba(129, 140, 248, 0.12);
+  color: #818cf8;
+  border: 1px solid rgba(129, 140, 248, 0.3);
+}
+
+.status-badge.status-failed {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
 /* Flow cell */
 .flow-cell {
   display: flex;

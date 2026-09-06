@@ -107,7 +107,10 @@ class CFDApp {
       if (this.telemetryPollingActive && activeTab && activeTab.dataset.tab === 'telemetry-tab') {
         this.pollTelemetry();
       }
-    }, 5000);
+      if (activeTab && activeTab.dataset.tab === 'cases-tab') {
+        this.loadCasesArchive();
+      }
+    }, 4000);
   }
 
   // -------------------------------------------------------------
@@ -1615,8 +1618,8 @@ class CFDApp {
       // Update Summary Stat Cards
       const total = this.archiveCases.length;
       const converged = this.archiveCases.filter(c => c.converged || (c.status && c.status.toLowerCase() === 'converged')).length;
-      const solving = this.archiveCases.filter(c => c.status && (c.status.toLowerCase() === 'solving' || c.status.toLowerCase() === 'meshing')).length;
-      const ready = this.archiveCases.filter(c => !c.converged && c.status && !['solving', 'meshing', 'converged'].includes(c.status.toLowerCase())).length;
+      const solving = this.archiveCases.filter(c => c.status && ['solving', 'meshing', 'queued', 'completing'].includes(c.status.toLowerCase())).length;
+      const ready = this.archiveCases.filter(c => !c.converged && c.status && !['solving', 'meshing', 'queued', 'completing', 'converged', 'failed'].includes(c.status.toLowerCase())).length;
 
       this.setValText('stat-total-cases', total);
       this.setValText('stat-converged-cases', converged);
@@ -1668,8 +1671,9 @@ class CFDApp {
         const s = (c.status || '').toLowerCase();
         if (f === 'converged') return c.converged || s === 'converged';
         if (f === 'completed') return s === 'completed' || c.converged || s === 'converged';
-        if (f === 'solving') return s === 'solving' || s === 'meshing';
-        if (f === 'generated') return s === 'generated' || s === 'meshed' || s === 'ready';
+        if (f === 'solving') return ['solving', 'meshing', 'queued', 'completing'].includes(s);
+        if (f === 'failed') return s === 'failed';
+        if (f === 'generated') return ['generated', 'meshed', 'ready'].includes(s);
         return s === f;
       });
     }
@@ -1715,6 +1719,15 @@ class CFDApp {
       } else if (statusLower === 'meshing' || statusLower === 'meshed') {
         badgeClass = 'status-meshed';
         statusIcon = '⬡';
+      } else if (statusLower === 'queued') {
+        badgeClass = 'status-queued';
+        statusIcon = '⏱';
+      } else if (statusLower === 'completing') {
+        badgeClass = 'status-completing';
+        statusIcon = '⏳';
+      } else if (statusLower === 'failed') {
+        badgeClass = 'status-failed';
+        statusIcon = '✕';
       }
       const statusBadge = `<span class="status-badge ${badgeClass}">${statusIcon} ${c.status || 'Ready'}</span>`;
 

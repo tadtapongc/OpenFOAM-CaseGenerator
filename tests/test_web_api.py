@@ -4,7 +4,7 @@ import asyncio
 import shutil
 from pathlib import Path
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, PropertyMock
 from fastapi import HTTPException
 
 from cfd_gen.web.server import (
@@ -25,6 +25,7 @@ from cfd_gen.web.server import (
     api_telemetry_logs,
     api_list_cases,
     api_case_delete,
+    ssh_client,
 )
 from cfd_gen.web.ssh_client import ClusterSSHClient
 
@@ -339,6 +340,150 @@ class TestWebAPI(unittest.TestCase):
             self.assertTrue(del_res["success"])
             self.assertFalse(dummy_case.exists())
 
+    def test_list_cases_failed_detection(self):
+        """Test that solver fatal error in log.simpleFoam results in status 'Failed'."""
+        failed_case = Path("cases/test_case_failed_dummy")
+        failed_case.mkdir(parents=True, exist_ok=True)
+        (failed_case / "case_config.json").write_text('{"case_name": "test_case_failed_dummy"}')
+        (failed_case / "log.simpleFoam").write_text(
+            "Time = 10\n"
+            "FOAM FATAL ERROR:\n"
+            "Continuity error cannot be resolved\n"
+            "FOAM aborting\n"
+        )
+        try:
+            cases = asyncio.run(api_list_cases())
+            match = next((c for c in cases if c["name"] == "test_case_failed_dummy"), None)
+            self.assertIsNotNone(match)
+            self.assertEqual(match["status"], "Failed")
+        finally:
+            del_res = asyncio.run(api_case_delete("test_case_failed_dummy"))
+            self.assertTrue(del_res["success"])
+
+    def test_list_cases_cluster_merge_and_slurm(self):
+        """Test merging remote cases and mapping SLURM queue states into case status."""
+        mock_slurm = [
+            {"job_id": "1001", "name": "case_queued_sim", "state": "PENDING"},
+            {"job_id": "1002", "name": "case_running_sim", "state": "RUNNING"},
+        ]
+        mock_remote_cases = [
+            {
+                "name": "case_queued_sim",
+                "modified": "2026-09-07 04:00:00",
+                "modified_ts": 100.0,
+                "status": "Generated",
+                "fidelity": "standard",
+                "velocity": "20.0",
+                "direction": "-z",
+                "n_procs": 16,
+                "stl_name": "wing.stl",
+                "has_forces": False,
+                "has_residuals": False,
+                "has_mesh": False,
+                "latest_iter": None,
+                "converged": False,
+                "downforce": None,
+                "drag": None,
+                "ld_ratio": None,
+            },
+            {
+                "name": "case_running_sim",
+                "modified": "2026-09-07 05:00:00",
+                "modified_ts": 200.0,
+                "status": "Solving",
+                "fidelity": "standard",
+                "velocity": "16.7",
+                "direction": "-z",
+                "n_procs": 32,
+                "stl_name": "car.stl",
+                "has_forces": True,
+                "has_residuals": True,
+                "has_mesh": True,
+                "latest_iter": 120,
+                "converged": False,
+                "downforce": 450.2,
+                "drag": 210.5,
+                "ld_ratio": 2.14,
+            },
+            {
+                "name": "RP14",
+                "modified": "2026-09-07 06:00:00",
+                "modified_ts": 300.0,
+                "status": "Converged",
+                "fidelity": "standard",
+                "velocity": "16.7",
+                "direction": "-z",
+                "n_procs": 32,
+                "stl_name": "body.stl",
+                "has_forces": True,
+                "has_residuals": True,
+                "has_mesh": True,
+                "latest_iter": 880,
+                "converged": True,
+                "downforce": 579.1,
+                "drag": 247.95,
+                "ld_ratio": 2.34,
+            },
+        ]
+
+        with patch.object(ClusterSSHClient, "is_connected", new_callable=PropertyMock, return_value=True):
+            with patch.object(ssh_client, "get_slurm_queue", return_value=mock_slurm):
+                with patch.object(ssh_client, "list_remote_cases_detailed", return_value=mock_remote_cases):
+                    cases = asyncio.run(api_list_cases())
+
+                    by_name = {c["name"]: c for c in cases}
+                    self.assertIn("case_queued_sim", by_name)
+                    self.assertIn("case_running_sim", by_name)
+                    self.assertIn("RP14", by_name)
+
+                    # PENDING job should map to Queued
+                    self.assertEqual(by_name["case_queued_sim"]["status"], "Queued")
+                    self.assertEqual(by_name["case_queued_sim"]["location"], "Cluster")
+
+                    # RUNNING job should map to Solving with forces
+                    self.assertEqual(by_name["case_running_sim"]["status"], "Solving")
+                    self.assertEqual(by_name["case_running_sim"]["latest_iter"], 120)
+                    self.assertEqual(by_name["case_running_sim"]["downforce"], 450.2)
+                    self.assertEqual(by_name["case_running_sim"]["drag"], 210.5)
+
+                    # Completed converged job
+                    self.assertEqual(by_name["RP14"]["status"], "Converged")
+                    self.assertTrue(by_name["RP14"]["converged"])
+                    self.assertEqual(by_name["RP14"]["latest_iter"], 880)
+                    self.assertEqual(by_name["RP14"]["downforce"], 579.1)
+                    self.assertEqual(by_name["RP14"]["drag"], 247.95)
+                    self.assertEqual(by_name["RP14"]["ld_ratio"], 2.34)
+
+    def test_ssh_client_list_remote_cases_detailed(self):
+        """Test ClusterSSHClient.list_remote_cases_detailed execution and parsing."""
+        c = ClusterSSHClient()
+        # When disconnected, should return empty list
+        self.assertEqual(c.list_remote_cases_detailed(), [])
+
+        mock_payload = [
+            {
+                "name": "case_remote_1",
+                "modified": "2026-09-07 05:00:00",
+                "modified_ts": 12345.0,
+                "status": "Converged",
+                "latest_iter": 500,
+                "converged": True,
+                "downforce": 300.0,
+                "drag": 150.0,
+                "ld_ratio": 2.0,
+            }
+        ]
+        import json
+        mock_out = f"__CASE_JSON_START__{json.dumps(mock_payload)}__CASE_JSON_END__"
+        with patch.object(ClusterSSHClient, "is_connected", new_callable=PropertyMock, return_value=True):
+            with patch.object(c, "run_command", return_value=(0, mock_out, "")):
+                res = c.list_remote_cases_detailed()
+                self.assertEqual(len(res), 1)
+                self.assertEqual(res[0]["name"], "case_remote_1")
+                self.assertEqual(res[0]["latest_iter"], 500)
+                self.assertEqual(res[0]["downforce"], 300.0)
+
 
 if __name__ == "__main__":
     unittest.main()
+

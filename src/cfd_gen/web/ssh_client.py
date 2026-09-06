@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 import io
+import json
 import logging
 import os
 import re
@@ -333,3 +335,234 @@ class ClusterSSHClient:
                     "modified": mtime,
                 })
         return cases
+
+    def list_remote_cases_detailed(self) -> list[dict[str, Any]]:
+        """Extract detailed metadata, simulation status, and aerodynamic forces for all remote cases."""
+        if not self.is_connected:
+            return []
+
+        remote_script = """
+import os, sys, json, glob, re, math, statistics, datetime
+from pathlib import Path
+
+repo = Path(sys.argv[1] if len(sys.argv) > 1 else ".")
+cases_dir = repo / "cases"
+
+AXIS_MAP = {"x": 0, "y": 1, "z": 2}
+def parse_axis(axis_str):
+    s = str(axis_str).strip().lower()
+    sign = -1.0 if s.startswith("-") else 1.0
+    idx = AXIS_MAP.get(s.lstrip("+-"), 0)
+    return idx, sign
+
+results = []
+if cases_dir.is_dir():
+    for d in sorted(cases_dir.iterdir()):
+        if not d.is_dir() or d.name.startswith("."):
+            continue
+        cname = d.name
+        st = d.stat()
+        mtime = st.st_mtime
+        mtime_str = datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
+
+        # Config
+        cfg_file = d / "case_config.json"
+        if not cfg_file.is_file():
+            cfg_file = repo / "configs" / (cname + ".json")
+
+        fidelity = "standard"
+        velocity = "16.67"
+        direction = "-z"
+        n_procs = 32
+        stl_name = "--"
+        drag_idx, drag_sign = 2, -1.0
+        df_idx, df_sign = 1, -1.0
+        is_sym = False
+
+        if cfg_file.is_file():
+            try:
+                with open(str(cfg_file), encoding="utf-8") as f:
+                    cd = json.load(f)
+                    fidelity = cd.get("fidelity", "standard")
+                    v_val = cd.get("flow", {}).get("velocity", 16.67)
+                    velocity = f"{v_val:.1f}" if isinstance(v_val, (int, float)) else str(v_val)
+                    direction = cd.get("flow", {}).get("direction", "-z")
+                    n_procs = cd.get("parallel", {}).get("n_procs", 32)
+                    stls = cd.get("stl_files", [])
+                    if stls:
+                        stl_name = Path(stls[0]).name
+                    outputs = cd.get("outputs", {})
+                    if "drag_axis" in outputs:
+                        drag_idx, drag_sign = parse_axis(outputs["drag_axis"])
+                    if "downforce_axis" in outputs:
+                        df_idx, df_sign = parse_axis(outputs["downforce_axis"])
+                    faces = cd.get("domain_faces", {})
+                    if any("symmetry" in str(v).lower() for v in faces.values()):
+                        is_sym = True
+            except Exception:
+                pass
+
+        sym_scale = 2.0 if is_sym else 1.0
+
+        # Read forces
+        force_files = sorted(d.glob("postProcessing/forces/*/force.dat"))
+        if not force_files:
+            force_files = sorted(d.glob("processor*/postProcessing/forces/*/force.dat"))
+
+        has_forces = len(force_files) > 0
+        latest_iter = None
+        converged = False
+        downforce_val = None
+        drag_val = None
+        ld_val = None
+
+        if force_files:
+            samples = {}
+            for ff in force_files:
+                try:
+                    with open(str(ff), encoding="utf-8", errors="replace") as f:
+                        for line in f:
+                            line = line.strip()
+                            if not line or line.startswith("#"):
+                                continue
+                            parts = line.replace("(", " ").replace(")", " ").split()
+                            if len(parts) >= 10:
+                                try:
+                                    t = float(parts[0])
+                                    drg = float(parts[1 + drag_idx]) * drag_sign * sym_scale
+                                    df = float(parts[1 + df_idx]) * df_sign * sym_scale
+                                    samples[t] = (t, drg, df)
+                                except ValueError:
+                                    continue
+                except Exception:
+                    pass
+
+            if samples:
+                sorted_samples = sorted(samples.values(), key=lambda s: s[0])
+                times = [s[0] for s in sorted_samples]
+                drags = [s[1] for s in sorted_samples]
+                downforces = [s[2] for s in sorted_samples]
+                latest_iter = int(times[-1])
+
+                window = 200
+                if len(drags) < window:
+                    window = len(drags)
+
+                if window >= 20:
+                    d_win = drags[-window:]
+                    f_win = downforces[-window:]
+                    d_avg = statistics.mean(d_win)
+                    f_avg = statistics.mean(f_win)
+                    d_std = statistics.stdev(d_win)
+                    f_std = statistics.stdev(f_win)
+                    d_pct = (d_std / abs(d_avg) * 100) if d_avg != 0 else 100.0
+                    f_pct = (f_std / abs(f_avg) * 100) if f_avg != 0 else 100.0
+                    converged = (d_pct < 0.5 and f_pct < 0.5)
+                else:
+                    d_avg = statistics.mean(drags) if drags else 0.0
+                    f_avg = statistics.mean(downforces) if downforces else 0.0
+                    converged = False
+
+                downforce_val = round(f_avg, 2)
+                drag_val = round(d_avg, 2)
+                ld_val = round(f_avg / d_avg, 2) if abs(d_avg) > 1e-3 else None
+
+        # Check logs and status
+        status = "Generated"
+        log_simple = d / "log.simpleFoam"
+        has_residuals = log_simple.is_file()
+        has_mesh = (d / "constant" / "polyMesh" / "points").is_file()
+
+        if log_simple.is_file():
+            try:
+                with open(str(log_simple), encoding="utf-8", errors="replace") as f:
+                    lines = f.readlines()
+                    tail = "".join(lines[-30:])
+                    if "End" in tail or "Finalising parallel run" in tail:
+                        status = "Converged" if converged else "Completed"
+                    elif any(err in tail for err in ["FOAM FATAL", "Fatal error", "FOAM aborting", "sigFpe", "SIGFPE", "Floating point exception"]):
+                        status = "Failed"
+                    else:
+                        status = "Solving"
+            except Exception:
+                status = "Solving" if not converged else "Converged"
+        elif (d / "log.snappyHexMesh").is_file():
+            try:
+                with open(str(d / "log.snappyHexMesh"), encoding="utf-8", errors="replace") as f:
+                    lines = f.readlines()
+                    tail = "".join(lines[-30:])
+                    if "End" in tail or "Finalising parallel run" in tail:
+                        status = "Meshed"
+                    elif any(err in tail for err in ["FOAM FATAL", "Fatal error", "FOAM aborting", "sigFpe", "SIGFPE"]):
+                        status = "Failed"
+                    else:
+                        status = "Meshing"
+            except Exception:
+                status = "Meshed"
+        elif has_mesh:
+            status = "Meshed"
+
+        is_running_loc = (d / ".running_location").is_file()
+
+        results.append({
+            "name": cname,
+            "modified": mtime_str,
+            "modified_ts": mtime,
+            "status": status,
+            "fidelity": fidelity,
+            "velocity": velocity,
+            "direction": direction,
+            "n_procs": n_procs,
+            "stl_name": stl_name,
+            "has_forces": has_forces,
+            "has_residuals": has_residuals,
+            "has_mesh": has_mesh,
+            "latest_iter": latest_iter,
+            "converged": converged,
+            "downforce": downforce_val,
+            "drag": drag_val,
+            "ld_ratio": ld_val,
+            "is_running_loc": is_running_loc,
+        })
+
+print("__CASE_JSON_START__" + json.dumps(results) + "__CASE_JSON_END__")
+"""
+        try:
+            b64 = base64.b64encode(remote_script.encode("utf-8")).decode("ascii")
+            quoted_repo = shlex.quote(self.remote_repo_path or ".")
+            py_code = f"import base64; exec(base64.b64decode('{b64}').decode('utf-8'))"
+            cmd = f"python3 -c {shlex.quote(py_code)} {quoted_repo}"
+            code, out, err = self.run_command(cmd, timeout=15)
+            if code == 0 and "__CASE_JSON_START__" in out:
+                payload = out.split("__CASE_JSON_START__")[1].split("__CASE_JSON_END__")[0]
+                return json.loads(payload)
+            log.warning("list_remote_cases_detailed remote script returned code %s: %s", code, err or out[:200])
+        except Exception as exc:
+            log.warning("list_remote_cases_detailed failed: %s", exc)
+
+        # Fallback to basic list_remote_cases
+        basic = self.list_remote_cases()
+        return [
+            {
+                "name": c["name"],
+                "modified": c.get("modified", ""),
+                "modified_ts": 0,
+                "status": "Cluster Job",
+                "fidelity": "--",
+                "velocity": "--",
+                "direction": "--",
+                "n_procs": 0,
+                "stl_name": "--",
+                "has_forces": False,
+                "has_residuals": False,
+                "has_mesh": False,
+                "latest_iter": None,
+                "converged": False,
+                "downforce": None,
+                "drag": None,
+                "ld_ratio": None,
+                "is_running_loc": False,
+            }
+            for c in basic
+        ]
+

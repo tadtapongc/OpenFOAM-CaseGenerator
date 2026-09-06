@@ -200,7 +200,10 @@ def check_convergence(
     if len(drags) < window:
         window = len(drags)
     if window < 20:
+        if drags and all(math.isfinite(v) for v in drags + downforces):
+            return False, 100.0, 100.0, statistics.mean(drags), statistics.mean(downforces)
         return False, 100.0, 100.0, 0.0, 0.0
+
 
     d_win = drags[-window:]
     f_win = downforces[-window:]

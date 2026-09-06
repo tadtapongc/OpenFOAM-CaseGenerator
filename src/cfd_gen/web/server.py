@@ -858,9 +858,11 @@ async def api_list_cases() -> list[dict[str, Any]]:
                 try:
                     with open(log_simple, encoding="utf-8", errors="replace") as f:
                         lines = f.readlines()
-                        tail = "".join(lines[-15:])
+                        tail = "".join(lines[-30:])
                         if "End" in tail or "Finalising parallel run" in tail:
-                            status = "Completed" if not converged else "Converged"
+                            status = "Converged" if converged else "Completed"
+                        elif any(err in tail for err in ["FOAM FATAL", "Fatal error", "FOAM aborting", "sigFpe", "SIGFPE", "Floating point exception"]):
+                            status = "Failed"
                         elif status != "Converged":
                             status = "Solving"
                 except Exception:
@@ -873,9 +875,11 @@ async def api_list_cases() -> list[dict[str, Any]]:
                     try:
                         with open(log_snappy, encoding="utf-8", errors="replace") as f:
                             lines = f.readlines()
-                            tail = "".join(lines[-15:])
+                            tail = "".join(lines[-30:])
                             if "End" in tail or "Finalising parallel run" in tail:
                                 status = "Meshed"
+                            elif any(err in tail for err in ["FOAM FATAL", "Fatal error", "FOAM aborting", "sigFpe", "SIGFPE"]):
+                                status = "Failed"
                             else:
                                 status = "Meshing"
                     except Exception:
@@ -908,35 +912,92 @@ async def api_list_cases() -> list[dict[str, Any]]:
     # 2. Remote cases if cluster connected
     if ssh_client.is_connected:
         try:
-            remote_cases = await asyncio.to_thread(ssh_client.list_remote_cases)
+            slurm_jobs = await asyncio.to_thread(ssh_client.get_slurm_queue)
+            slurm_by_name: dict[str, dict[str, str]] = {
+                j.get("name", ""): j for j in slurm_jobs if j.get("name")
+            }
+
+            remote_cases = await asyncio.to_thread(ssh_client.list_remote_cases_detailed)
             for rc in remote_cases:
                 cname = rc["name"]
+
+                # Cross-reference SLURM state
+                sjob = slurm_by_name.get(cname)
+                if not sjob:
+                    for jn, job_obj in slurm_by_name.items():
+                        if jn == cname or jn.startswith(cname) or cname.startswith(jn):
+                            sjob = job_obj
+                            break
+
+                slurm_status = None
+                if sjob:
+                    st = sjob.get("state", "").upper()
+                    if st in ("PENDING", "CONFIGURING"):
+                        slurm_status = "Queued"
+                    elif st in ("RUNNING",):
+                        slurm_status = rc.get("status") if rc.get("status") in ("Meshing", "Solving") else "Solving"
+                    elif st in ("COMPLETING",):
+                        slurm_status = "Completing"
+                    elif st in ("FAILED", "NODE_FAIL", "TIMEOUT", "CANCELLED"):
+                        slurm_status = "Failed"
+
+                final_status = slurm_status or rc.get("status", "Generated")
+
                 if cname in cases_dict:
-                    cases_dict[cname]["location"] = "Local & Cluster"
+                    local_entry = cases_dict[cname]
+                    local_entry["location"] = "Local & Cluster"
+                    # If remote has simulation activity or results, update local entry
+                    if final_status in ("Solving", "Meshing", "Queued", "Converged", "Completed", "Failed") or rc.get("latest_iter") is not None:
+                        local_iter = local_entry.get("latest_iter") or 0
+                        remote_iter = rc.get("latest_iter") or 0
+                        if remote_iter >= local_iter or final_status in ("Solving", "Meshing", "Queued", "Converged", "Completed", "Failed"):
+                            local_entry["status"] = final_status
+                            if rc.get("latest_iter") is not None:
+                                local_entry["latest_iter"] = rc["latest_iter"]
+                            if rc.get("downforce") is not None:
+                                local_entry["downforce"] = rc["downforce"]
+                            if rc.get("drag") is not None:
+                                local_entry["drag"] = rc["drag"]
+                            if rc.get("ld_ratio") is not None:
+                                local_entry["ld_ratio"] = rc["ld_ratio"]
+                            if rc.get("converged"):
+                                local_entry["converged"] = rc["converged"]
+                            if rc.get("has_forces"):
+                                local_entry["has_forces"] = True
+                            if rc.get("has_residuals"):
+                                local_entry["has_residuals"] = True
+                            if rc.get("fidelity") and rc["fidelity"] != "--":
+                                local_entry["fidelity"] = rc["fidelity"]
+                            if rc.get("velocity") and rc["velocity"] != "--":
+                                local_entry["velocity"] = rc["velocity"]
+                            if rc.get("direction") and rc["direction"] != "--":
+                                local_entry["direction"] = rc["direction"]
+                            if rc.get("stl_name") and rc["stl_name"] != "--" and local_entry.get("stl_name") == "--":
+                                local_entry["stl_name"] = rc["stl_name"]
                 else:
                     cases_dict[cname] = {
                         "name": cname,
                         "location": "Cluster",
                         "path": f"{ssh_client.remote_repo_path}/cases/{cname}",
                         "modified": rc.get("modified", "--"),
-                        "modified_ts": 0.0,
-                        "status": "Cluster Job",
-                        "fidelity": "--",
-                        "velocity": "--",
-                        "direction": "--",
-                        "n_procs": "--",
-                        "stl_name": "--",
-                        "has_forces": True,
-                        "has_residuals": True,
-                        "has_mesh": True,
-                        "latest_iter": None,
-                        "converged": False,
-                        "downforce": None,
-                        "drag": None,
-                        "ld_ratio": None,
+                        "modified_ts": rc.get("modified_ts", 0.0),
+                        "status": final_status,
+                        "fidelity": rc.get("fidelity", "--"),
+                        "velocity": rc.get("velocity", "--"),
+                        "direction": rc.get("direction", "--"),
+                        "n_procs": rc.get("n_procs", "--"),
+                        "stl_name": rc.get("stl_name", "--"),
+                        "has_forces": rc.get("has_forces", False),
+                        "has_residuals": rc.get("has_residuals", False),
+                        "has_mesh": rc.get("has_mesh", False),
+                        "latest_iter": rc.get("latest_iter"),
+                        "converged": rc.get("converged", False),
+                        "downforce": rc.get("downforce"),
+                        "drag": rc.get("drag"),
+                        "ld_ratio": rc.get("ld_ratio"),
                     }
         except Exception as exc:
-            log.warning("Could not list remote cases: %s", exc)
+            log.warning("Could not list detailed remote cases: %s", exc)
 
     return sorted(cases_dict.values(), key=lambda x: x.get("modified_ts", 0.0), reverse=True)
 
