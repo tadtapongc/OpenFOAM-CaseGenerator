@@ -55,7 +55,7 @@ class CFDApp {
         use_tmpdir: true,
         sync_interval: 15,
       },
-      _comment_overrides: "Expert overrides — all fields below have built-in FSAE defaults in fidelity presets. Uncomment only if manual tuning is needed.",
+      _comment_overrides: "Expert overrides — all fields below have built-in defaults in fidelity presets. Uncomment only if manual tuning is needed.",
       _optional_overrides_example: {
         mesh_params: {
           _base_cell_size: 0.10,
@@ -245,11 +245,16 @@ class CFDApp {
       }
     });
 
-    // Template loader
+    // Template loader (auto-loads on change)
+    const selectTemplate = document.getElementById('select-template');
+    selectTemplate?.addEventListener('change', async (e) => {
+      if (e.target.value) {
+        await this.loadConfigFile(e.target.value);
+      }
+    });
     document.getElementById('btn-load-template')?.addEventListener('click', async () => {
-      const select = document.getElementById('select-template');
-      if (select) {
-        await this.loadConfigFile(select.value);
+      if (selectTemplate && selectTemplate.value) {
+        await this.loadConfigFile(selectTemplate.value);
       }
     });
 
@@ -514,7 +519,7 @@ class CFDApp {
       delete cfg._optional_overrides_example;
     } else {
       delete cfg.overrides;
-      cfg._comment_overrides = "Expert overrides — all fields below have built-in FSAE defaults in fidelity presets. Uncomment only if manual tuning is needed.";
+      cfg._comment_overrides = "Expert overrides — all fields below have built-in defaults in fidelity presets. Uncomment only if manual tuning is needed.";
       cfg._optional_overrides_example = {
         mesh_params: {
           _base_cell_size: 0.10,
@@ -598,11 +603,11 @@ class CFDApp {
       this.updateDomainBoxVisualization();
       this.isSyncingFromJson = false;
 
-      this.setJsonStatus('🟢 Live Synced with Visual Form', true);
+      this.setJsonStatus('Live Synced with Form', true);
       if (showToast) {
         // Pretty-format valid JSON on manual click
         editor.value = JSON.stringify(parsed, null, 4);
-        this.showToast('✓ Visual form updated from JSON', 'success');
+        this.showToast('Visual form updated from JSON', 'success');
       }
     } catch (err) {
       this.isSyncingFromJson = false;
@@ -702,7 +707,7 @@ class CFDApp {
     if (expandBtn && viewerPanel) {
       expandBtn.addEventListener('click', () => {
         const isMaximized = viewerPanel.classList.toggle('maximized');
-        expandBtn.textContent = isMaximized ? '⛶ Collapse' : '⛶ Expand';
+        expandBtn.textContent = isMaximized ? 'Collapse' : 'Expand';
         expandBtn.className = isMaximized ? 'btn btn-primary btn-xs' : 'btn btn-secondary btn-xs';
         setTimeout(() => this.viewer.onResize(), 150);
       });
@@ -769,14 +774,14 @@ class CFDApp {
     this.activeConfig.symmetry_plane = center;
     this.buildConfigFromVisualForm();
 
-    this.showToast(`🎯 Auto Symmetry Plane set to center (${axisName} = ${center} m)`, 'success');
+    this.showToast(`Auto Symmetry Plane set to center (${axisName} = ${center} m)`, 'success');
   }
 
   zeroSymmetryPlane() {
     this.setVal('cfg-symmetry-plane', 0.0);
     this.activeConfig.symmetry_plane = 0.0;
     this.buildConfigFromVisualForm();
-    this.showToast('🎯 Symmetry Plane set to CAD Origin (0.0 m)', 'info');
+    this.showToast('Symmetry Plane set to CAD Origin (0.0 m)', 'info');
   }
 
   async updateDomainBoxVisualization(autoFit = false) {
@@ -877,7 +882,7 @@ class CFDApp {
       const chip = document.createElement('div');
       chip.className = 'stl-chip active';
       chip.innerHTML = `
-        <span>📄 ${filename}</span>
+        <span>${filename}</span>
         <span class="btn-remove" title="Remove">&times;</span>
       `;
       chip.addEventListener('click', (e) => {
@@ -923,7 +928,7 @@ class CFDApp {
         templates.forEach((t) => {
           const opt = document.createElement('option');
           opt.value = t.filename;
-          opt.textContent = `${t.filename} (${t.case_name})`;
+          opt.textContent = `configs/${t.filename}`;
           select.appendChild(opt);
         });
       }
@@ -972,12 +977,12 @@ class CFDApp {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || 'Validation failed');
-      this.showToast(`✓ Config valid! Ready to generate.`, 'success');
+      this.showToast('Configuration valid. Ready to generate.', 'success');
       if (data.warnings && data.warnings.length > 0) {
-        data.warnings.forEach((w) => this.showToast(`⚠ ${w}`, 'info'));
+        data.warnings.forEach((w) => this.showToast(w, 'info'));
       }
     } catch (err) {
-      this.showToast(`✗ ${err.message}`, 'error');
+      this.showToast(err.message, 'error');
     }
   }
 
@@ -993,7 +998,7 @@ class CFDApp {
     const btnSubmit = document.getElementById('btn-submit-case');
     if (btnSubmit) {
       btnSubmit.disabled = true;
-      btnSubmit.textContent = submitToCluster ? '🚀 Submitting to Cluster...' : 'Saving...';
+      btnSubmit.textContent = submitToCluster ? 'Submitting to Cluster...' : 'Saving...';
     }
 
     try {
@@ -1013,7 +1018,7 @@ class CFDApp {
       if (submitToCluster) {
         const slurmRes = data.cluster_actions?.slurm_submit;
         if (slurmRes && slurmRes.job_id) {
-          this.showToast(`🚀 Simulation submitted! SLURM Job ID: ${slurmRes.job_id}`, 'success');
+          this.showToast(`Simulation submitted. SLURM Job ID: ${slurmRes.job_id}`, 'success');
         } else {
           this.showToast(`Generated case ${data.case_name} on cluster!`, 'success');
         }
@@ -1029,7 +1034,7 @@ class CFDApp {
     } finally {
       if (btnSubmit) {
         btnSubmit.disabled = false;
-        btnSubmit.textContent = '🚀 Launch Simulation on Cluster';
+        btnSubmit.textContent = 'Launch Simulation on Cluster';
       }
     }
   }
@@ -1288,7 +1293,7 @@ class CFDApp {
         if (pill) {
           if (data.converged) {
             pill.className = 'convergence-status-pill converged';
-            pill.querySelector('.pill-text').textContent = 'CONVERGED ✓';
+            pill.querySelector('.pill-text').textContent = 'CONVERGED';
           } else {
             pill.className = 'convergence-status-pill running';
             pill.querySelector('.pill-text').textContent = `Solving (Iter ${data.latest_iteration})`;
@@ -1365,7 +1370,7 @@ class CFDApp {
           <td><span class="badge">${c.location}</span></td>
           <td>${c.modified}</td>
           <td>
-            <button class="btn btn-outline btn-xs btn-inspect-case" data-name="${c.name}">📈 Telemetry</button>
+            <button class="btn btn-outline btn-xs btn-inspect-case" data-name="${c.name}">Telemetry</button>
           </td>
         `;
 

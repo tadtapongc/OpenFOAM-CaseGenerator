@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>OpenFOAM Case Generator Studio | Rapidamente Aero</title>
+  <title>OpenFOAM Studio | Case Generator & Cluster Dispatcher</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
   
   <!-- Three.js for 3D STL Visualization -->
@@ -21,19 +21,37 @@
   <!-- Top Navigation Bar -->
   <header class="navbar">
     <div class="nav-brand">
-      <div class="brand-logo">🏎️</div>
-      <div class="brand-text">
-        <h1>Rapidamente <span>CFD Studio</span></h1>
-        <p class="subtitle">OpenFOAM Case Generator & HPC Cluster Dispatcher</p>
+      <div class="brand-mark" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 2L3 7v10l9 5 9-5V7l-9-5z" stroke-linejoin="round"/>
+          <path d="M12 22V12M21 7l-9 5M3 7l9 5" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div class="brand-info">
+        <span class="brand-name">OpenFOAM</span>
+        <span class="brand-divider">/</span>
+        <span class="brand-sub">Case Generator</span>
       </div>
     </div>
     
     <div class="nav-center">
-      <nav class="nav-tabs">
-        <button class="nav-tab active" data-tab="config-tab" id="tab-btn-config">⚙️ Case Config</button>
-        <button class="nav-tab" data-tab="cluster-tab" id="tab-btn-cluster">⚡ Cluster & Queue</button>
-        <button class="nav-tab" data-tab="telemetry-tab" id="tab-btn-telemetry">📈 Live Telemetry</button>
-        <button class="nav-tab" data-tab="cases-tab" id="tab-btn-cases">📂 Archive</button>
+      <nav class="nav-tabs" role="tablist">
+        <button class="nav-tab active" data-tab="config-tab" id="tab-btn-config" role="tab" aria-selected="true">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+          <span>Case Setup</span>
+        </button>
+        <button class="nav-tab" data-tab="cluster-tab" id="tab-btn-cluster" role="tab" aria-selected="false">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+          <span>Cluster & Jobs</span>
+        </button>
+        <button class="nav-tab" data-tab="telemetry-tab" id="tab-btn-telemetry" role="tab" aria-selected="false">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          <span>Telemetry</span>
+        </button>
+        <button class="nav-tab" data-tab="cases-tab" id="tab-btn-cases" role="tab" aria-selected="false">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          <span>Archive</span>
+        </button>
       </nav>
     </div>
 
@@ -42,27 +60,38 @@
         <span class="status-dot disconnected"></span>
         <span class="status-text">Disconnected</span>
       </div>
-      <button class="btn btn-secondary btn-sm" id="btn-open-ssh-modal">🔑 SSH Login</button>
-      <button class="btn btn-primary btn-sm" id="btn-quick-run">🚀 Submit Simulation</button>
+      <button class="btn btn-secondary btn-sm" id="btn-open-ssh-modal">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        <span>Cluster SSH</span>
+      </button>
+      <button class="btn btn-primary btn-sm" id="btn-quick-run">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        <span>Run on Cluster</span>
+      </button>
     </div>
   </header>
 
   <!-- Main Workspace -->
   <main class="main-container">
     
-    <!-- TAB 1: VISUAL CASE CONFIG & 3D VIEWER -->
+    <!-- TAB 1: CASE CONFIG & 3D VIEWER -->
     <section class="tab-pane active" id="config-tab">
       <div class="two-column-layout">
         
         <!-- Left Column: 3D STL Viewer & STL Manager -->
         <div class="panel viewer-panel" id="viewer-panel">
           <div class="panel-header">
-            <h3>📐 3D Geometry Inspector</h3>
+            <div class="panel-title-wrap">
+              <h3>Geometry & Domain</h3>
+            </div>
             <div class="panel-header-actions">
-              <label class="btn btn-outline btn-xs" for="stl-file-input">➕ Upload STL</label>
+              <label class="btn btn-outline btn-xs" for="stl-file-input">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+                <span>Upload STL</span>
+              </label>
               <input type="file" id="stl-file-input" accept=".stl,.STL" multiple style="display:none;">
-              <button class="btn btn-ghost btn-xs" id="btn-reset-camera" title="Reset Camera">🎥 Center</button>
-              <button class="btn btn-secondary btn-xs" id="btn-toggle-expand-viewer" title="Toggle Expanded Area">⛶ Expand</button>
+              <button class="btn btn-ghost btn-xs" id="btn-reset-camera" title="Reset Camera">Recenter</button>
+              <button class="btn btn-secondary btn-xs" id="btn-toggle-expand-viewer" title="Toggle Expanded Area">Expand</button>
             </div>
           </div>
           
@@ -72,11 +101,11 @@
                 <label><input type="checkbox" id="chk-show-domain" checked> Domain Box</label>
                 <label><input type="checkbox" id="chk-show-bounds" checked> Model Bounds</label>
                 <label><input type="checkbox" id="chk-show-ground" checked> Ground</label>
-                <label><input type="checkbox" id="chk-show-flow" checked> Flow</label>
+                <label><input type="checkbox" id="chk-show-flow" checked> Flow Vector</label>
               </div>
               <div class="view-framing">
-                <button class="btn-frame active" id="btn-fit-domain" title="Fit Entire Wind Tunnel Domain Box">🌐 Fit Wind Tunnel</button>
-                <button class="btn-frame" id="btn-fit-model" title="Fit STL Model Geometry">🚗 Fit Model</button>
+                <button class="btn-frame active" id="btn-fit-domain" title="Fit Entire Wind Tunnel Domain Box">Fit Domain</button>
+                <button class="btn-frame" id="btn-fit-model" title="Fit Model Geometry">Fit Model</button>
               </div>
               <div class="view-angles">
                 <button class="btn-view-angle" data-angle="iso" title="Isometric View">Iso</button>
@@ -86,55 +115,56 @@
               </div>
             </div>
             <div class="viewer-domain-info" id="viewer-domain-badge" style="display: none;">
-              <span class="badge-title">🌐 Wind Tunnel:</span>
+              <span class="badge-title">Domain Bounds:</span>
               <span id="domain-dims-text">--</span>
             </div>
             <div class="viewer-canvas-placeholder" id="viewer-empty-msg">
-              <p>Drag & Drop an STL file here or select one below</p>
+              <p>Drag & drop an STL file here or select one below</p>
             </div>
           </div>
 
           <!-- STL File List & Scale Alerts -->
           <div class="stl-manager">
             <div class="stl-list-header">
-              <span>Active Geometry Files</span>
+              <span>Active Geometries</span>
               <span class="badge" id="active-stl-count">0 files</span>
             </div>
             <div class="stl-chip-list" id="stl-chip-list">
               <!-- Loaded dynamically -->
             </div>
             <div class="alert alert-warning" id="scale-warning" style="display: none;">
-              ⚠️ <strong>Potential Millimeter Scale Detected:</strong> Geometry size exceeds 20m. OpenFOAM expects meters (m).
+              <strong>Unit Alert:</strong> Dimensions exceed 20 m. OpenFOAM expects coordinates in meters (m). Verify CAD export scaling.
             </div>
           </div>
         </div>
 
-        <!-- Right Column: Comprehensive Visual Configuration Studio -->
+        <!-- Right Column: Case Configuration -->
         <div class="panel config-panel">
           <div class="panel-header">
             <div class="config-header-left">
-              <h3>🛠️ Case Configuration Studio</h3>
-              <div class="template-selector">
-                <label>Template:</label>
-                <select id="select-template">
-                  <option value="config.json">configs/config.json (Default Template)</option>
+              <h3>Case Configuration</h3>
+              <div class="config-file-picker" title="Active configuration file in configs/">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                <select id="select-template" class="config-select-pill">
+                  <option value="config.json">configs/config.json</option>
                 </select>
-                <button class="btn btn-ghost btn-xs" id="btn-load-template" title="Load selected template">Load</button>
+                <svg class="select-caret" width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                <button id="btn-load-template" style="display:none;"></button>
               </div>
             </div>
             <div class="panel-header-actions">
-              <button class="btn btn-outline btn-xs" id="btn-toggle-json-drawer">📄 Code / JSON View</button>
-              <button class="btn btn-ghost btn-xs" id="btn-reset-defaults">↺ Reset</button>
+              <button class="btn btn-outline btn-xs" id="btn-toggle-json-drawer">JSON Code</button>
+              <button class="btn btn-ghost btn-xs" id="btn-reset-defaults">Reset</button>
             </div>
           </div>
 
           <!-- Sub-Tabs for Configuration Categories -->
           <div class="sub-nav-tabs">
-            <button class="sub-tab active" data-subtab="subtab-general">General & Presets</button>
+            <button class="sub-tab active" data-subtab="subtab-general">General</button>
             <button class="sub-tab" data-subtab="subtab-flow">Flow & Axes</button>
             <button class="sub-tab" data-subtab="subtab-domain">Domain & Ground</button>
             <button class="sub-tab" data-subtab="subtab-slurm">Parallel & SLURM</button>
-            <button class="sub-tab" data-subtab="subtab-expert">Overrides (Optional)</button>
+            <button class="sub-tab" data-subtab="subtab-expert">Overrides</button>
           </div>
 
           <!-- Visual Configuration Form -->
@@ -144,41 +174,41 @@
             <div class="subtab-content active" id="subtab-general">
               <div class="form-grid">
                 <div class="form-group col-span-2">
-                  <label for="cfg-case-name">Case Name <span class="required">*</span></label>
+                  <label for="cfg-case-name">Case Directory Name <span class="required">*</span></label>
                   <input type="text" id="cfg-case-name" class="input" placeholder="e.g. my_case" required>
-                  <span class="field-hint">Folder name created under cases/ (no spaces or slashes).</span>
+                  <span class="field-hint">Target directory name created inside <code>cases/&lt;case_name&gt;/</code>.</span>
                 </div>
 
                 <div class="form-group col-span-2">
-                  <label>Simulation Fidelity Preset</label>
+                  <label>Mesh & Solver Fidelity Preset</label>
                   <div class="fidelity-cards">
                     <label class="fidelity-card" data-fidelity="fast">
                       <input type="radio" name="cfg-fidelity" value="fast">
                       <div class="card-body">
-                        <div class="card-title">🟢 Fast Check</div>
+                        <div class="card-title">Fast Preview</div>
                         <div class="card-cells">~2–4M cells</div>
                         <div class="card-time">~10–15 min</div>
-                        <div class="card-desc">Quick validation & CAD orientation check</div>
+                        <div class="card-desc">Rapid validation & geometry orientation check</div>
                       </div>
                     </label>
 
                     <label class="fidelity-card selected" data-fidelity="standard">
                       <input type="radio" name="cfg-fidelity" value="standard" checked>
                       <div class="card-body">
-                        <div class="card-title">🟡 Standard (FSAE)</div>
+                        <div class="card-title">Standard (Recommended)</div>
                         <div class="card-cells">~6–9M cells</div>
                         <div class="card-time">~35–50 min</div>
-                        <div class="card-desc">Production aerodynamic balance & L/D</div>
+                        <div class="card-desc">Production aerodynamic balance & force calculation</div>
                       </div>
                     </label>
 
                     <label class="fidelity-card" data-fidelity="fine">
                       <input type="radio" name="cfg-fidelity" value="fine">
                       <div class="card-body">
-                        <div class="card-title">🔴 Fine Aero</div>
+                        <div class="card-title">Fine Mesh</div>
                         <div class="card-cells">~12–16M cells</div>
                         <div class="card-time">~1.5–2 hrs</div>
-                        <div class="card-desc">High resolution wake & boundary layer</div>
+                        <div class="card-desc">High-resolution boundary layer & wake vortex capture</div>
                       </div>
                     </label>
                   </div>
@@ -204,35 +234,35 @@
                     </div>
                   </div>
                   <input type="range" id="slider-velocity" min="5" max="150" value="60" class="range-slider">
-                  <span class="field-hint">Formula Student cornering speed is typically 50–70 km/h (14–20 m/s).</span>
+                  <span class="field-hint">Standard automotive / aerodynamic test speed range: 14–25 m/s (50–90 km/h).</span>
                 </div>
 
                 <div class="form-group">
-                  <label for="cfg-flow-direction">Flow Direction</label>
+                  <label for="cfg-flow-direction">Flow Direction Vector</label>
                   <select id="cfg-flow-direction" class="input">
-                    <option value="-z" selected>-z (Default: Flow from +Z towards -Z)</option>
-                    <option value="+z">+z (Flow from -Z towards +Z)</option>
-                    <option value="+x">+x (Flow along X)</option>
-                    <option value="-x">-x (Flow along -X)</option>
-                    <option value="+y">+y (Flow along Y)</option>
-                    <option value="-y">-y (Flow along -Y)</option>
+                    <option value="-z" selected>-z (Default: Flow travels toward -Z)</option>
+                    <option value="+z">+z (Flow travels toward +Z)</option>
+                    <option value="+x">+x (Flow travels along +X)</option>
+                    <option value="-x">-x (Flow travels along -X)</option>
+                    <option value="+y">+y (Flow travels along +Y)</option>
+                    <option value="-y">-y (Flow travels along -Y)</option>
                   </select>
                 </div>
 
                 <div class="form-group">
-                  <label>Moving Ground Simulation</label>
+                  <label>Road Boundary Condition</label>
                   <label class="switch-control">
                     <input type="checkbox" id="cfg-flow-ground" checked>
                     <span class="switch-slider"></span>
-                    <span class="switch-label">Enable Moving Road BC</span>
+                    <span class="switch-label">Moving Ground Wall</span>
                   </label>
-                  <span class="field-hint">Applies matching road velocity on ground boundary.</span>
+                  <span class="field-hint">Applies freestream velocity matching road motion.</span>
                 </div>
 
                 <div class="form-group">
-                  <label for="cfg-outputs-drag">Drag Axis Projection</label>
+                  <label for="cfg-outputs-drag">Drag Axis Direction</label>
                   <select id="cfg-outputs-drag" class="input">
-                    <option value="-z" selected>-z (Opposing freestream flow)</option>
+                    <option value="-z" selected>-z (Along freestream travel axis)</option>
                     <option value="+z">+z</option>
                     <option value="+x">+x</option>
                     <option value="-x">-x</option>
@@ -240,10 +270,10 @@
                 </div>
 
                 <div class="form-group">
-                  <label for="cfg-outputs-downforce">Downforce Axis Projection</label>
+                  <label for="cfg-outputs-downforce">Downforce Axis Direction</label>
                   <select id="cfg-outputs-downforce" class="input">
-                    <option value="-y" selected>-y (Towards ground plane)</option>
-                    <option value="+y">+y (Lift)</option>
+                    <option value="-y" selected>-y (Toward road floor)</option>
+                    <option value="+y">+y (Aircraft lift)</option>
                     <option value="-z">-z</option>
                     <option value="+z">+z</option>
                   </select>
@@ -257,63 +287,68 @@
               <div class="form-grid">
                 
                 <div class="form-group col-span-2">
-                  <label for="cfg-domain-box">Domain Wind Tunnel Box</label>
+                  <label for="cfg-domain-box">Virtual Wind Tunnel Domain</label>
                   <select id="cfg-domain-box" class="input">
-                    <option value="auto" selected>Auto-fit (Fits wind tunnel bounding box with aerodynamic margins)</option>
-                    <option value="custom">Explicit Custom Coordinates [min, max]</option>
+                    <option value="auto" selected>auto (Derive automatically: 4L upstream, 8L wake, 4H ceiling)</option>
+                    <option value="custom">Custom Domain Coordinates (Explicit min/max bounds)</option>
                   </select>
                 </div>
 
-                <div class="form-group col-span-2" id="custom-domain-container" style="display: none;">
-                  <label>Custom Bounding Box (Meters)</label>
-                  <div class="dual-input-row">
-                    <input type="text" id="cfg-domain-min" class="input" placeholder="Min: [-1.5, 0.0, -4.0]">
-                    <input type="text" id="cfg-domain-max" class="input" placeholder="Max: [1.5, 2.0, 8.0]">
+                <div id="custom-domain-container" class="col-span-2 form-grid" style="display: none;">
+                  <div class="form-group">
+                    <label for="cfg-domain-min">Min Bounds [X, Y, Z]</label>
+                    <input type="text" id="cfg-domain-min" class="input" placeholder="[-2.0, 0.0, -8.0]">
+                  </div>
+                  <div class="form-group">
+                    <label for="cfg-domain-max">Max Bounds [X, Y, Z]</label>
+                    <input type="text" id="cfg-domain-max" class="input" placeholder="[2.0, 3.0, 4.0]">
                   </div>
                 </div>
 
                 <div class="form-group">
-                  <label for="cfg-symmetry-plane">Symmetry Plane Offset (m)</label>
+                  <label for="cfg-symmetry-plane">Symmetry Plane Coordinate</label>
                   <div class="input-with-action">
-                    <input type="number" id="cfg-symmetry-plane" class="input domain-calc-trigger" step="0.0001" value="0.0">
-                    <button type="button" class="btn btn-secondary btn-sm" id="btn-auto-sym-inline" title="Auto-calculate symmetry plane at geometric center ((Xmin + Xmax) / 2)">
-                      🎯 Auto Center
+                    <div class="input-with-unit">
+                      <input type="number" id="cfg-symmetry-plane" class="input domain-calc-trigger" step="0.0001" value="0.0">
+                      <span class="unit-label">m</span>
+                    </div>
+                    <button type="button" class="btn btn-secondary btn-sm" id="btn-auto-sym-inline" title="Calculate center ((Xmin + Xmax) / 2)">
+                      Auto Center
                     </button>
                   </div>
-                  <span class="field-hint">Centerline coordinate if CAD symmetry is not at 0.0 (0.0 for origin-centered models). Click <strong>🎯 Auto Center</strong> to calculate <code>(Xmin + Xmax)/2</code>.</span>
+                  <span class="field-hint">Centerline coordinate (0.0 for origin-centered models).</span>
                 </div>
 
                 <div class="form-group col-span-2">
-                  <label for="cfg-ground-style">Ground Level / Ride Height Specification (2 + 1 Styles)</label>
+                  <label for="cfg-ground-style">Ground Elevation Control</label>
                   <select id="cfg-ground-style" class="input domain-calc-trigger">
-                    <option value="none" selected>Touching CAD Bottom / None (Default — road touches lowest point)</option>
+                    <option value="none" selected>Default: Snap road to lowest STL vertex</option>
                     <option value="relative">Style 1: Relative Ride Height (Gap below lowest STL vertex)</option>
-                    <option value="absolute">Style 2: Absolute Ground Plane (Fixed CAD Y-coordinate, e.g. 0.0)</option>
+                    <option value="absolute">Style 2: Absolute Road Coordinate (Fixed CAD elevation)</option>
                   </select>
-                  <span class="field-hint">config.json leaves this as an example by default. Select Style 1 or 2 only if manual offset is needed.</span>
                 </div>
 
                 <div class="form-group" id="group-ground-relative" style="display: none;">
-                  <label for="cfg-ground-clearance">Style 1: Ride Height Gap (meters)</label>
+                  <label for="cfg-ground-clearance">Style 1: Ride Height Gap</label>
                   <div class="input-with-unit">
                     <input type="number" id="cfg-ground-clearance" class="input domain-calc-trigger" step="0.001" placeholder="0.035">
                     <span class="unit-label">m</span>
                   </div>
-                  <span class="field-hint">Road placed at [CAD lowest point - gap] (e.g. 0.035 = 35mm front wing ride height).</span>
+                  <span class="field-hint">Road placed at [CAD lowest point - gap] (e.g. 0.035 = 35 mm clearance).</span>
                 </div>
 
                 <div class="form-group" id="group-ground-absolute" style="display: none;">
-                  <label for="cfg-ground-plane">Style 2: Road CAD Coordinate (meters)</label>
+                  <label for="cfg-ground-plane">Style 2: Absolute Road Coordinate</label>
                   <div class="input-with-unit">
                     <input type="number" id="cfg-ground-plane" class="input domain-calc-trigger" step="0.001" placeholder="0.0">
                     <span class="unit-label">m</span>
                   </div>
-                  <span class="field-hint">Road placed at fixed CAD coordinate (e.g. 0.0 if assembly CAD origin is on road).</span>
+                  <span class="field-hint">Road fixed at exact CAD coordinate (e.g. 0.0 if assembly origin is on ground).</span>
                 </div>
 
                 <!-- 6 Domain Faces -->
                 <div class="form-group col-span-2">
-                  <label>Boundary Face Assignments</label>
+                  <label>Domain Boundary Faces</label>
                   <div class="faces-grid">
                     <div class="face-box">
                       <span class="face-tag">-X Face</span>
@@ -377,11 +412,11 @@
               <div class="form-grid">
                 
                 <div class="form-group">
-                  <label for="cfg-parallel-procs">CPU Cores (MPI Decompose)</label>
+                  <label for="cfg-parallel-procs">MPI Decomposition Cores</label>
                   <select id="cfg-parallel-procs" class="input">
                     <option value="8">8 Cores</option>
                     <option value="16">16 Cores</option>
-                    <option value="32" selected>32 Cores (Recommended for CU e-Science)</option>
+                    <option value="32" selected>32 Cores</option>
                     <option value="48">48 Cores</option>
                     <option value="64">64 Cores</option>
                   </select>
@@ -390,7 +425,7 @@
                 <div class="form-group">
                   <label for="cfg-parallel-method">Decomposition Method</label>
                   <select id="cfg-parallel-method" class="input">
-                    <option value="scotch" selected>scotch (Automatic graph partitioning)</option>
+                    <option value="scotch" selected>scotch (Graph partitioning)</option>
                     <option value="hierarchical">hierarchical</option>
                   </select>
                 </div>
@@ -399,50 +434,50 @@
                   <label for="cfg-slurm-qos">SLURM QoS</label>
                   <select id="cfg-slurm-qos" class="input">
                     <option value="cu_hpc" selected>cu_hpc (Priority queue)</option>
-                    <option value="cu_long">cu_long (Long running jobs)</option>
+                    <option value="cu_long">cu_long (Extended run)</option>
                     <option value="normal">normal</option>
                   </select>
                 </div>
 
                 <div class="form-group">
-                  <label for="cfg-slurm-partition">Partition</label>
+                  <label for="cfg-slurm-partition">SLURM Partition</label>
                   <input type="text" id="cfg-slurm-partition" class="input" value="cpu">
                 </div>
 
                 <div class="form-group">
-                  <label for="cfg-slurm-time">Time Limit (Walltime)</label>
+                  <label for="cfg-slurm-time">Walltime Limit</label>
                   <input type="text" id="cfg-slurm-time" class="input" value="08:00:00">
                 </div>
 
                 <div class="form-group">
-                  <label for="cfg-slurm-mem">Memory per CPU</label>
+                  <label for="cfg-slurm-mem">Memory Per Core</label>
                   <input type="text" id="cfg-slurm-mem" class="input" value="2G">
                 </div>
 
                 <div class="form-group col-span-2">
-                  <label for="cfg-slurm-source">OpenFOAM Bashrc Source Path</label>
+                  <label for="cfg-slurm-source">OpenFOAM Environment Source Script</label>
                   <input type="text" id="cfg-slurm-source" class="input" value="$HOME/OpenFOAM/OpenFOAM-v2606/etc/bashrc">
                 </div>
 
                 <div class="form-group col-span-2">
-                  <label for="cfg-slurm-modules">OpenFOAM Environment Modules (comma-separated)</label>
+                  <label for="cfg-slurm-modules">Environment Modules (Comma-separated)</label>
                   <input type="text" id="cfg-slurm-modules" class="input" value="GCC/11.3.0, OpenMPI/4.1.4-GCC-11.3.0">
                 </div>
 
                 <div class="form-group">
-                  <label>Fast Node Scratch ($TMPDIR)</label>
+                  <label>Node Local Storage ($TMPDIR)</label>
                   <label class="switch-control">
                     <input type="checkbox" id="cfg-slurm-tmpdir" checked>
                     <span class="switch-slider"></span>
-                    <span class="switch-label">Run in fast local SSD/RAM</span>
+                    <span class="switch-label">Run in local scratch SSD</span>
                   </label>
                 </div>
 
                 <div class="form-group">
-                  <label for="cfg-slurm-sync">Live Sync Interval</label>
+                  <label for="cfg-slurm-sync">Live Telemetry Sync Interval</label>
                   <div class="input-with-unit">
                     <input type="number" id="cfg-slurm-sync" class="input" value="15" min="5" max="120">
-                    <span class="unit-label">seconds</span>
+                    <span class="unit-label">sec</span>
                   </div>
                 </div>
 
@@ -457,26 +492,25 @@
                   <label class="switch-control">
                     <input type="checkbox" id="chk-enable-overrides">
                     <span class="switch-slider"></span>
-                    <span class="switch-label">Enable Manual Overrides in config.json</span>
+                    <span class="switch-label">Enable Manual Dictionary Overrides</span>
                   </label>
-                  <span class="field-hint">By default (recommended), your config.json leaves overrides commented out. All solver schemes, turbulence models, and mesh levels use built-in FSAE defaults from your fidelity preset.</span>
+                  <span class="field-hint">Overrides are commented out by default. Standard presets automatically calculate optimal mesh levels and numerical schemes.</span>
                 </div>
 
                 <div class="alert alert-info col-span-2" id="overrides-disabled-notice">
-                  ℹ️ <strong>Using Built-in Presets:</strong> No overrides active. <code>config.json</code> will keep overrides cleanly commented out as in the standard FSAE template.
+                  <strong>Built-in Presets Active:</strong> Numerical schemes, turbulence models, and mesh refinement are driven by the selected fidelity preset.
                 </div>
 
-                <!-- Mesh Params Overrides (Hidden unless enabled) -->
+                <!-- Mesh Params Overrides -->
                 <div id="overrides-controls-container" class="col-span-2 form-grid" style="display: none;">
                   <div class="form-group col-span-2">
-                    <h4 style="font-size: 13px; color: var(--accent-cyan);">Mesh Parameters (mesh_params)</h4>
+                    <h4 class="section-subtitle">Mesh Parameter Overrides</h4>
                     <span class="field-hint">Custom cell refinement levels overriding fidelity preset defaults.</span>
                   </div>
 
                   <div class="form-group">
                     <label for="cfg-override-basecell">Base Cell Size (m)</label>
                     <input type="number" id="cfg-override-basecell" class="input" step="0.01" value="0.10">
-                    <span class="field-hint">Default is auto-scaled from car wheelbase/length.</span>
                   </div>
 
                   <div class="form-group">
@@ -485,25 +519,21 @@
                       <input type="number" id="cfg-override-surf-min" class="input" value="4" min="1" max="10">
                       <input type="number" id="cfg-override-surf-max" class="input" value="5" min="1" max="10">
                     </div>
-                    <span class="field-hint">e.g. [4, 5] for FSAE wings and chassis.</span>
                   </div>
 
                   <div class="form-group">
                     <label for="cfg-override-edge">Edge Refinement Level</label>
                     <input type="number" id="cfg-override-edge" class="input" value="6" min="1" max="10">
-                    <span class="field-hint">Feature edges level (default 6).</span>
                   </div>
 
                   <div class="form-group">
                     <label for="cfg-override-nearwake">Near Wake Refinement Level</label>
                     <input type="number" id="cfg-override-nearwake" class="input" value="3" min="0" max="8">
-                    <span class="field-hint">Refinement zone immediately behind aerodynamic elements.</span>
                   </div>
 
                   <div class="form-group">
                     <label for="cfg-override-farwake">Far Wake Refinement Level</label>
                     <input type="number" id="cfg-override-farwake" class="input" value="1" min="0" max="8">
-                    <span class="field-hint">Coarser wake refinement trailing downstream.</span>
                   </div>
                 </div>
 
@@ -514,23 +544,23 @@
 
           <!-- Action Footer -->
           <div class="config-actions-bar">
-            <button class="btn btn-outline" id="btn-validate-config">✓ Validate</button>
-            <button class="btn btn-secondary" id="btn-save-config">💾 Save Config</button>
-            <button class="btn btn-primary" id="btn-submit-case">🚀 Launch Simulation on Cluster</button>
+            <button class="btn btn-outline" id="btn-validate-config">Validate</button>
+            <button class="btn btn-secondary" id="btn-save-config">Save Config</button>
+            <button class="btn btn-primary" id="btn-submit-case">Launch Simulation on Cluster</button>
           </div>
 
         </div>
 
       </div>
 
-      <!-- Slide-Over Raw JSON Editor Drawer -->
+      <!-- Raw JSON Editor Drawer -->
       <aside class="json-drawer" id="json-drawer">
         <div class="drawer-header">
-          <h4>📄 Bidirectional Raw JSON View</h4>
+          <h4>JSON Configuration</h4>
           <div class="drawer-actions">
-            <button class="btn btn-ghost btn-xs" id="btn-copy-json">📋 Copy</button>
-            <button class="btn btn-ghost btn-xs" id="btn-apply-json">🔄 Sync to Visual Form</button>
-            <button class="btn btn-ghost btn-xs" id="btn-close-drawer">✕</button>
+            <button class="btn btn-ghost btn-xs" id="btn-copy-json">Copy</button>
+            <button class="btn btn-ghost btn-xs" id="btn-apply-json">Apply to Form</button>
+            <button class="btn btn-ghost btn-xs" id="btn-close-drawer">Close</button>
           </div>
         </div>
         <div class="drawer-body">
@@ -548,25 +578,25 @@
         <!-- Cluster Connection Status Card -->
         <div class="panel">
           <div class="panel-header">
-            <h3>⚡ HPC Cluster Connection (CU e-Science)</h3>
-            <button class="btn btn-primary btn-sm" id="btn-reconnect-ssh">🔄 Test & Refresh</button>
+            <h3>HPC Cluster Status</h3>
+            <button class="btn btn-secondary btn-sm" id="btn-reconnect-ssh">Test Connection</button>
           </div>
           <div class="cluster-summary-grid">
             <div class="metric-card">
               <div class="metric-label">Target Host</div>
-              <div class="metric-value" id="disp-cluster-host">escience0.sc.chula.ac.th</div>
+              <div class="metric-value monospace" id="disp-cluster-host">escience0.sc.chula.ac.th</div>
             </div>
             <div class="metric-card">
               <div class="metric-label">SSH User</div>
-              <div class="metric-value" id="disp-cluster-user">tadtapongc</div>
+              <div class="metric-value monospace" id="disp-cluster-user">tadtapongc</div>
             </div>
             <div class="metric-card">
               <div class="metric-label">SLURM Status</div>
               <div class="metric-value" id="disp-slurm-status">Checking...</div>
             </div>
             <div class="metric-card">
-              <div class="metric-label">Remote Repository</div>
-              <div class="metric-value small" id="disp-remote-repo">/work/home/tadtapongc/...</div>
+              <div class="metric-label">Remote Project Path</div>
+              <div class="metric-value small monospace" id="disp-remote-repo">/work/home/tadtapongc/...</div>
             </div>
           </div>
         </div>
@@ -574,9 +604,9 @@
         <!-- SLURM Job Queue Table -->
         <div class="panel col-span-2">
           <div class="panel-header">
-            <h3>📋 Active SLURM Jobs</h3>
+            <h3>SLURM Queue</h3>
             <div class="panel-header-actions">
-              <button class="btn btn-ghost btn-xs" id="btn-refresh-queue">🔄 Refresh Queue</button>
+              <button class="btn btn-ghost btn-xs" id="btn-refresh-queue">Refresh Queue</button>
             </div>
           </div>
           <div class="table-responsive">
@@ -584,10 +614,10 @@
               <thead>
                 <tr>
                   <th>Job ID</th>
-                  <th>Name</th>
+                  <th>Job Name</th>
                   <th>Partition</th>
                   <th>Status</th>
-                  <th>Time Used</th>
+                  <th>Elapsed</th>
                   <th>Time Limit</th>
                   <th>Nodes</th>
                   <th>Action</th>
@@ -608,11 +638,11 @@
     <section class="tab-pane" id="telemetry-tab">
       <div class="telemetry-top-bar">
         <div class="case-picker">
-          <label>Monitoring Case:</label>
+          <label for="telemetry-case-select">Monitored Case:</label>
           <select id="telemetry-case-select" class="input input-sm">
-            <option value="">(Select a case to monitor)</option>
+            <option value="">(Select case)</option>
           </select>
-          <button class="btn btn-ghost btn-xs" id="btn-refresh-telemetry">🔄 Refresh</button>
+          <button class="btn btn-ghost btn-xs" id="btn-refresh-telemetry">Refresh</button>
         </div>
         
         <div class="convergence-status-pill" id="telemetry-convergence-pill">
@@ -634,14 +664,14 @@
           <div class="kpi-sub" id="kpi-drag-variation">±--%</div>
         </div>
         <div class="kpi-card highlight">
-          <div class="kpi-title">Efficiency (L/D)</div>
+          <div class="kpi-title">Aero Efficiency (-Fy / -Fz)</div>
           <div class="kpi-val" id="kpi-ld">--</div>
-          <div class="kpi-sub">Downforce to Drag Ratio</div>
+          <div class="kpi-sub">Lift-to-Drag Ratio</div>
         </div>
         <div class="kpi-card">
-          <div class="kpi-title">Current Iteration</div>
+          <div class="kpi-title">Solver Iteration</div>
           <div class="kpi-val" id="kpi-iter">0</div>
-          <div class="kpi-sub" id="kpi-status-sub">Solver status</div>
+          <div class="kpi-sub" id="kpi-status-sub">Status: Standby</div>
         </div>
       </div>
 
@@ -649,7 +679,7 @@
       <div class="charts-grid">
         <div class="panel">
           <div class="panel-header">
-            <h3>📈 Aerodynamic Force Convergence (N)</h3>
+            <h3>Aerodynamic Force History</h3>
           </div>
           <div class="chart-container">
             <canvas id="chart-forces"></canvas>
@@ -658,7 +688,7 @@
 
         <div class="panel">
           <div class="panel-header">
-            <h3>📉 Equation Residuals (log scale)</h3>
+            <h3>Equation Residuals</h3>
           </div>
           <div class="chart-container">
             <canvas id="chart-residuals"></canvas>
@@ -669,7 +699,7 @@
       <!-- Live Terminal Console Log Tail -->
       <div class="panel console-panel">
         <div class="panel-header">
-          <h3>💻 Live Solver Console Output</h3>
+          <h3>Solver Log Console</h3>
           <div class="panel-header-actions">
             <select id="select-log-type" class="input input-xs">
               <option value="simpleFoam">log.simpleFoam (Solver)</option>
@@ -688,16 +718,16 @@
     <section class="tab-pane" id="cases-tab">
       <div class="panel">
         <div class="panel-header">
-          <h3>📂 Case History & Aerodynamic Runs</h3>
-          <button class="btn btn-ghost btn-xs" id="btn-refresh-cases">🔄 Refresh</button>
+          <h3>Case History & Results</h3>
+          <button class="btn btn-ghost btn-xs" id="btn-refresh-cases">Refresh</button>
         </div>
         <div class="table-responsive">
           <table class="data-table" id="archive-table">
             <thead>
               <tr>
                 <th>Case Name</th>
-                <th>Location</th>
-                <th>Modified Date</th>
+                <th>Directory Path</th>
+                <th>Last Modified</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -716,11 +746,11 @@
     <div class="modal-backdrop" id="modal-backdrop"></div>
     <div class="modal-dialog">
       <div class="modal-header">
-        <h3>🔑 Cluster SSH Credentials</h3>
-        <button class="btn-close" id="btn-close-ssh-modal">✕</button>
+        <h3>Cluster SSH Credentials</h3>
+        <button class="btn-close" id="btn-close-ssh-modal" aria-label="Close">✕</button>
       </div>
       <div class="modal-body">
-        <p class="text-muted small">Connects directly from your laptop to the Chulalongkorn e-Science HPC login node.</p>
+        <p class="text-muted small">Configure direct SSH transport to the cluster login node.</p>
         
         <form id="ssh-connect-form" onsubmit="return false;">
           <div class="form-group">
@@ -729,13 +759,13 @@
           </div>
 
           <div class="form-group">
-            <label for="ssh-username">Cluster Username</label>
+            <label for="ssh-username">Username</label>
             <input type="text" id="ssh-username" class="input" value="tadtapongc" required>
           </div>
 
           <div class="form-group">
             <label for="ssh-password">Password</label>
-            <input type="password" id="ssh-password" class="input" placeholder="Enter cluster password">
+            <input type="password" id="ssh-password" class="input" placeholder="Enter password">
           </div>
 
           <div class="form-group">
@@ -744,14 +774,14 @@
           </div>
 
           <div class="form-group">
-            <label for="ssh-remotepath">Remote Repository Path</label>
+            <label for="ssh-remotepath">Remote Repository Root</label>
             <input type="text" id="ssh-remotepath" class="input" value="/work/home/tadtapongc/Rapidamente/cfd/OpenFOAM-CaseGenerator" required>
           </div>
 
           <div class="form-group">
             <label class="checkbox-control">
               <input type="checkbox" id="ssh-save-pw" checked>
-              <span>Remember password securely on this machine</span>
+              <span>Store credentials in local session</span>
             </label>
           </div>
 
