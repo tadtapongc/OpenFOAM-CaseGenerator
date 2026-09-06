@@ -299,10 +299,8 @@ The Cases Archive provides a centralized view of all simulation cases residing o
   - **Aerodynamic Results**: Color-coded badges displaying final $F_y$ (downforce), $F_z$ (drag), and $L/D$ (aero efficiency).
   - **Progress**: Current solver iteration count.
   - **Location & Modified**: `Local` vs `Cluster` indicator with formatted timestamp (`YYYY-MM-DD HH:MM`).
-- **Lifecycle Actions**:
-  - **📊 Telemetry**: One-click jump to the Telemetry tab with the selected case loaded.
-  - **⚙️ Setup**: Load the case configuration back into Tab 1 for inspection or modification.
-  - **🗑️ Delete**: Permanently remove local case directories and mesh solutions with confirmation safeguards (`DELETE /api/cases/{case_name}`).
+- **Actions**:
+  - **📊 Live Telemetry**: One-click jump to the Telemetry dashboard with the selected case loaded for real-time convergence and log monitoring.
 
 ---
 

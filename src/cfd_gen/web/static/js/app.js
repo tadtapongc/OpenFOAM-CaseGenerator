@@ -1784,9 +1784,7 @@ class CFDApp {
         <td>${locDateHtml}</td>
         <td>
           <div class="action-btn-group">
-            <button class="btn btn-outline btn-xs btn-inspect-case" data-name="${c.name}" title="Inspect Live Telemetry">📊 Telemetry</button>
-            <button class="btn btn-outline btn-xs btn-load-setup" data-name="${c.name}" title="Load into Case Setup">⚙️ Setup</button>
-            <button class="btn btn-outline btn-xs btn-delete-case text-danger" data-name="${c.name}" title="Delete Case">🗑️</button>
+            <button class="btn btn-outline btn-xs btn-inspect-case" data-name="${c.name}" title="Inspect Live Telemetry">📊 Live Telemetry</button>
           </div>
         </td>
       `;
@@ -1798,36 +1796,8 @@ class CFDApp {
         this.pollTelemetry();
       });
 
-      tr.querySelector('.btn-load-setup')?.addEventListener('click', async () => {
-        document.querySelector('.nav-tab[data-tab="config-tab"]')?.click();
-        await this.loadConfigFile(`${c.name}.json`, false);
-      });
-
-      tr.querySelector('.btn-delete-case')?.addEventListener('click', () => {
-        this.deleteCase(c.name);
-      });
-
       tbody.appendChild(tr);
     });
-  }
-
-  async deleteCase(caseName) {
-    if (!confirm(`Are you sure you want to permanently delete case '${caseName}'? This will remove all local mesh and solution files.`)) {
-      return;
-    }
-
-    try {
-      const res = await fetch(`/api/cases/${encodeURIComponent(caseName)}`, {
-        method: 'DELETE',
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Delete failed');
-
-      this.showToast(`Case '${caseName}' successfully deleted.`, 'success');
-      await this.loadCasesArchive();
-    } catch (err) {
-      this.showToast(`Delete failed: ${err.message}`, 'error');
-    }
   }
 
   // -------------------------------------------------------------
