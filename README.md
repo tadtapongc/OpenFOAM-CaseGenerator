@@ -160,7 +160,8 @@ cases/<case_name>/
 ├── log.simpleFoam                      # Steady-state RANS solver log
 ├── log.reconstructPar                  # Parallel field reconstruction log
 ├── postProcessing/
-│   ├── forces/0/force.dat              # Raw drag, downforce, and pitching moment per time step
+│   ├── forces/0/force.dat              # Force vectors; CLI projects onto drag/downforce axes
+│   ├── forces/0/moment.dat             # Moment vectors about CofR
 │   ├── forceCoeffs/0/forceCoeffs.dat   # Force coefficients (Cd, Cl, Cs, Cm)
 │   └── residuals/0/solverInfo.dat      # Solver convergence residuals for p, U, k, omega
 └── VTK/                                # (Optional) Converted ParaView visualization files
@@ -457,12 +458,15 @@ To configure a domain without a moving ground, use far-field faces above and bel
 "turbulence": {
     "model": "kOmegaSST",                // Default turbulence model
     "intensity": 0.005,                  // Example freestream turbulence intensity: 0.5%
-    "nut_ratio": 10                      // Ratio of turbulent to laminar viscosity (nut / nu = 10)
+    "nut_ratio": 10                      // Initial turbulent-to-laminar viscosity ratio
 }
 ```
 
-Turbulent kinetic energy ($k$) and specific dissipation rate ($\omega$) are automatically initialized via:
-$$k = \frac{3}{2} (U_\infty \cdot I)^2, \quad \omega = \frac{k}{(\nu_t / \nu) \cdot \nu}, \quad \nu_t = 10 \cdot \nu$$
+Let $r$ be the configured `nut_ratio`, $I$ the turbulence intensity as a fraction, and $U_\infty$ the freestream speed. The generator initializes the turbulence fields using:
+
+$$k_0 = \frac{3}{2}(U_\infty I)^2, \qquad \nu_{t,0} = r\nu, \qquad \omega_0 = \frac{k_0}{r\nu}.$$
+
+The estimate for $k_0$ assumes isotropic turbulence. The viscosity-ratio relation is an initialization estimate, not the general SST eddy-viscosity law: the model recalculates $\nu_t$ using a strain-dependent limiter. The default $r=10$ can be changed in the configuration. See the [OpenFOAM SST model equations](https://doc.openfoam.com/2606/tools/processing/models/turbulence/ras/linear-evm/rtm/kOmegaSST/).
 
 ### Parallel & SLURM Cluster Settings
 
@@ -768,14 +772,25 @@ The generated `nut` wall boundary uses `nutUSpaldingWallFunction`. This selectio
 
 ### Force Extraction & Decomposition
 
-OpenFOAM's `forces` function object calculates total aerodynamic loads by integrating pressure and viscous shear stress over vehicle surface patches:
+OpenFOAM's `forces` function object integrates pressure and viscous contributions over the selected body patches:
 
-$$\vec{F}_{\text{total}} = \vec{F}_{\text{pressure}} + \vec{F}_{\text{viscous}} = \sum_{f} p_f \vec{A}_f + \sum_{f} \vec{\tau}_{w,f} \cdot \vec{A}_f$$
+$$\vec{F}_{\text{total}} = \vec{F}_{\text{pressure}} + \vec{F}_{\text{viscous}}.$$
+
+The generated incompressible case stores kinematic pressure $p_k=p_{\mathrm{physical}}/\rho_\infty$ in units of $\mathrm{m^2/s^2}$. Using OpenFOAM's boundary face-area vectors $\vec{S}_f$, which point out of the fluid domain, the pressure force on the body is:
+
+$$\vec{F}_{\text{pressure}} = \rho_\infty \sum_f (p_{k,f}-p_{k,\mathrm{ref}})\vec{S}_f.$$
+
+Here $p_{k,\mathrm{ref}}$ is the reference pressure expressed in the same kinematic units. The `rho rhoInf;` and `rhoInf` entries supply `fluid.rho` for conversion to force in newtons. The viscous contribution comes from the model's effective stress at the body patches. See the [OpenFOAM forces documentation](https://doc.openfoam.com/2606/tools/post-processing/function-objects/forces/forces/).
 
 Forces are projected along configured axes:
-- **Drag**: Along flow direction ($\vec{F} \cdot \vec{d}_{\text{drag}}$)
-- **Downforce**: Toward ground ($\vec{F} \cdot \vec{d}_{\text{downforce}}$)
-- **Efficiency ($L/D$)**: $\frac{\text{Downforce}}{\text{Drag}}$
+
+- **Drag**: $F_D=\vec{F}\cdot\vec{d}_{\text{drag}}$, along `outputs.drag_axis` (normally the flow direction).
+- **Downforce**: $F_{DF}=\vec{F}\cdot\vec{d}_{\text{downforce}}$, along `outputs.downforce_axis`. The default `-y` makes downward force positive; setting `+y` reports upward lift under the same CLI label.
+- **Displayed Ratio (`L/D`)**: $|F_{DF}/F_D|$. The CLI takes the absolute value, so inspect the signed force components to distinguish lift from downforce. A zero drag denominator makes this ratio undefined; the CLI's zero or omitted display in that case is not a physical efficiency value.
+
+The generated `forceCoeffs` object also uses `outputs.downforce_axis` as `liftDir`. With the default `-y` direction, positive `Cl` therefore denotes downforce. Its `pitchAxis` is `dragDir` crossed with `liftDir` (default `-x`), and moments are referenced to `force_refs.CofR`. Match directions, reference area, reference length, and moment origin before comparing coefficients with another study.
+
+`force.dat` contains force vectors; `moment.dat` contains moment vectors about `CofR`. The CLI projects the force vectors onto the configured axes and does not read pitching moments. These separate files are described in the [OpenFOAM forces output specification](https://api.openfoam.com/2512/forces_8H_source.html).
 
 Run `python read_forces.py`. The following numbers illustrate the output format; they are not validation results:
 
@@ -809,7 +824,7 @@ If multiple STL files are supplied (e.g. `["front_wing.stl", "rear_wing.stl", "u
 - `postProcessing/forces_rear_wing/0/force.dat`
 - `postProcessing/forces_undertray/0/force.dat`
 
-These files provide per-component force data. Center-of-pressure or aerodynamic-balance calculations require separate interpretation of forces, moments, axes, and reference points.
+Each component also has a `moment.dat` file alongside `force.dat`, containing moments about `CofR`. Center-of-pressure or aerodynamic-balance calculations require separate interpretation of those forces, moments, axes, and reference points.
 
 ### Automated Convergence Monitor & Clean Auto-Stop
 
