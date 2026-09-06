@@ -399,6 +399,8 @@ class CFDApp {
       const validActive = newStls.filter((f) => availableNames.has(f));
       if (validActive.length > 0) {
         this.activeConfig.stl_files = validActive;
+      } else if (newStls.length > 0 && !newStls.includes('geometry.stl')) {
+        this.activeConfig.stl_files = newStls;
       } else {
         // Fall back to first available geometry if config uses a generic placeholder (e.g. geometry.stl)
         this.activeConfig.stl_files = [this.availableSTLs[0].filename];
@@ -407,10 +409,7 @@ class CFDApp {
       this.activeConfig.stl_files = newStls;
     }
     this.renderActiveSTLChips(this.activeConfig.stl_files);
-    if (this.activeConfig.stl_files.length > 0 && this.activeConfig.stl_files[0] !== this.currentSTLName) {
-      this.currentSTLName = this.activeConfig.stl_files[0];
-      this.loadSTLGeometryFromServer(this.activeConfig.stl_files[0]);
-    }
+    this.loadAllActiveSTLsFromServer(true);
   }
 
   buildConfigFromVisualForm() {
@@ -838,60 +837,100 @@ class CFDApp {
     }
   }
 
+  async loadAllActiveSTLsFromServer(autoFit = true) {
+    if (!this.viewer) return;
+
+    const stlsToLoad = (this.activeConfig.stl_files || []).filter(
+      (f) => f && f !== 'geometry.stl'
+    );
+
+    if (stlsToLoad.length === 0) {
+      this.viewer.clearSTLs();
+      this.currentSTLBounds = null;
+      await this.updateDomainBoxVisualization(true);
+      return;
+    }
+
+    this.viewer.clearSTLs();
+    let loadedCount = 0;
+
+    for (const filename of stlsToLoad) {
+      try {
+        const res = await fetch(`/api/stl/file/${encodeURIComponent(filename)}`);
+        if (!res.ok) continue;
+        const buffer = await res.arrayBuffer();
+        this.viewer.addSTLFromArrayBuffer(buffer, filename);
+        loadedCount++;
+      } catch (err) {
+        console.warn(`Could not load STL '${filename}' from server:`, err);
+      }
+    }
+
+    this.currentSTLBounds = this.viewer.getCombinedBoundingBox();
+    await this.updateDomainBoxVisualization(autoFit);
+  }
+
   async loadSTLGeometryFromServer(filename) {
     if (!this.viewer || !filename) return;
     try {
       const res = await fetch(`/api/stl/file/${encodeURIComponent(filename)}`);
       if (!res.ok) return;
       const buffer = await res.arrayBuffer();
-      const info = this.viewer.loadSTLFromArrayBuffer(buffer, filename);
-      if (info && info.bbox) {
-        this.currentSTLBounds = info.bbox;
-      }
-      await this.updateDomainBoxVisualization(true);
+      this.viewer.addSTLFromArrayBuffer(buffer, filename);
+      this.currentSTLBounds = this.viewer.getCombinedBoundingBox();
+      await this.updateDomainBoxVisualization(false);
     } catch (err) {
       console.warn('Could not auto-load STL file geometry:', err);
     }
   }
 
   async handleSTLFiles(files) {
-    for (const file of files) {
-      if (!file.name.toLowerCase().endsWith('.stl')) continue;
+    const stlFiles = Array.from(files).filter((f) => f.name.toLowerCase().endsWith('.stl'));
+    if (stlFiles.length === 0) {
+      this.showToast('Please select valid .stl files', 'warning');
+      return;
+    }
 
-      // 1. Preview in Three.js locally via FileReader
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const buffer = e.target.result;
-        const info = this.viewer.loadSTLFromArrayBuffer(buffer, file.name);
-        if (info && info.bbox) {
-          this.currentSTLBounds = info.bbox;
-          this.updateDomainBoxVisualization();
-        }
-      };
-      reader.readAsArrayBuffer(file);
-
-      // 2. Upload to server
-      const formData = new FormData();
-      formData.append('file', file);
+    let loadedCount = 0;
+    for (const file of stlFiles) {
       try {
+        // 1. Preview in Three.js locally via ArrayBuffer without overwriting other parts
+        const buffer = await file.arrayBuffer();
+        if (this.viewer) {
+          this.viewer.addSTLFromArrayBuffer(buffer, file.name);
+        }
+        loadedCount++;
+
+        // 2. Upload to server stl/ directory
+        const formData = new FormData();
+        formData.append('file', file);
         const res = await fetch('/api/stl/upload', {
           method: 'POST',
           body: formData,
         });
         const data = await res.json();
         if (data.success) {
-          this.showToast(`Uploaded ${file.name}`, 'success');
           if (!this.activeConfig.stl_files) this.activeConfig.stl_files = [];
+          // Filter out generic placeholder if present
+          this.activeConfig.stl_files = this.activeConfig.stl_files.filter((f) => f !== 'geometry.stl');
           if (!this.activeConfig.stl_files.includes(file.name)) {
             this.activeConfig.stl_files.push(file.name);
           }
-          this.renderActiveSTLChips(this.activeConfig.stl_files);
-          this.syncConfigToJsonDrawer();
         }
       } catch (err) {
-        this.showToast(`Upload failed: ${err.message}`, 'error');
+        console.error(`Error processing STL file ${file.name}:`, err);
+        this.showToast(`Error processing ${file.name}: ${err.message}`, 'error');
       }
     }
+
+    // 3. Recompute domain and update UI once all STLs are loaded
+    if (this.viewer) {
+      this.currentSTLBounds = this.viewer.getCombinedBoundingBox();
+    }
+    this.renderActiveSTLChips(this.activeConfig.stl_files);
+    this.syncConfigToJsonDrawer();
+    await this.updateDomainBoxVisualization(true);
+    this.showToast(`Loaded ${loadedCount} STL ${loadedCount === 1 ? 'geometry' : 'geometries'} into 3D viewer`, 'success');
   }
 
   renderActiveSTLChips(stlList) {
@@ -902,24 +941,45 @@ class CFDApp {
     container.innerHTML = '';
     if (countBadge) countBadge.textContent = `${stlList.length} files`;
 
-    stlList.forEach((filename) => {
+    const STL_CHIP_COLORS = [
+      '#38bdf8', '#34d399', '#f472b6', '#a78bfa',
+      '#fbbf24', '#2dd4bf', '#f87171', '#60a5fa'
+    ];
+
+    stlList.forEach((filename, idx) => {
+      const color = STL_CHIP_COLORS[idx % STL_CHIP_COLORS.length];
       const chip = document.createElement('div');
       chip.className = 'stl-chip active';
+      chip.style.borderColor = `${color}55`;
       chip.innerHTML = `
+        <span class="stl-chip-dot" style="background: ${color}; width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px;"></span>
         <span>${filename}</span>
         <span class="btn-remove" title="Remove">&times;</span>
       `;
+
+      // Clicking chip highlights part in 3D viewer
       chip.addEventListener('click', (e) => {
         if (!e.target.classList.contains('btn-remove')) {
-          this.loadSTLGeometryFromServer(filename);
+          if (this.viewer) {
+            this.viewer.highlightSTL(filename);
+          }
         }
       });
+
+      // Removing chip deletes from 3D scene and config
       chip.querySelector('.btn-remove').addEventListener('click', (e) => {
         e.stopPropagation();
         this.activeConfig.stl_files = this.activeConfig.stl_files.filter((f) => f !== filename);
+        if (this.viewer) {
+          this.viewer.removeSTL(filename);
+          this.currentSTLBounds = this.viewer.getCombinedBoundingBox();
+        }
         this.renderActiveSTLChips(this.activeConfig.stl_files);
         this.syncConfigToJsonDrawer();
+        this.updateDomainBoxVisualization(false);
+        this.showToast(`Removed ${filename}`, 'info');
       });
+
       container.appendChild(chip);
     });
   }
@@ -938,7 +998,7 @@ class CFDApp {
           this.activeConfig.stl_files = [stls[0].filename];
         }
         this.renderActiveSTLChips(this.activeConfig.stl_files);
-        await this.loadSTLGeometryFromServer(this.activeConfig.stl_files[0]);
+        await this.loadAllActiveSTLsFromServer(true);
       } else {
         // No STLs available in stl/ directory
         this.activeConfig.stl_files = [];
@@ -981,8 +1041,10 @@ class CFDApp {
 
       if (this.activeConfig.stl_files && this.activeConfig.stl_files.length > 0) {
         this.renderActiveSTLChips(this.activeConfig.stl_files);
-        await this.loadSTLGeometryFromServer(this.activeConfig.stl_files[0]);
+        await this.loadAllActiveSTLsFromServer(true);
       } else {
+        if (this.viewer) this.viewer.clearSTLs();
+        this.currentSTLBounds = null;
         await this.updateDomainBoxVisualization(true);
       }
 

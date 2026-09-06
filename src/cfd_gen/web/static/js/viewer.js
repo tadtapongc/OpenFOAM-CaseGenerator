@@ -2,6 +2,17 @@
  * 3D Geometry & Wind Tunnel Inspector using Three.js
  */
 
+const STL_PALETTE = [
+  0x38bdf8, // Sky Cyan (Aero Primary)
+  0x34d399, // Mint Emerald
+  0xf472b6, // Rose Pink
+  0xa78bfa, // Indigo Lavender
+  0xfbbf24, // Amber Gold
+  0x2dd4bf, // Marine Teal
+  0xf87171, // Coral Red
+  0x60a5fa, // Electric Blue
+];
+
 class STLViewer {
   constructor(containerId) {
     this.container = document.getElementById(containerId);
@@ -11,7 +22,8 @@ class STLViewer {
     this.camera = null;
     this.renderer = null;
     this.controls = null;
-    this.currentMesh = null;
+    this.stlGroup = null;
+    this.stlMeshes = new Map(); // filename -> THREE.Mesh
     this.bboxHelper = null;
     this.domainBoxGroup = null;
     this.groundGrid = null;
@@ -35,6 +47,11 @@ class STLViewer {
     this.init();
   }
 
+  get currentMesh() {
+    // Backward compatibility: return first loaded mesh
+    return this.stlMeshes.values().next().value || null;
+  }
+
   init() {
     if (typeof THREE === 'undefined') {
       console.warn('Three.js not loaded. 3D viewer unavailable.');
@@ -47,6 +64,9 @@ class STLViewer {
     // 1. Scene
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x080c14);
+
+    this.stlGroup = new THREE.Group();
+    this.scene.add(this.stlGroup);
 
     // 2. Camera (Wide view distance so 50m domain fits comfortably)
     this.camera = new THREE.PerspectiveCamera(45, width / height, 0.05, 2000);
@@ -202,85 +222,197 @@ class STLViewer {
     this.scene.add(this.flowArrow);
   }
 
-  loadSTLFromArrayBuffer(buffer, filename = 'geometry.stl') {
+  addSTLFromArrayBuffer(buffer, filename = 'geometry.stl') {
     if (typeof THREE.STLLoader === 'undefined') {
       console.error('STLLoader not available.');
-      return;
+      return null;
     }
 
     const loader = new THREE.STLLoader();
     try {
       const geometry = loader.parse(buffer);
       geometry.computeVertexNormals();
+      geometry.computeBoundingBox();
 
-      if (this.currentMesh) {
-        this.scene.remove(this.currentMesh);
-        this.disposeObject(this.currentMesh);
-        this.currentMesh = null;
+      // If mesh already loaded under this filename, replace it
+      if (this.stlMeshes.has(filename)) {
+        const oldMesh = this.stlMeshes.get(filename);
+        this.stlGroup.remove(oldMesh);
+        this.disposeObject(oldMesh);
+        this.stlMeshes.delete(filename);
       }
-      if (this.bboxHelper) {
-        this.scene.remove(this.bboxHelper);
-        this.disposeObject(this.bboxHelper);
-        this.bboxHelper = null;
-      }
+
+      // Assign palette color by current count
+      const colorIdx = this.stlMeshes.size % STL_PALETTE.length;
+      const color = STL_PALETTE[colorIdx];
 
       // Material: Sleek aerodynamic metallic finish with DoubleSide for thin aero surfaces
       const material = new THREE.MeshStandardMaterial({
-        color: 0x38bdf8,
+        color: color,
         metalness: 0.35,
         roughness: 0.35,
         flatShading: false,
         side: THREE.DoubleSide,
       });
 
-      this.currentMesh = new THREE.Mesh(geometry, material);
-      this.scene.add(this.currentMesh);
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.name = filename;
+      mesh.userData = { filename, colorIdx, originalColor: color };
+      this.stlGroup.add(mesh);
+      this.stlMeshes.set(filename, mesh);
 
-      // Compute bounding box
-      geometry.computeBoundingBox();
-      const bbox = geometry.boundingBox;
-      const size = new THREE.Vector3();
-      bbox.getSize(size);
+      // Recompute combined bounding box of all active parts
+      const info = this.recomputeOverallBoundingBox();
 
-      // Add Model Bounding Box Helper (Warm Golden Amber for instant visual distinction)
-      this.bboxHelper = new THREE.Box3Helper(bbox, 0xf59e0b);
-      this.bboxHelper.visible = this.showBounds;
-      this.scene.add(this.bboxHelper);
+      return {
+        ...info,
+        filename,
+        colorHex: `#${color.toString(16).padStart(6, '0')}`,
+      };
+    } catch (err) {
+      console.error(`Failed to parse STL '${filename}':`, err);
+      return null;
+    }
+  }
 
-      // Check scale warning (mm vs m)
-      const maxDim = Math.max(size.x, size.y, size.z);
+  removeSTL(filename) {
+    if (this.stlMeshes.has(filename)) {
+      const mesh = this.stlMeshes.get(filename);
+      this.stlGroup.remove(mesh);
+      this.disposeObject(mesh);
+      this.stlMeshes.delete(filename);
+      return this.recomputeOverallBoundingBox();
+    }
+    return null;
+  }
+
+  clearSTLs() {
+    for (const mesh of this.stlMeshes.values()) {
+      this.stlGroup.remove(mesh);
+      this.disposeObject(mesh);
+    }
+    this.stlMeshes.clear();
+    if (this.bboxHelper) {
+      this.scene.remove(this.bboxHelper);
+      this.disposeObject(this.bboxHelper);
+      this.bboxHelper = null;
+    }
+  }
+
+  recomputeOverallBoundingBox() {
+    if (this.bboxHelper) {
+      this.scene.remove(this.bboxHelper);
+      this.disposeObject(this.bboxHelper);
+      this.bboxHelper = null;
+    }
+
+    if (this.stlMeshes.size === 0) {
       const warnEl = document.getElementById('scale-warning');
-      if (warnEl) {
-        warnEl.style.display = maxDim > 20.0 ? 'block' : 'none';
+      if (warnEl) warnEl.style.display = 'none';
+      return null;
+    }
+
+    const combinedBBox = new THREE.Box3();
+    for (const mesh of this.stlMeshes.values()) {
+      if (!mesh.geometry.boundingBox) {
+        mesh.geometry.computeBoundingBox();
       }
+      combinedBBox.union(mesh.geometry.boundingBox);
+    }
 
-      // If domain not yet set, place ground grid at model bottom
-      if (!this.domainMin && this.groundGrid) {
-        this.groundGrid.position.set(0, bbox.min.y, 0);
+    const size = new THREE.Vector3();
+    combinedBBox.getSize(size);
+
+    // Add Model Bounding Box Helper (Warm Golden Amber for instant visual distinction)
+    this.bboxHelper = new THREE.Box3Helper(combinedBBox, 0xf59e0b);
+    this.bboxHelper.visible = this.showBounds;
+    this.scene.add(this.bboxHelper);
+
+    // Check scale warning (mm vs m)
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const warnEl = document.getElementById('scale-warning');
+    if (warnEl) {
+      warnEl.style.display = maxDim > 20.0 ? 'block' : 'none';
+    }
+
+    // If domain not yet set, place ground grid at model bottom
+    if (!this.domainMin && this.groundGrid) {
+      this.groundGrid.position.set(0, combinedBBox.min.y, 0);
+    }
+
+    // Proportional origin axes scale
+    this.updateOriginAxesScale(maxDim);
+
+    return {
+      bbox: {
+        min: [combinedBBox.min.x, combinedBBox.min.y, combinedBBox.min.z],
+        max: [combinedBBox.max.x, combinedBBox.max.y, combinedBBox.max.z],
+      },
+      size: [size.x, size.y, size.z],
+      isLikelyMM: maxDim > 20.0,
+      totalMeshes: this.stlMeshes.size,
+    };
+  }
+
+  getCombinedBoundingBox() {
+    if (this.stlMeshes.size === 0) return null;
+    const combinedBBox = new THREE.Box3();
+    for (const mesh of this.stlMeshes.values()) {
+      if (!mesh.geometry.boundingBox) {
+        mesh.geometry.computeBoundingBox();
       }
+      combinedBBox.union(mesh.geometry.boundingBox);
+    }
+    return {
+      min: [combinedBBox.min.x, combinedBBox.min.y, combinedBBox.min.z],
+      max: [combinedBBox.max.x, combinedBBox.max.y, combinedBBox.max.z],
+    };
+  }
 
-      // Proportional origin axes scale
-      this.updateOriginAxesScale(maxDim);
+  getCombinedBoundingBoxVector3() {
+    if (this.stlMeshes.size === 0) return null;
+    const combinedBBox = new THREE.Box3();
+    for (const mesh of this.stlMeshes.values()) {
+      if (!mesh.geometry.boundingBox) {
+        mesh.geometry.computeBoundingBox();
+      }
+      combinedBBox.union(mesh.geometry.boundingBox);
+    }
+    return combinedBBox;
+  }
 
-      // Camera auto-framing
+  highlightSTL(filename) {
+    const mesh = this.stlMeshes.get(filename);
+    if (!mesh) return;
+
+    const originalColor = mesh.userData.originalColor !== undefined
+      ? mesh.userData.originalColor
+      : mesh.material.color.getHex();
+
+    mesh.material.color.setHex(0xffffff);
+    mesh.material.emissive.setHex(0x38bdf8);
+    mesh.material.emissiveIntensity = 0.6;
+
+    setTimeout(() => {
+      mesh.material.color.setHex(originalColor);
+      mesh.material.emissive.setHex(0x000000);
+      mesh.material.emissiveIntensity = 0;
+    }, 500);
+  }
+
+  loadSTLFromArrayBuffer(buffer, filename = 'geometry.stl', clearExisting = false) {
+    if (clearExisting) {
+      this.clearSTLs();
+    }
+    const info = this.addSTLFromArrayBuffer(buffer, filename);
+    if (info) {
       if (this.domainMin && this.domainMax) {
         this.fitView('domain');
       } else {
         this.fitView('model');
       }
-
-      return {
-        bbox: {
-          min: [bbox.min.x, bbox.min.y, bbox.min.z],
-          max: [bbox.max.x, bbox.max.y, bbox.max.z],
-        },
-        size: [size.x, size.y, size.z],
-        isLikelyMM: maxDim > 20.0,
-      };
-    } catch (err) {
-      console.error('Failed to parse STL:', err);
-      return null;
     }
+    return info;
   }
 
   fitView(target = 'domain') {
@@ -305,29 +437,31 @@ class STLViewer {
         this.controls.target.copy(center);
         this.controls.update();
       }
-    } else if (this.currentMesh) {
-      const bbox = this.currentMesh.geometry.boundingBox;
-      const center = new THREE.Vector3();
-      const size = new THREE.Vector3();
-      bbox.getCenter(center);
-      bbox.getSize(size);
-
-      const maxDim = Math.max(size.x, size.y, size.z);
-      const dist = Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 1.8;
-
-      this.camera.position.set(center.x + dist * 0.8, center.y + dist * 0.6, center.z + dist);
-      this.camera.lookAt(center);
-
-      if (this.controls) {
-        this.controls.target.copy(center);
-        this.controls.update();
-      }
     } else {
-      this.camera.position.set(15, 12, 28);
-      this.camera.lookAt(0, 0, 0);
-      if (this.controls) {
-        this.controls.target.set(0, 0, 0);
-        this.controls.update();
+      const bbox = this.getCombinedBoundingBoxVector3();
+      if (bbox) {
+        const center = new THREE.Vector3();
+        const size = new THREE.Vector3();
+        bbox.getCenter(center);
+        bbox.getSize(size);
+
+        const maxDim = Math.max(size.x, size.y, size.z);
+        const dist = Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 1.8;
+
+        this.camera.position.set(center.x + dist * 0.8, center.y + dist * 0.6, center.z + dist);
+        this.camera.lookAt(center);
+
+        if (this.controls) {
+          this.controls.target.copy(center);
+          this.controls.update();
+        }
+      } else {
+        this.camera.position.set(15, 12, 28);
+        this.camera.lookAt(0, 0, 0);
+        if (this.controls) {
+          this.controls.target.set(0, 0, 0);
+          this.controls.update();
+        }
       }
     }
   }
@@ -350,13 +484,15 @@ class STLViewer {
       const size = new THREE.Vector3().subVectors(maxVec, minVec);
       const maxDim = Math.max(size.x, size.y, size.z);
       dist = Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 1.35;
-    } else if (this.currentMesh) {
-      const bbox = this.currentMesh.geometry.boundingBox;
-      bbox.getCenter(center);
-      const size = new THREE.Vector3();
-      bbox.getSize(size);
-      const maxDim = Math.max(size.x, size.y, size.z);
-      dist = Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 1.8;
+    } else {
+      const bbox = this.getCombinedBoundingBoxVector3();
+      if (bbox) {
+        bbox.getCenter(center);
+        const size = new THREE.Vector3();
+        bbox.getSize(size);
+        const maxDim = Math.max(size.x, size.y, size.z);
+        dist = Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 1.8;
+      }
     }
 
     if (angle === 'top') {
