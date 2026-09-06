@@ -59,10 +59,10 @@ def get_saved_cluster_config() -> dict[str, Any]:
         except Exception:
             pass
     return {
-        "host": "escience0.sc.chula.ac.th",
+        "host": "",
         "port": 22,
-        "username": "tadtapongc",
-        "remote_repo_path": "/work/home/tadtapongc/Rapidamente/cfd/OpenFOAM-CaseGenerator",
+        "username": "",
+        "remote_repo_path": "",
         "save_password": True,
     }
 
@@ -89,12 +89,12 @@ def save_cluster_config(cfg: dict[str, Any]) -> None:
 # -------------------------------------------------------------
 
 class SSHConnectRequest(BaseModel):
-    host: str = "escience0.sc.chula.ac.th"
+    host: str = ""
     port: int = 22
-    username: str = "tadtapongc"
+    username: str = ""
     password: Optional[str] = None
     key_path: Optional[str] = None
-    remote_repo_path: str = "/work/home/tadtapongc/Rapidamente/cfd/OpenFOAM-CaseGenerator"
+    remote_repo_path: str = ""
     save_password: bool = True
 
 
@@ -176,10 +176,10 @@ async def api_get_saved_config() -> dict[str, Any]:
     """Get cached connection settings (without exposing plain password unnecessarily)."""
     cfg = get_saved_cluster_config()
     return {
-        "host": cfg.get("host", "escience0.sc.chula.ac.th"),
+        "host": cfg.get("host", ""),
         "port": cfg.get("port", 22),
-        "username": cfg.get("username", "tadtapongc"),
-        "remote_repo_path": cfg.get("remote_repo_path", "/work/home/tadtapongc/Rapidamente/cfd/OpenFOAM-CaseGenerator"),
+        "username": cfg.get("username", ""),
+        "remote_repo_path": cfg.get("remote_repo_path", ""),
         "has_saved_password": bool(cfg.get("password")),
         "saved_password": cfg.get("password", ""),
         "key_path": cfg.get("key_path", ""),
@@ -746,8 +746,9 @@ def main() -> None:
 
     url = f"http://{args.host}:{args.port}"
     print("\n" + "=" * 60)
-    print("  [RapidAero] OpenFOAM Case Generator Studio (Web App)")
-    print(f"  Cluster target: escience0.sc.chula.ac.th")
+    cfg = get_saved_cluster_config()
+    target = cfg.get("host") or "Not configured (set in Web UI)"
+    print(f"  Cluster target: {target}")
     print(f"  Listening on:   {url}")
     print("=" * 60 + "\n")
 

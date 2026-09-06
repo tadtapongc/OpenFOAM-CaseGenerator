@@ -4,8 +4,7 @@ setlocal enabledelayedexpansion
 title Rapidamente CFD Studio - OpenFOAM Case Generator
 
 echo ======================================================================
-echo    🏎️  Rapidamente CFD Studio - 1-Click Desktop Web App
-echo    Target HPC Cluster: escience0.sc.chula.ac.th
+echo    OpenFOAM Studio - Case Generator & Cluster Dispatcher
 echo ======================================================================
 echo.
 

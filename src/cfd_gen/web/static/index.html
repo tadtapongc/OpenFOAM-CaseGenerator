@@ -593,19 +593,19 @@
           <div class="cluster-summary-grid">
             <div class="metric-card">
               <div class="metric-label">Target Host</div>
-              <div class="metric-value monospace" id="disp-cluster-host">escience0.sc.chula.ac.th</div>
+              <div class="metric-value monospace" id="disp-cluster-host">Not Configured</div>
             </div>
             <div class="metric-card">
               <div class="metric-label">SSH User</div>
-              <div class="metric-value monospace" id="disp-cluster-user">tadtapongc</div>
+              <div class="metric-value monospace" id="disp-cluster-user">--</div>
             </div>
             <div class="metric-card">
               <div class="metric-label">SLURM Status</div>
-              <div class="metric-value" id="disp-slurm-status">Checking...</div>
+              <div class="metric-value" id="disp-slurm-status">Disconnected</div>
             </div>
             <div class="metric-card">
               <div class="metric-label">Remote Project Path</div>
-              <div class="metric-value small monospace" id="disp-remote-repo">/work/home/tadtapongc/...</div>
+              <div class="metric-value small monospace" id="disp-remote-repo">--</div>
             </div>
           </div>
         </div>
@@ -764,12 +764,12 @@
         <form id="ssh-connect-form" onsubmit="return false;">
           <div class="form-group">
             <label for="ssh-host">Cluster Hostname</label>
-            <input type="text" id="ssh-host" class="input" value="escience0.sc.chula.ac.th" required>
+            <input type="text" id="ssh-host" class="input" placeholder="e.g. cluster.university.edu" required>
           </div>
 
           <div class="form-group">
             <label for="ssh-username">Username</label>
-            <input type="text" id="ssh-username" class="input" value="tadtapongc" required>
+            <input type="text" id="ssh-username" class="input" placeholder="e.g. jdoe" required>
           </div>
 
           <div class="form-group">
@@ -784,7 +784,7 @@
 
           <div class="form-group">
             <label for="ssh-remotepath">Remote Repository Root</label>
-            <input type="text" id="ssh-remotepath" class="input" value="/work/home/tadtapongc/Rapidamente/cfd/OpenFOAM-CaseGenerator" required>
+            <input type="text" id="ssh-remotepath" class="input" placeholder="e.g. /home/user/OpenFOAM-CaseGenerator" required>
           </div>
 
           <div class="form-group">

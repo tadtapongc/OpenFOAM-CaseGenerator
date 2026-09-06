@@ -85,6 +85,7 @@ class CFDApp {
     this.bindTelemetryEvents();
 
     // 3. Load initial data from backend
+    await this.loadLocalClusterConfig();
     await this.checkClusterStatus();
     await this.loadTemplatesList();
     // Automatically load configs/config.json as the default config
@@ -1063,22 +1064,56 @@ class CFDApp {
     connectSubmitBtn?.addEventListener('click', () => this.submitSSHConnect());
   }
 
-  async openSSHModal() {
-    const modal = document.getElementById('ssh-modal');
-    if (!modal) return;
+  async loadLocalClusterConfig() {
+    let cfg = null;
 
-    // Load saved settings
+    // 1. First check browser localStorage for credentials saved on this machine
     try {
-      const res = await fetch('/api/cluster/saved-config');
-      const cfg = await res.json();
-      this.setVal('ssh-host', cfg.host);
-      this.setVal('ssh-username', cfg.username);
-      this.setVal('ssh-remotepath', cfg.remote_repo_path);
+      const stored = localStorage.getItem('cfd_cluster_config');
+      if (stored) {
+        cfg = JSON.parse(stored);
+      }
+    } catch {}
+
+    // 2. Fallback or sync with server-side saved config (~/.cfd_gen_cluster.json)
+    if (!cfg || !cfg.host) {
+      try {
+        const res = await fetch('/api/cluster/saved-config');
+        if (res.ok) {
+          const serverCfg = await res.json();
+          if (serverCfg && serverCfg.host) {
+            cfg = serverCfg;
+          }
+        }
+      } catch {}
+    }
+
+    if (cfg) {
+      if (cfg.host) this.setValText('disp-cluster-host', cfg.host);
+      if (cfg.username) this.setValText('disp-cluster-user', cfg.username);
+      if (cfg.remote_repo_path) this.setValText('disp-remote-repo', cfg.remote_repo_path);
+
+      this.setVal('ssh-host', cfg.host || '');
+      this.setVal('ssh-username', cfg.username || '');
+      this.setVal('ssh-remotepath', cfg.remote_repo_path || '');
       this.setVal('ssh-keypath', cfg.key_path || '');
       if (cfg.saved_password) {
         this.setVal('ssh-password', cfg.saved_password);
       }
-    } catch {}
+    } else {
+      this.setValText('disp-cluster-host', 'Not Configured');
+      this.setValText('disp-cluster-user', '--');
+      this.setValText('disp-remote-repo', '--');
+    }
+    return cfg;
+  }
+
+  async openSSHModal() {
+    const modal = document.getElementById('ssh-modal');
+    if (!modal) return;
+
+    // Load saved settings from local storage or server
+    await this.loadLocalClusterConfig();
 
     document.getElementById('ssh-error-alert').style.display = 'none';
     document.getElementById('ssh-success-alert').style.display = 'none';
@@ -1106,6 +1141,24 @@ class CFDApp {
     succAlert.style.display = 'none';
     submitBtn.disabled = true;
     submitBtn.textContent = 'Connecting...';
+
+    // Persist credentials locally in localStorage
+    try {
+      const localCfg = {
+        host,
+        username,
+        key_path: keyPath || '',
+        remote_repo_path: remoteRepo,
+        saved_password: savePw ? (password || '') : '',
+        save_password: savePw,
+      };
+      localStorage.setItem('cfd_cluster_config', JSON.stringify(localCfg));
+    } catch {}
+
+    // Update display metrics immediately
+    if (host) this.setValText('disp-cluster-host', host);
+    if (username) this.setValText('disp-cluster-user', username);
+    if (remoteRepo) this.setValText('disp-remote-repo', remoteRepo);
 
     try {
       const res = await fetch('/api/cluster/connect', {
@@ -1166,8 +1219,8 @@ class CFDApp {
     if (connected) {
       dot.className = 'status-dot connected';
       text.textContent = `${user}@${host.split('.')[0]}`;
-      this.setValText('disp-cluster-host', host);
-      this.setValText('disp-cluster-user', user);
+      if (host) this.setValText('disp-cluster-host', host);
+      if (user) this.setValText('disp-cluster-user', user);
       this.setValText('disp-slurm-status', 'Active & Ready');
     } else {
       dot.className = 'status-dot disconnected';
