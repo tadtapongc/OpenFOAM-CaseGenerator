@@ -61,6 +61,16 @@ class CFDApp {
       },
       _comment_overrides: "Expert overrides — all fields below have built-in defaults in fidelity presets. Uncomment only if manual tuning is needed.",
       _optional_overrides_example: {
+        solver: {
+          _end_time: 800,
+          _write_interval: 400,
+          _purge_write: 2,
+        },
+        force_refs: {
+          _Aref: 1.0,
+          _lRef: 1.0,
+          _CofR: [0.0, 0.0, 0.0],
+        },
         mesh_params: {
           _base_cell_size: 0.10,
           _surface_level: [4, 5],
@@ -68,24 +78,20 @@ class CFDApp {
           _near_wake_level: 3,
           _far_wake_level: 1,
         },
+        layers: {
+          _n_layers: 5,
+          _expansion_ratio: 1.2,
+          _first_layer_thickness: 0.3,
+          _min_thickness: 0.05,
+        },
         fluid: {
-          _nu: 1.516e-5,
           _rho: 1.225,
+          _nu: 1.516e-5,
         },
         turbulence: {
           _model: "kOmegaSST",
           _intensity: 0.005,
           _nut_ratio: 10,
-        },
-        solver: {
-          _end_time: 800,
-          _write_interval: 400,
-          _purge_write: 2,
-        },
-        force_refs: {
-          _lRef: 1.0,
-          _Aref: 1.0,
-          _CofR: [0.0, 0.0, 0.0],
         },
       }
     };
@@ -386,13 +392,32 @@ class CFDApp {
 
     // Overrides handling: populate only overridden fields, leave others blank for preset fallback
     const overrides = cfg.overrides || {};
-    const meshParams = overrides.mesh_params || null;
-    const fluid = overrides.fluid || null;
-    const turb = overrides.turbulence || null;
     const solver = overrides.solver || null;
     const refs = overrides.force_refs || null;
+    const meshParams = overrides.mesh_params || null;
+    const layers = overrides.layers || null;
+    const fluid = overrides.fluid || null;
+    const turb = overrides.turbulence || null;
 
-    // 1. Mesh Params
+    // 1. Solver & Iterations (Priority 1: Most frequently adjusted)
+    this.setVal('cfg-override-solver-endtime', solver?.end_time ?? '');
+    this.setVal('cfg-override-solver-writeinterval', solver?.write_interval ?? '');
+    this.setVal('cfg-override-solver-purgewrite', solver?.purge_write ?? '');
+
+    // 2. Force References (Priority 2: Geometry scale & moment centers)
+    this.setVal('cfg-override-ref-aref', refs?.Aref ?? '');
+    this.setVal('cfg-override-ref-lref', refs?.lRef ?? '');
+    if (Array.isArray(refs?.CofR) && refs.CofR.length >= 3) {
+      this.setVal('cfg-override-ref-cofr-x', refs.CofR[0]);
+      this.setVal('cfg-override-ref-cofr-y', refs.CofR[1]);
+      this.setVal('cfg-override-ref-cofr-z', refs.CofR[2]);
+    } else {
+      this.setVal('cfg-override-ref-cofr-x', '');
+      this.setVal('cfg-override-ref-cofr-y', '');
+      this.setVal('cfg-override-ref-cofr-z', '');
+    }
+
+    // 3. Mesh Params (Priority 3: Discretization & wake boxes)
     this.setVal('cfg-override-basecell', meshParams?.base_cell_size ?? '');
     if (Array.isArray(meshParams?.surface_level) && meshParams.surface_level.length >= 2) {
       this.setVal('cfg-override-surf-min', meshParams.surface_level[0]);
@@ -405,32 +430,20 @@ class CFDApp {
     this.setVal('cfg-override-nearwake', meshParams?.near_wake_level ?? '');
     this.setVal('cfg-override-farwake', meshParams?.far_wake_level ?? '');
 
-    // 2. Fluid Properties
-    this.setVal('cfg-override-fluid-nu', fluid?.nu ?? '');
-    this.setVal('cfg-override-fluid-rho', fluid?.rho ?? '');
+    // 4. Boundary Layer Overrides (Priority 4: Wall y+ & inflation)
+    this.setVal('cfg-override-layer-nlayers', layers?.n_layers ?? '');
+    this.setVal('cfg-override-layer-expansion', layers?.expansion_ratio ?? '');
+    this.setVal('cfg-override-layer-firstlayer', layers?.first_layer_thickness ?? '');
+    this.setVal('cfg-override-layer-minthickness', layers?.min_thickness ?? '');
 
-    // 3. Turbulence Modeling
+    // 5. Fluid Properties (Priority 5: Ambient medium)
+    this.setVal('cfg-override-fluid-rho', fluid?.rho ?? '');
+    this.setVal('cfg-override-fluid-nu', fluid?.nu ?? '');
+
+    // 6. Turbulence Modeling (Priority 6: Closure model)
     this.setVal('cfg-override-turb-model', turb?.model ?? '');
     this.setVal('cfg-override-turb-intensity', turb?.intensity ?? '');
     this.setVal('cfg-override-turb-nut-ratio', turb?.nut_ratio ?? '');
-
-    // 4. Solver & Iterations
-    this.setVal('cfg-override-solver-endtime', solver?.end_time ?? '');
-    this.setVal('cfg-override-solver-writeinterval', solver?.write_interval ?? '');
-    this.setVal('cfg-override-solver-purgewrite', solver?.purge_write ?? '');
-
-    // 5. Force References
-    this.setVal('cfg-override-ref-lref', refs?.lRef ?? '');
-    this.setVal('cfg-override-ref-aref', refs?.Aref ?? '');
-    if (Array.isArray(refs?.CofR) && refs.CofR.length >= 3) {
-      this.setVal('cfg-override-ref-cofr-x', refs.CofR[0]);
-      this.setVal('cfg-override-ref-cofr-y', refs.CofR[1]);
-      this.setVal('cfg-override-ref-cofr-z', refs.CofR[2]);
-    } else {
-      this.setVal('cfg-override-ref-cofr-x', '');
-      this.setVal('cfg-override-ref-cofr-y', '');
-      this.setVal('cfg-override-ref-cofr-z', '');
-    }
 
     this.updateOverridePlaceholders(fidelity);
 
@@ -581,7 +594,31 @@ class CFDApp {
 
     const overrides = {};
 
-    // 1. Mesh Params
+    // 1. Solver (Priority 1)
+    const solverOverrides = {};
+    const endTime = getOptionalInt('cfg-override-solver-endtime');
+    if (endTime !== null) solverOverrides.end_time = endTime;
+    const writeInterval = getOptionalInt('cfg-override-solver-writeinterval');
+    if (writeInterval !== null) solverOverrides.write_interval = writeInterval;
+    const purgeWrite = getOptionalInt('cfg-override-solver-purgewrite');
+    if (purgeWrite !== null) solverOverrides.purge_write = purgeWrite;
+    if (Object.keys(solverOverrides).length > 0) overrides.solver = solverOverrides;
+
+    // 2. Force Refs (Priority 2)
+    const refsOverrides = {};
+    const Aref = getOptionalFloat('cfg-override-ref-aref');
+    if (Aref !== null) refsOverrides.Aref = Aref;
+    const lRef = getOptionalFloat('cfg-override-ref-lref');
+    if (lRef !== null) refsOverrides.lRef = lRef;
+    const cofrX = getOptionalFloat('cfg-override-ref-cofr-x');
+    const cofrY = getOptionalFloat('cfg-override-ref-cofr-y');
+    const cofrZ = getOptionalFloat('cfg-override-ref-cofr-z');
+    if (cofrX !== null || cofrY !== null || cofrZ !== null) {
+      refsOverrides.CofR = [cofrX ?? 0.0, cofrY ?? 0.0, cofrZ ?? 0.0];
+    }
+    if (Object.keys(refsOverrides).length > 0) overrides.force_refs = refsOverrides;
+
+    // 3. Mesh Params (Priority 3)
     const meshOverrides = {};
     const baseCell = getOptionalFloat('cfg-override-basecell');
     if (baseCell !== null) meshOverrides.base_cell_size = baseCell;
@@ -598,15 +635,27 @@ class CFDApp {
     if (farWake !== null) meshOverrides.far_wake_level = farWake;
     if (Object.keys(meshOverrides).length > 0) overrides.mesh_params = meshOverrides;
 
-    // 2. Fluid
+    // 4. Boundary Layers (Priority 4)
+    const layersOverrides = {};
+    const nLayers = getOptionalInt('cfg-override-layer-nlayers');
+    if (nLayers !== null) layersOverrides.n_layers = nLayers;
+    const expansionRatio = getOptionalFloat('cfg-override-layer-expansion');
+    if (expansionRatio !== null) layersOverrides.expansion_ratio = expansionRatio;
+    const firstLayer = getOptionalFloat('cfg-override-layer-firstlayer');
+    if (firstLayer !== null) layersOverrides.first_layer_thickness = firstLayer;
+    const minThickness = getOptionalFloat('cfg-override-layer-minthickness');
+    if (minThickness !== null) layersOverrides.min_thickness = minThickness;
+    if (Object.keys(layersOverrides).length > 0) overrides.layers = layersOverrides;
+
+    // 5. Fluid (Priority 5)
     const fluidOverrides = {};
-    const nu = getOptionalFloat('cfg-override-fluid-nu');
-    if (nu !== null) fluidOverrides.nu = nu;
     const rho = getOptionalFloat('cfg-override-fluid-rho');
     if (rho !== null) fluidOverrides.rho = rho;
+    const nu = getOptionalFloat('cfg-override-fluid-nu');
+    if (nu !== null) fluidOverrides.nu = nu;
     if (Object.keys(fluidOverrides).length > 0) overrides.fluid = fluidOverrides;
 
-    // 3. Turbulence
+    // 6. Turbulence (Priority 6)
     const turbOverrides = {};
     const turbModel = getOptionalStr('cfg-override-turb-model');
     if (turbModel) turbOverrides.model = turbModel;
@@ -616,30 +665,6 @@ class CFDApp {
     if (nutRatio !== null) turbOverrides.nut_ratio = nutRatio;
     if (Object.keys(turbOverrides).length > 0) overrides.turbulence = turbOverrides;
 
-    // 4. Solver
-    const solverOverrides = {};
-    const endTime = getOptionalInt('cfg-override-solver-endtime');
-    if (endTime !== null) solverOverrides.end_time = endTime;
-    const writeInterval = getOptionalInt('cfg-override-solver-writeinterval');
-    if (writeInterval !== null) solverOverrides.write_interval = writeInterval;
-    const purgeWrite = getOptionalInt('cfg-override-solver-purgewrite');
-    if (purgeWrite !== null) solverOverrides.purge_write = purgeWrite;
-    if (Object.keys(solverOverrides).length > 0) overrides.solver = solverOverrides;
-
-    // 5. Force Refs
-    const refsOverrides = {};
-    const lRef = getOptionalFloat('cfg-override-ref-lref');
-    if (lRef !== null) refsOverrides.lRef = lRef;
-    const Aref = getOptionalFloat('cfg-override-ref-aref');
-    if (Aref !== null) refsOverrides.Aref = Aref;
-    const cofrX = getOptionalFloat('cfg-override-ref-cofr-x');
-    const cofrY = getOptionalFloat('cfg-override-ref-cofr-y');
-    const cofrZ = getOptionalFloat('cfg-override-ref-cofr-z');
-    if (cofrX !== null || cofrY !== null || cofrZ !== null) {
-      refsOverrides.CofR = [cofrX ?? 0.0, cofrY ?? 0.0, cofrZ ?? 0.0];
-    }
-    if (Object.keys(refsOverrides).length > 0) overrides.force_refs = refsOverrides;
-
     if (Object.keys(overrides).length > 0) {
       cfg.overrides = overrides;
       delete cfg._comment_overrides;
@@ -648,6 +673,16 @@ class CFDApp {
       delete cfg.overrides;
       cfg._comment_overrides = "Expert overrides — all fields below have built-in defaults in fidelity presets. Uncomment only if manual tuning is needed.";
       cfg._optional_overrides_example = {
+        solver: {
+          _end_time: 800,
+          _write_interval: 400,
+          _purge_write: 2,
+        },
+        force_refs: {
+          _Aref: 1.0,
+          _lRef: 1.0,
+          _CofR: [0.0, 0.0, 0.0],
+        },
         mesh_params: {
           _base_cell_size: 0.10,
           _surface_level: [4, 5],
@@ -655,24 +690,20 @@ class CFDApp {
           _near_wake_level: 3,
           _far_wake_level: 1,
         },
+        layers: {
+          _n_layers: 5,
+          _expansion_ratio: 1.2,
+          _first_layer_thickness: 0.3,
+          _min_thickness: 0.05,
+        },
         fluid: {
-          _nu: 1.516e-5,
           _rho: 1.225,
+          _nu: 1.516e-5,
         },
         turbulence: {
           _model: "kOmegaSST",
           _intensity: 0.005,
           _nut_ratio: 10,
-        },
-        solver: {
-          _end_time: 800,
-          _write_interval: 400,
-          _purge_write: 2,
-        },
-        force_refs: {
-          _lRef: 1.0,
-          _Aref: 1.0,
-          _CofR: [0.0, 0.0, 0.0],
         },
       };
     }
@@ -863,9 +894,9 @@ class CFDApp {
 
   updateOverridePlaceholders(fidelity = 'standard') {
     const presets = {
-      fast: { base_cell: '0.15', surf_min: '3', surf_max: '4', edge: '5', nearwake: '3', farwake: '1', endtime: '800', writeint: '400' },
-      standard: { base_cell: '0.10', surf_min: '4', surf_max: '5', edge: '6', nearwake: '3', farwake: '1', endtime: '1500', writeint: '500' },
-      fine: { base_cell: '0.06', surf_min: '5', surf_max: '6', edge: '7', nearwake: '3', farwake: '1', endtime: '2500', writeint: '500' },
+      fast: { base_cell: '0.15', surf_min: '3', surf_max: '4', edge: '5', nearwake: '3', farwake: '1', endtime: '800', writeint: '400', n_layers: '3', expansion: '1.30', first_layer: '0.40' },
+      standard: { base_cell: '0.10', surf_min: '4', surf_max: '5', edge: '6', nearwake: '3', farwake: '1', endtime: '1500', writeint: '500', n_layers: '5', expansion: '1.20', first_layer: '0.30' },
+      fine: { base_cell: '0.06', surf_min: '5', surf_max: '6', edge: '7', nearwake: '3', farwake: '1', endtime: '2500', writeint: '500', n_layers: '6', expansion: '1.15', first_layer: '0.20' },
     };
     const p = presets[fidelity] || presets.standard;
 
@@ -882,29 +913,36 @@ class CFDApp {
     setPlaceholder('cfg-override-farwake', `Auto / Preset (${p.farwake})`);
     setPlaceholder('cfg-override-solver-endtime', `Auto / Preset (${p.endtime})`);
     setPlaceholder('cfg-override-solver-writeinterval', `Auto / Preset (${p.writeint})`);
+    setPlaceholder('cfg-override-layer-nlayers', `Auto / Preset (${p.n_layers})`);
+    setPlaceholder('cfg-override-layer-expansion', `Auto / Preset (${p.expansion})`);
+    setPlaceholder('cfg-override-layer-firstlayer', `Auto / Preset (${p.first_layer})`);
   }
 
   clearAllOverrides() {
     const overrideIds = [
+      'cfg-override-solver-endtime',
+      'cfg-override-solver-writeinterval',
+      'cfg-override-solver-purgewrite',
+      'cfg-override-ref-aref',
+      'cfg-override-ref-lref',
+      'cfg-override-ref-cofr-x',
+      'cfg-override-ref-cofr-y',
+      'cfg-override-ref-cofr-z',
       'cfg-override-basecell',
       'cfg-override-surf-min',
       'cfg-override-surf-max',
       'cfg-override-edge',
       'cfg-override-nearwake',
       'cfg-override-farwake',
-      'cfg-override-fluid-nu',
+      'cfg-override-layer-nlayers',
+      'cfg-override-layer-expansion',
+      'cfg-override-layer-firstlayer',
+      'cfg-override-layer-minthickness',
       'cfg-override-fluid-rho',
+      'cfg-override-fluid-nu',
       'cfg-override-turb-model',
       'cfg-override-turb-intensity',
       'cfg-override-turb-nut-ratio',
-      'cfg-override-solver-endtime',
-      'cfg-override-solver-writeinterval',
-      'cfg-override-solver-purgewrite',
-      'cfg-override-ref-lref',
-      'cfg-override-ref-aref',
-      'cfg-override-ref-cofr-x',
-      'cfg-override-ref-cofr-y',
-      'cfg-override-ref-cofr-z',
     ];
     overrideIds.forEach((id) => this.setVal(id, ''));
     this.buildConfigFromVisualForm();

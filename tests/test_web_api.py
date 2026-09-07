@@ -563,6 +563,12 @@ class TestWebAPI(unittest.TestCase):
                     "Aref": 0.85,
                     "CofR": [0.1, 0.0, 0.5],
                 },
+                "layers": {
+                    "n_layers": 7,
+                    "expansion_ratio": 1.22,
+                    "first_layer_thickness": 0.25,
+                    "min_thickness": 0.04,
+                },
             },
         }
         merged = merge_config_with_defaults(user_cfg)
@@ -575,6 +581,9 @@ class TestWebAPI(unittest.TestCase):
         self.assertEqual(merged["solver"]["write_interval"], 300)
         self.assertEqual(merged["force_refs"]["lRef"], 1.25)
         self.assertEqual(merged["force_refs"]["CofR"], [0.1, 0.0, 0.5])
+        self.assertEqual(merged["layers"]["n_layers"], 7)
+        self.assertEqual(merged["layers"]["expansion_ratio"], 1.22)
+        self.assertEqual(merged["layers"]["first_layer_thickness"], 0.25)
 
     def test_case_generate_with_overrides(self):
         """Test that api_case_generate_and_submit applies overrides to generated case."""
@@ -588,6 +597,7 @@ class TestWebAPI(unittest.TestCase):
                 "overrides": {
                     "fluid": {"rho": 1.15},
                     "solver": {"end_time": 600},
+                    "layers": {"n_layers": 7, "expansion_ratio": 1.25},
                 },
             },
             upload_to_cluster=False,
@@ -603,6 +613,9 @@ class TestWebAPI(unittest.TestCase):
             control_dict = (case_path / "system" / "controlDict").read_text(encoding="utf-8")
             self.assertIn("endTime         600;", control_dict)
             self.assertIn("rhoInf          1.15;", control_dict)
+            snappy_dict = (case_path / "system" / "snappyHexMeshDict").read_text(encoding="utf-8")
+            self.assertIn("nSurfaceLayers 7;", snappy_dict)
+            self.assertIn("expansionRatio          1.25;", snappy_dict)
         finally:
             shutil.rmtree(case_path, ignore_errors=True)
             cfg_file = Path("configs") / f"{case_name}.json"

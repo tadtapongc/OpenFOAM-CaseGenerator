@@ -81,6 +81,16 @@
     "_section_overrides": "--- 7. Expert Overrides (Optional) ---",
     "_overrides_note": "All fields below have built-in defaults in fidelity presets. Uncomment only if manual tuning is needed.",
     "_optional_overrides_example": {
+        "solver": {
+            "_end_time": 800,
+            "_write_interval": 400,
+            "_purge_write": 2
+        },
+        "force_refs": {
+            "_Aref": 1.0,
+            "_lRef": 1.0,
+            "_CofR": [0.0, 0.0, 0.0]
+        },
         "mesh_params": {
             "_base_cell_size": 0.10,
             "_surface_level": [4, 5],
@@ -88,24 +98,20 @@
             "_near_wake_level": 3,
             "_far_wake_level": 1
         },
+        "layers": {
+            "_n_layers": 5,
+            "_expansion_ratio": 1.2,
+            "_first_layer_thickness": 0.3,
+            "_min_thickness": 0.05
+        },
         "fluid": {
-            "_nu": 1.516e-5,
-            "_rho": 1.225
+            "_rho": 1.225,
+            "_nu": 1.516e-5
         },
         "turbulence": {
             "_model": "kOmegaSST",
             "_intensity": 0.005,
             "_nut_ratio": 10
-        },
-        "solver": {
-            "_end_time": 800,
-            "_write_interval": 400,
-            "_purge_write": 2
-        },
-        "force_refs": {
-            "_lRef": 1.0,
-            "_Aref": 1.0,
-            "_CofR": [0.0, 0.0, 0.0]
         }
     }
 }
