@@ -1047,6 +1047,35 @@
     </div>
   </div>
 
+  <!-- Confirmation Modal Dialog -->
+  <div class="modal" id="confirm-modal" style="display: none;">
+    <div class="modal-backdrop" id="confirm-modal-backdrop"></div>
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h3 id="confirm-modal-title">⚠️ Confirmation Required</h3>
+        <button class="btn-close" id="btn-close-confirm-modal" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="confirm-modal-alert" class="alert alert-warning" style="display: none;"></div>
+        <p id="confirm-modal-message" style="font-size: 13px; color: var(--text-secondary); line-height: 1.5; margin: 0;"></p>
+        
+        <div id="confirm-modal-rename-container" style="display: none; margin-top: 10px; background: var(--bg-surface-raised); padding: 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);">
+          <label style="font-size: 11px; font-weight: 600; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 6px;">
+            Or Save with a New Name:
+          </label>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="confirm-modal-new-name" class="form-input" style="flex: 1; font-family: monospace;" placeholder="new_name.stl">
+            <button class="btn btn-secondary btn-sm" id="btn-confirm-rename" type="button">Use New Name</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" id="btn-confirm-cancel" type="button">Cancel</button>
+        <button class="btn btn-warning" id="btn-confirm-proceed" type="button">Overwrite</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast Notification Container -->
   <div class="toast-container" id="toast-container"></div>
 

@@ -392,12 +392,72 @@ async def api_get_stl_file(filename: str):
     return FileResponse(path=p, media_type="application/octet-stream", filename=p.name)
 
 
+@app.get("/api/stl/check-exists")
+async def api_stl_check_exists(filename: str) -> dict[str, Any]:
+    """Check if an STL file already exists locally or on remote cluster."""
+    raw_name = Path(filename).name
+    safe_name = raw_name if raw_name.lower().endswith(".stl") else f"{raw_name}.stl"
+
+    stl_dir = (PROJECT_ROOT / "stl").resolve()
+    local_exists = (stl_dir / safe_name).is_file()
+
+    cluster_exists = False
+    if ssh_client.is_connected:
+        try:
+            remote_path = f"{ssh_client.remote_repo_path}/stl/{safe_name}"
+            cluster_exists = ssh_client.remote_file_exists(remote_path)
+        except Exception:
+            pass
+
+    return {
+        "filename": safe_name,
+        "exists": local_exists or cluster_exists,
+        "local_exists": local_exists,
+        "cluster_exists": cluster_exists,
+    }
+
+
+@app.get("/api/case/check-exists")
+async def api_case_check_exists(case_name: str) -> dict[str, Any]:
+    """Check if a case name already exists locally or on cluster, and whether it's currently running."""
+    safe_name = case_name.strip()
+    if not safe_name:
+        return {"case_name": "", "exists": False, "local_exists": False, "cluster_exists": False, "is_running": False}
+
+    local_case = (PROJECT_ROOT / "cases" / safe_name).is_dir()
+    local_cfg = (PROJECT_ROOT / "configs" / f"{safe_name}.json").is_file()
+    local_exists = local_case or local_cfg
+
+    cluster_exists = False
+    is_running = False
+    if ssh_client.is_connected:
+        try:
+            remote_case = f"{ssh_client.remote_repo_path}/cases/{safe_name}"
+            remote_cfg = f"{ssh_client.remote_repo_path}/configs/{safe_name}.json"
+            cluster_exists = ssh_client.remote_file_exists(remote_case) or ssh_client.remote_file_exists(remote_cfg)
+            is_running = ssh_client.is_case_running(safe_name)
+        except Exception:
+            pass
+
+    return {
+        "case_name": safe_name,
+        "exists": local_exists or cluster_exists,
+        "local_exists": local_exists,
+        "cluster_exists": cluster_exists,
+        "is_running": is_running,
+    }
+
+
 @app.post("/api/stl/upload")
-async def api_stl_upload(file: UploadFile = File(...)) -> dict[str, Any]:
+async def api_stl_upload(
+    file: UploadFile = File(...),
+    override_name: Optional[str] = Form(None),
+) -> dict[str, Any]:
     """Upload an STL file to local stl/ directory and inspect its bounds."""
-    safe_name = Path(file.filename or "uploaded.stl").name
+    chosen_name = (override_name.strip() if override_name else "") or file.filename or "uploaded.stl"
+    safe_name = Path(chosen_name).name
     if not safe_name.lower().endswith(".stl"):
-        raise HTTPException(status_code=400, detail="Only .stl files are allowed")
+        safe_name = f"{safe_name}.stl"
 
     stl_dir = (PROJECT_ROOT / "stl").resolve()
     stl_dir.mkdir(exist_ok=True)

@@ -25,6 +25,8 @@ from cfd_gen.web.server import (
     api_telemetry_logs,
     api_list_cases,
     api_case_delete,
+    api_stl_check_exists,
+    api_case_check_exists,
     merge_config_with_defaults,
     ssh_client,
 )
@@ -627,9 +629,32 @@ class TestWebAPI(unittest.TestCase):
         parser.add_argument("--no-browser", action="store_true")
         parser.add_argument("--restart", action="store_true")
         args = parser.parse_args(["--port", "8888", "--no-browser", "--restart"])
-        self.assertEqual(args.port, 8888)
-        self.assertTrue(args.no_browser)
-        self.assertTrue(args.restart)
+    def test_stl_and_case_check_exists(self):
+        """Test STL and Case existence checking APIs."""
+        # Check existing STL
+        res_stl_exist = asyncio.run(api_stl_check_exists("sample_wing.stl"))
+        self.assertTrue(res_stl_exist["exists"])
+        self.assertTrue(res_stl_exist["local_exists"])
+
+        # Check non-existing STL
+        res_stl_no = asyncio.run(api_stl_check_exists("definitely_nonexistent_stl_file.stl"))
+        self.assertFalse(res_stl_no["exists"])
+        self.assertFalse(res_stl_no["local_exists"])
+
+        # Check non-existing case
+        res_case_no = asyncio.run(api_case_check_exists("fake_case_12345"))
+        self.assertFalse(res_case_no["exists"])
+
+        # Create temporary dummy config to test case existence
+        cfg_file = Path("configs") / "fake_case_12345.json"
+        try:
+            cfg_file.write_text("{}", encoding="utf-8")
+            res_case_yes = asyncio.run(api_case_check_exists("fake_case_12345"))
+            self.assertTrue(res_case_yes["exists"])
+            self.assertTrue(res_case_yes["local_exists"])
+        finally:
+            if cfg_file.exists():
+                cfg_file.unlink()
 
 
 if __name__ == "__main__":

@@ -2099,3 +2099,38 @@ body.dark-theme {
   color: #f87171;
 }
 
+.btn-warning {
+  background: #d97706;
+  border: 1px solid #b45309;
+  color: #ffffff;
+}
+
+.btn-warning:hover {
+  background: #b45309;
+  color: #ffffff;
+}
+
+.btn-danger-solid {
+  background: #dc2626;
+  border: 1px solid #b91c1c;
+  color: #ffffff;
+}
+
+.btn-danger-solid:hover {
+  background: #b91c1c;
+  color: #ffffff;
+}
+
+.alert-warning {
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #fbbf24;
+}
+
+.alert-danger {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #f87171;
+}
+
+

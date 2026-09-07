@@ -1110,16 +1110,65 @@ class CFDApp {
     let loadedCount = 0;
     for (const file of stlFiles) {
       try {
+        let targetFilename = file.name;
+
+        // Check if file already exists locally or on cluster
+        let checkRes = null;
+        try {
+          const cRes = await fetch(`/api/stl/check-exists?filename=${encodeURIComponent(file.name)}`);
+          if (cRes.ok) checkRes = await cRes.json();
+        } catch (e) {
+          console.warn('Could not check STL existence:', e);
+        }
+
+        if (checkRes && checkRes.exists) {
+          const loc = checkRes.local_exists && checkRes.cluster_exists
+            ? 'locally and on cluster'
+            : checkRes.cluster_exists ? 'on the remote cluster' : 'in the local library';
+
+          const dotIdx = file.name.lastIndexOf('.');
+          const stem = dotIdx > 0 ? file.name.slice(0, dotIdx) : file.name;
+          const ext = dotIdx > 0 ? file.name.slice(dotIdx) : '.stl';
+          const suggestedName = `${stem}_v2${ext}`;
+
+          const decision = await this.showConfirmDialog({
+            title: `⚠️ STL File Already Exists: ${file.name}`,
+            message: `A geometry file named "${file.name}" already exists ${loc}.`,
+            warning: `Overwriting will replace the surface geometry for all future simulation cases referencing this filename.`,
+            severity: 'warning',
+            allowRename: true,
+            suggestedName: suggestedName,
+            confirmText: 'Overwrite File',
+            confirmClass: 'btn-warning',
+            cancelText: 'Skip / Cancel',
+          });
+
+          if (decision.action === 'cancel') {
+            this.showToast(`Upload skipped for ${file.name}`, 'info');
+            continue;
+          }
+
+          if (decision.action === 'rename' && decision.newName) {
+            targetFilename = decision.newName;
+            if (!targetFilename.toLowerCase().endsWith('.stl')) {
+              targetFilename += '.stl';
+            }
+          }
+        }
+
         // 1. Preview in Three.js locally via ArrayBuffer without overwriting other parts
         const buffer = await file.arrayBuffer();
         if (this.viewer) {
-          this.viewer.addSTLFromArrayBuffer(buffer, file.name);
+          this.viewer.addSTLFromArrayBuffer(buffer, targetFilename);
         }
         loadedCount++;
 
         // 2. Upload to server stl/ directory
         const formData = new FormData();
         formData.append('file', file);
+        if (targetFilename !== file.name) {
+          formData.append('override_name', targetFilename);
+        }
         const res = await fetch('/api/stl/upload', {
           method: 'POST',
           body: formData,
@@ -1129,8 +1178,8 @@ class CFDApp {
           if (!this.activeConfig.stl_files) this.activeConfig.stl_files = [];
           // Filter out generic placeholder if present
           this.activeConfig.stl_files = this.activeConfig.stl_files.filter((f) => f !== 'geometry.stl');
-          if (!this.activeConfig.stl_files.includes(file.name)) {
-            this.activeConfig.stl_files.push(file.name);
+          if (!this.activeConfig.stl_files.includes(targetFilename)) {
+            this.activeConfig.stl_files.push(targetFilename);
           }
         }
       } catch (err) {
@@ -1146,7 +1195,9 @@ class CFDApp {
     this.renderActiveSTLChips(this.activeConfig.stl_files);
     this.syncConfigToJsonDrawer();
     await this.updateDomainBoxVisualization(true);
-    this.showToast(`Loaded ${loadedCount} STL ${loadedCount === 1 ? 'geometry' : 'geometries'} into 3D viewer`, 'success');
+    if (loadedCount > 0) {
+      this.showToast(`Loaded ${loadedCount} STL ${loadedCount === 1 ? 'geometry' : 'geometries'} into 3D viewer`, 'success');
+    }
   }
 
   renderActiveSTLChips(stlList) {
@@ -1299,6 +1350,33 @@ class CFDApp {
 
   async generateCaseLocally() {
     this.buildConfigFromVisualForm();
+    const caseName = this.activeConfig.case_name || 'my_case';
+
+    // Check if case already exists locally or on cluster
+    const check = await this.checkCaseNameExists(caseName);
+    if (check && check.exists) {
+      const decision = await this.showConfirmDialog({
+        title: `⚠️ Case Already Exists: "${caseName}"`,
+        message: `A case named "${caseName}" was found in your local cases/ directory or configs.`,
+        warning: `Generating locally will overwrite the existing case directory and system dictionaries in cases/${caseName}/.`,
+        severity: 'warning',
+        allowRename: false,
+        confirmText: 'Overwrite Case',
+        confirmClass: 'btn-warning',
+        cancelText: 'Cancel & Change Name',
+      });
+
+      if (decision.action === 'cancel') {
+        this.showToast('Generation cancelled. Please update Case Name.', 'info');
+        const caseInput = document.getElementById('cfg-case-name');
+        if (caseInput) {
+          caseInput.focus();
+          caseInput.select();
+        }
+        return;
+      }
+    }
+
     const btnGenLocal = document.getElementById('btn-generate-local');
     if (btnGenLocal) {
       btnGenLocal.disabled = true;
@@ -1337,6 +1415,45 @@ class CFDApp {
       this.showToast('Please connect to the cluster via SSH first!', 'error');
       this.openSSHModal();
       return;
+    }
+
+    const caseName = this.activeConfig.case_name || 'my_case';
+
+    // Check if case already exists locally or on cluster
+    const check = await this.checkCaseNameExists(caseName);
+    if (check && check.exists) {
+      let warningMsg = `A case named "${caseName}" already exists. Overwriting will replace existing case dictionaries, mesh setup, and simulation logs.`;
+      let severity = 'warning';
+      let confirmBtnText = 'Overwrite & Submit';
+      let confirmBtnClass = 'btn-warning';
+
+      if (check.is_running) {
+        warningMsg = `🚨 CRITICAL: Case "${caseName}" is currently RUNNING or PENDING on the SLURM cluster! Overwriting now may crash or corrupt the active simulation run.`;
+        severity = 'danger';
+        confirmBtnText = 'Force Overwrite';
+        confirmBtnClass = 'btn-danger-solid';
+      }
+
+      const decision = await this.showConfirmDialog({
+        title: `⚠️ Case Already Exists: "${caseName}"`,
+        message: `Case "${caseName}" was found ${check.cluster_exists && check.local_exists ? 'both locally and on the cluster' : check.cluster_exists ? 'on the remote cluster' : 'in local storage'}.`,
+        warning: warningMsg,
+        severity: severity,
+        allowRename: false,
+        confirmText: confirmBtnText,
+        confirmClass: confirmBtnClass,
+        cancelText: 'Cancel & Change Name',
+      });
+
+      if (decision.action === 'cancel') {
+        this.showToast('Submission cancelled. Please update Case Name.', 'info');
+        const caseInput = document.getElementById('cfg-case-name');
+        if (caseInput) {
+          caseInput.focus();
+          caseInput.select();
+        }
+        return;
+      }
     }
 
     const btnSubmit = document.getElementById('btn-submit-case');
@@ -1382,6 +1499,139 @@ class CFDApp {
         btnSubmit.textContent = 'Launch Simulation on Cluster';
       }
     }
+  }
+
+  // -------------------------------------------------------------
+  // Reusable Confirmation Modal
+  // -------------------------------------------------------------
+  showConfirmDialog({
+    title = '⚠️ Confirmation Required',
+    message = '',
+    warning = '',
+    severity = 'warning',
+    allowRename = false,
+    suggestedName = '',
+    confirmText = 'Overwrite',
+    confirmClass = 'btn-warning',
+    cancelText = 'Cancel',
+  } = {}) {
+    return new Promise((resolve) => {
+      const modal = document.getElementById('confirm-modal');
+      const titleEl = document.getElementById('confirm-modal-title');
+      const msgEl = document.getElementById('confirm-modal-message');
+      const alertEl = document.getElementById('confirm-modal-alert');
+      const renameBox = document.getElementById('confirm-modal-rename-container');
+      const renameInput = document.getElementById('confirm-modal-new-name');
+      const renameBtn = document.getElementById('btn-confirm-rename');
+      const proceedBtn = document.getElementById('btn-confirm-proceed');
+      const cancelBtn = document.getElementById('btn-confirm-cancel');
+      const closeBtn = document.getElementById('btn-close-confirm-modal');
+      const backdrop = document.getElementById('confirm-modal-backdrop');
+
+      if (!modal) {
+        const res = window.confirm(`${title}\n\n${warning ? warning + '\n\n' : ''}${message}`);
+        resolve({ action: res ? 'overwrite' : 'cancel' });
+        return;
+      }
+
+      if (titleEl) titleEl.textContent = title;
+      if (msgEl) msgEl.textContent = message;
+
+      if (alertEl) {
+        if (warning) {
+          alertEl.textContent = warning;
+          alertEl.className = `alert alert-${severity}`;
+          alertEl.style.display = 'block';
+        } else {
+          alertEl.style.display = 'none';
+        }
+      }
+
+      if (renameBox) {
+        if (allowRename) {
+          renameBox.style.display = 'block';
+          if (renameInput) renameInput.value = suggestedName || '';
+        } else {
+          renameBox.style.display = 'none';
+        }
+      }
+
+      if (proceedBtn) {
+        proceedBtn.textContent = confirmText;
+        proceedBtn.className = `btn ${confirmClass}`;
+      }
+      if (cancelBtn) {
+        cancelBtn.textContent = cancelText;
+      }
+
+      const cleanup = () => {
+        modal.style.display = 'none';
+        if (proceedBtn) proceedBtn.onclick = null;
+        if (cancelBtn) cancelBtn.onclick = null;
+        if (closeBtn) closeBtn.onclick = null;
+        if (backdrop) backdrop.onclick = null;
+        if (renameBtn) renameBtn.onclick = null;
+      };
+
+      if (proceedBtn) {
+        proceedBtn.onclick = () => {
+          cleanup();
+          resolve({ action: 'overwrite' });
+        };
+      }
+
+      if (allowRename && renameBtn) {
+        renameBtn.onclick = () => {
+          const val = renameInput ? renameInput.value.trim() : '';
+          if (!val) {
+            this.showToast('Please enter a valid new name', 'warning');
+            return;
+          }
+          cleanup();
+          resolve({ action: 'rename', newName: val });
+        };
+      }
+
+      if (cancelBtn) {
+        cancelBtn.onclick = () => {
+          cleanup();
+          resolve({ action: 'cancel' });
+        };
+      }
+
+      if (closeBtn) {
+        closeBtn.onclick = () => {
+          cleanup();
+          resolve({ action: 'cancel' });
+        };
+      }
+
+      if (backdrop) {
+        backdrop.onclick = () => {
+          cleanup();
+          resolve({ action: 'cancel' });
+        };
+      }
+
+      modal.style.display = 'flex';
+      if (allowRename && renameInput) {
+        setTimeout(() => {
+          renameInput.focus();
+          renameInput.select();
+        }, 80);
+      }
+    });
+  }
+
+  async checkCaseNameExists(caseName) {
+    if (!caseName) return null;
+    try {
+      const res = await fetch(`/api/case/check-exists?case_name=${encodeURIComponent(caseName)}`);
+      if (res.ok) return await res.json();
+    } catch (err) {
+      console.warn('Could not check case existence:', err);
+    }
+    return null;
   }
 
   // -------------------------------------------------------------

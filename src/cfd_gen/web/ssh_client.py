@@ -269,6 +269,34 @@ class ClusterSSHClient:
                 })
         return jobs
 
+    def remote_file_exists(self, remote_path: str) -> bool:
+        """Check if a remote file or directory exists via SFTP."""
+        if not self.is_connected:
+            return False
+        try:
+            sftp = self.get_sftp()
+            sftp.stat(remote_path.replace("\\", "/"))
+            return True
+        except (IOError, OSError):
+            return False
+
+    def is_case_running(self, case_name: str) -> bool:
+        """Check if a case currently has an active (RUNNING or PENDING) SLURM job."""
+        if not self.is_connected:
+            return False
+        try:
+            jobs = self.get_slurm_queue()
+            for job in jobs:
+                # Job name or case_name matching
+                jname = job.get("name", "")
+                if jname == case_name or jname == f"cfd_{case_name}" or case_name in jname:
+                    state = job.get("state", "").upper()
+                    if state in ("R", "RUNNING", "PD", "PENDING", "CF", "CONFIGURING"):
+                        return True
+        except Exception:
+            pass
+        return False
+
     def submit_job(self, case_name: str) -> dict[str, Any]:
         """Submit sbatch run.sh for a case on the cluster."""
         if not re.match(r"^[A-Za-z0-9_-]+$", case_name):
