@@ -225,6 +225,16 @@ if [ -f system/controlDict ]; then
     sed -i 's/stopAt.*writeNow/stopAt          endTime/' system/controlDict
 fi
 
+# Configure Open MPI to use node-local storage for shared memory backing files
+if [ -d "/dev/shm" ] && [ -w "/dev/shm" ]; then
+    export OMPI_MCA_orte_tmpdir_base="/dev/shm"
+    export OMPI_MCA_pmix_server_tmpdir="/dev/shm"
+elif [ -d "/tmp" ] && [ -w "/tmp" ]; then
+    export OMPI_MCA_orte_tmpdir_base="/tmp"
+    export OMPI_MCA_pmix_server_tmpdir="/tmp"
+fi
+export OMPI_MCA_shmem_mmap_enable_nfs_warning=0
+
 # Mesh
 runApplication surfaceFeatureExtract
 runApplication blockMesh
@@ -332,11 +342,24 @@ SOLVER_PHASE=0
 RECONSTRUCTION_ATTEMPTED=0
 PRESERVE_PROCESSORS=0
 
-# Robustly create a temporary directory prioritizing $TMPDIR (Cluster scratch space), then /dev/shm, then /tmp
+# Detect if $TMPDIR is on a network filesystem (e.g. Lustre / NFS / GPFS)
+IS_NETWORK_TMP=0
 if [ -n "$TMPDIR" ] && [ -w "$TMPDIR" ]; then
+    FSTYPE=$(stat -f -c %T "$TMPDIR" 2>/dev/null || df -T "$TMPDIR" 2>/dev/null | awk 'NR==2 {{print $2}}')
+    case "$FSTYPE" in
+        *nfs*|*lustre*|*gpfs*|*cifs*|*smb*) IS_NETWORK_TMP=1 ;;
+    esac
+fi
+
+# Create a temporary execution directory, prioritizing fast node-local storage
+if [ -n "$TMPDIR" ] && [ -w "$TMPDIR" ] && [ "$IS_NETWORK_TMP" -eq 0 ]; then
     RAM_DIR=$(mktemp -d -p "$TMPDIR" cfd_${{SLURM_JOB_ID:-local}}_XXXXXX)
 elif [ -d "/dev/shm" ] && [ -w "/dev/shm" ]; then
     RAM_DIR=$(mktemp -d -p /dev/shm cfd_${{SLURM_JOB_ID:-local}}_XXXXXX)
+elif [ -d "/tmp" ] && [ -w "/tmp" ]; then
+    RAM_DIR=$(mktemp -d -p /tmp cfd_${{SLURM_JOB_ID:-local}}_XXXXXX)
+elif [ -n "$TMPDIR" ] && [ -w "$TMPDIR" ]; then
+    RAM_DIR=$(mktemp -d -p "$TMPDIR" cfd_${{SLURM_JOB_ID:-local}}_XXXXXX)
 else
     RAM_DIR=$(mktemp -d -t cfd_${{SLURM_JOB_ID:-local}}_XXXXXX)
 fi
@@ -461,6 +484,17 @@ module purge
 if [ -n "${{FOAM_INST_DIR:-}}" ]; then
     source ${{FOAM_INST_DIR}}/etc/bashrc 2>/dev/null || true
 fi
+
+# Configure Open MPI to use node-local storage (/dev/shm or /tmp) for shared memory
+# backing files, preventing extreme lock contention and latency on network scratch (NFS/Lustre)
+if [ -d "/dev/shm" ] && [ -w "/dev/shm" ]; then
+    export OMPI_MCA_orte_tmpdir_base="/dev/shm"
+    export OMPI_MCA_pmix_server_tmpdir="/dev/shm"
+elif [ -d "/tmp" ] && [ -w "/tmp" ]; then
+    export OMPI_MCA_orte_tmpdir_base="/tmp"
+    export OMPI_MCA_pmix_server_tmpdir="/tmp"
+fi
+export OMPI_MCA_shmem_mmap_enable_nfs_warning=0
 
 set -e
 {MONITOR_CLEANUP}
