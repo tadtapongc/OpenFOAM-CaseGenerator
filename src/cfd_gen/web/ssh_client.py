@@ -141,7 +141,7 @@ class ClusterSSHClient:
         if not self.is_connected:
             raise ConnectionError("Not connected to cluster SSH server.")
 
-        stdin, stdout, stderr = self._client.exec_command(command, timeout=timeout)
+        _stdin, stdout, stderr = self._client.exec_command(command, timeout=timeout)
         exit_code = stdout.channel.recv_exit_status()
         out_str = stdout.read().decode("utf-8", errors="replace")
         err_str = stderr.read().decode("utf-8", errors="replace")
@@ -160,12 +160,11 @@ class ClusterSSHClient:
             f"which python3 >/dev/null 2>&1 && echo 'PYTHON='$(which python3) || echo 'PYTHON=missing' && "
             f"[ -d {quoted_repo} ] && echo 'REPO=exists' || echo 'REPO=missing'"
         )
-        code, out, err = self.run_command(cmd, timeout=15)
+        _, out, _ = self.run_command(cmd, timeout=15)
         lines = dict(item.split("=", 1) for item in out.strip().splitlines() if "=" in item)
 
         repo_exists = lines.get("REPO") == "exists"
         slurm_ok = lines.get("SLURM") == "available"
-        python_ok = lines.get("PYTHON") != "missing"
 
         return {
             "connected": True,
@@ -224,7 +223,7 @@ class ClusterSSHClient:
             safe_lines = max(1, min(int(max_lines), 2000))
             quoted_path = shlex.quote(remote_path)
             cmd = f"tail -n {safe_lines} {quoted_path}"
-            code, out, err = self.run_command(cmd, timeout=10)
+            code, out, _ = self.run_command(cmd, timeout=10)
             if code == 0:
                 return out
             return ""
@@ -246,7 +245,7 @@ class ClusterSSHClient:
 
         quoted_user = shlex.quote(user)
         cmd = f"squeue -u {quoted_user} --format='%i|%j|%P|%T|%M|%l|%D|%R' --noheader"
-        code, out, err = self.run_command(cmd, timeout=15)
+        code, out, _ = self.run_command(cmd, timeout=15)
         if code != 0:
             return []
 
@@ -330,7 +329,7 @@ class ClusterSSHClient:
             return {"success": False, "job_id": job_id_str, "error": "Job ID must be numeric"}
 
         cmd = f"scancel {shlex.quote(job_id_str)}"
-        code, out, err = self.run_command(cmd, timeout=15)
+        code, _, err = self.run_command(cmd, timeout=15)
         return {
             "success": code == 0,
             "job_id": job_id_str,
@@ -345,7 +344,7 @@ class ClusterSSHClient:
             f"[ -d {quoted_dir} ] && "
             f"ls -l --time-style=+%Y-%m-%d\\ %H:%M:%S {quoted_dir} || echo ''"
         )
-        code, out, err = self.run_command(cmd, timeout=15)
+        code, out, _ = self.run_command(cmd, timeout=15)
         cases: list[dict[str, Any]] = []
         if code != 0 or not out.strip():
             return cases

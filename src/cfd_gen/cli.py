@@ -8,7 +8,6 @@ import logging
 import shutil
 import sys
 from pathlib import Path
-from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -59,8 +58,6 @@ Examples:
 
 def _do_init(project_dir: Path) -> None:
     """Create starter project structure."""
-    from cfd_gen.config import DEFAULT_CONFIG
-
     cfg_dir = project_dir / "configs"
     cfg_dir.mkdir(exist_ok=True)
 
@@ -88,11 +85,11 @@ def _do_init(project_dir: Path) -> None:
     (project_dir / "stl").mkdir(exist_ok=True)
     (project_dir / "cases").mkdir(exist_ok=True)
 
-    print(f"  ✓ Created: stl/ and cases/")
-    print(f"\n  Next steps:")
-    print(f"    1. Place STL files in stl/")
-    print(f"    2. Edit configs/config.json")
-    print(f"    3. python setup_case.py configs/config.json")
+    print("  ✓ Created: stl/ and cases/")
+    print("\n  Next steps:")
+    print("    1. Place STL files in stl/")
+    print("    2. Edit configs/config.json")
+    print("    3. python setup_case.py configs/config.json")
 
 
 def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> None:
@@ -112,7 +109,7 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
         vec_str,
         velocity_vector,
     )
-    from cfd_gen.stl_utils import copy_stl, stl_bounds, stl_info
+    from cfd_gen.stl_utils import copy_stl, stl_info
 
     if not cfg_path.exists():
         sys.exit(f"ERROR: {cfg_path} not found")
@@ -257,14 +254,14 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
     mesh = cfg["mesh_params"]
     end_time = cfg["solver"]["end_time"]
 
-    print(f"\n  Geometry bounds:")
+    print("\n  Geometry bounds:")
     print(f"    min: ({all_min[0]:.3f}, {all_min[1]:.3f}, {all_min[2]:.3f})")
     print(f"    max: ({all_max[0]:.3f}, {all_max[1]:.3f}, {all_max[2]:.3f})")
-    print(f"  Domain box:")
+    print("  Domain box:")
     box = cfg["domain_box"]
     print(f"    min: ({box['min'][0]:.3f}, {box['min'][1]:.3f}, {box['min'][2]:.3f})")
     print(f"    max: ({box['max'][0]:.3f}, {box['max'][1]:.3f}, {box['max'][2]:.3f})")
-    print(f"  Mesh:")
+    print("  Mesh:")
     print(f"    Base cell:      {mesh['base_cell_size']} m")
     print(f"    Surface level:  {mesh['surface_level']}")
     print(f"    Edge level:     {mesh['edge_level']}")
@@ -300,7 +297,7 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
         (case_dir / d).mkdir(parents=True, exist_ok=True)
 
     # Copy STL files
-    print(f"\n  STL files:")
+    print("\n  STL files:")
     tri_dir = case_dir / "constant" / "triSurface"
     for stem, path in stl_pairs:
         try:

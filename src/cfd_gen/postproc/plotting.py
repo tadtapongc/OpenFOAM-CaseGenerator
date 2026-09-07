@@ -57,7 +57,7 @@ def plot_forces(
     except ImportError:
         sys.exit("ERROR: pip install matplotlib (or: pip install cfd-gen[plot])")
 
-    fig, axes = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
+    _, axes = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
 
     axes[0].plot(times, drags, "b-", linewidth=0.8)
     axes[0].set_ylabel(f"Drag [{drag_axis}] (N)")
@@ -91,7 +91,6 @@ def live_monitor(
         sys.exit("ERROR: pip install matplotlib (or: pip install cfd-gen[plot])")
 
     from cfd_gen.postproc.forces import (
-        axis_index_sign,
         check_convergence,
         find_force_files,
         load_axis_config,
@@ -141,15 +140,6 @@ def live_monitor(
     btn_next.on_clicked(go_next)
     fig.canvas.mpl_connect("key_press_event", on_key)
 
-    def _stats_text(label: str, stats: dict, unit: str = "N") -> str:
-        """Format stats as multi-line text."""
-        return (
-            f"Avg (last 200): {stats['avg']:.2f} {unit}\n"
-            f"Last:           {stats['last']:.2f} {unit}\n"
-            f"Variation:      ±{stats['pct']:.2f}%\n"
-            f"Range:          [{stats['min']:.2f}, {stats['max']:.2f}] {unit}"
-        )
-
     force_cache: dict[str, Any] = {"time": 0.0, "data": None}
 
     def get_forces() -> tuple[list[float], list[float], list[float]] | None:
@@ -186,7 +176,6 @@ def live_monitor(
             ax.grid(True, alpha=0.3)
             colors = plt.cm.tab10.colors
             ci = 0
-            legend_labels = []
             for key in headers:
                 if "initial" in key.lower() and key != "Time":
                     vals = data.get(key, [])
@@ -280,7 +269,7 @@ def live_monitor(
             d_stats = _force_stats(drags)
             f_stats = _force_stats(dfs)
             ld = abs(f_stats["avg"] / d_stats["avg"]) if d_stats["avg"] != 0 else 0
-            conv, dp, fp, da, fa = check_convergence(drags, dfs)
+            conv, *_ = check_convergence(drags, dfs)
 
             ax.axis("off")
             summary = (

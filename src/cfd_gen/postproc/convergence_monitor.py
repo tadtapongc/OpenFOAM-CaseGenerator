@@ -13,7 +13,6 @@ The solver must have `runTimeModifiable true` and `writeAtEnd true` in controlDi
 from __future__ import annotations
 
 import argparse
-import json
 import math
 import sys
 import time
@@ -86,7 +85,7 @@ def monitor(
         config_path, case_dir=case_dir
     )
 
-    print(f"  Convergence monitor started")
+    print("  Convergence monitor started")
     print(f"    Threshold: ±{threshold}% | Window: {window} iters | Min: {min_iters} iters")
     print(f"    Check interval: {interval}s")
     print(f"    Drag axis: {drag_axis} | Downforce axis: {df_axis}")
@@ -124,11 +123,11 @@ def monitor(
             print(f"    Downforce: {f_avg:.3f} N (±{f_pct:.3f}%)")
             print(f"    L/D:       {abs(f_avg / d_avg):.3f}" if d_avg != 0 else "")
             print()
-            print(f"  → Triggering solver stop (writeNow)...")
+            print("  → Triggering solver stop (writeNow)...")
 
             _write_stop_trigger(case_dir)
 
-            print(f"  → Done. Solver will write current state and exit.")
+            print("  → Done. Solver will write current state and exit.")
             return True
 
 

@@ -21,7 +21,7 @@ from cfd_gen.postproc.forces import check_convergence, find_force_files, read_fo
 from cfd_gen.postproc.plotting import _force_stats, _rolling_average
 from cfd_gen.postproc.residuals import read_residuals
 from cfd_gen.postproc.convergence_monitor import monitor
-from cfd_gen.stl_utils import copy_stl, read_stl, stl_bounds, stl_info, write_stl
+from cfd_gen.stl_utils import copy_stl, stl_bounds, stl_info, write_stl
 from cfd_gen.writers.scripts import _convergence_monitor_script
 
 
@@ -258,7 +258,7 @@ class ProjectTest(unittest.TestCase):
 
     def test_plotting_headless_manager_none(self):
         try:
-            import matplotlib
+            import matplotlib  # noqa: F401
         except ImportError:
             self.skipTest("matplotlib not installed")
         from cfd_gen.postproc.plotting import live_monitor
@@ -306,7 +306,7 @@ class ProjectTest(unittest.TestCase):
             "0.20000000 (0 -15 -25) (0 0 0) (0 0 0)\n"
             "0.30000000 (0 -15 -25) (0 0 0) (0 0 0)\n"
         )
-        times, drags, dfs = read_forces([f, f_restart], 2, -1, 1, -1)
+        times, drags, _ = read_forces([f, f_restart], 2, -1, 1, -1)
         self.assertEqual(len(times), 3)
         self.assertEqual(times, [0.1, 0.2, 0.3])
         self.assertEqual(drags, [20.0, 25.0, 25.0])

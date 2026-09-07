@@ -7,9 +7,8 @@ import math
 import re
 import statistics
 from pathlib import Path
-from typing import Any
 
-from cfd_gen.geometry import AXIS_MAP, axis_index_sign
+from cfd_gen.geometry import AXIS_MAP as AXIS_MAP, axis_index_sign
 
 
 def load_axis_config(
@@ -243,22 +242,22 @@ def print_summary(
     print(f"\n{'='*65}")
     print(f"  FORCE RESULTS ({len(times)} iterations)")
     if is_symmetry:
-        print(f"  ℹ  SYMMETRY DETECTED: Showing Half-Model and Full-Car (x2)")
+        print("  ℹ  SYMMETRY DETECTED: Showing Half-Model and Full-Car (x2)")
     print(f"{'='*65}")
 
     if is_symmetry:
-        print(f"  [Half-Model Simulated]")
+        print("  [Half-Model Simulated]")
         print(f"    Drag ({drag_axis}):        {drags[-1]:>10.3f} N")
         print(f"    Downforce ({df_axis}):    {downforces[-1]:>10.3f} N")
         if drags[-1] != 0:
             print(f"    L/D:                {abs(downforces[-1]/drags[-1]):>10.3f}")
-        print(f"\n  [Full-Car Projected (x2)]")
+        print("\n  [Full-Car Projected (x2)]")
         print(f"    Drag ({drag_axis}):        {drags[-1] * 2:>10.3f} N")
         print(f"    Downforce ({df_axis}):    {downforces[-1] * 2:>10.3f} N")
         if drags[-1] != 0:
             print(f"    L/D:                {abs(downforces[-1]/drags[-1]):>10.3f}")
         print(f"{'-'*65}")
-        print(f"  Averaged (last 200 iterations):")
+        print("  Averaged (last 200 iterations):")
         print(f"    Half-Model:  Drag = {d_avg:>9.3f} N (±{d_pct:.2f}%) | DF = {f_avg:>9.3f} N (±{f_pct:.2f}%)")
         print(f"    Full-Car:    Drag = {d_avg * 2:>9.3f} N (±{d_pct:.2f}%) | DF = {f_avg * 2:>9.3f} N (±{f_pct:.2f}%)")
         print(f"    L/D:         {ld:>9.3f}")
@@ -268,7 +267,7 @@ def print_summary(
         if drags[-1] != 0:
             print(f"  L/D:                {abs(downforces[-1]/drags[-1]):>10.3f}")
         print(f"{'-'*65}")
-        print(f"  Averaged (last 200 iterations):")
+        print("  Averaged (last 200 iterations):")
         print(f"    Drag:         {d_avg:>10.3f} N  (±{d_pct:.3f}%)")
         print(f"    Downforce:    {f_avg:>10.3f} N  (±{f_pct:.3f}%)")
         print(f"    L/D:          {ld:>10.3f}")

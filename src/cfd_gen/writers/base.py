@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 
 HEADER = """\
 /*--------------------------------*- C++ -*----------------------------------*\\
@@ -38,11 +37,6 @@ def foam_header(obj: str) -> str:
     """Generate OpenFOAM file header for a given object name."""
     return HEADER.format(cls=FIELD_CLASS.get(obj, "dictionary"), obj=obj)
 
-
-def write_foam_file(path: Path, obj: str, content: str) -> None:
-    """Write a complete OpenFOAM file with header and footer."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(foam_header(obj) + content + FOOTER, encoding="utf-8")
 
 
 def bool_str(val: bool) -> str:

@@ -367,7 +367,6 @@ body.dark-theme {
   flex-direction: column;
 }
 
-.viewer-panel.expanded,
 .viewer-panel.maximized {
   position: absolute;
   top: 0;
@@ -1679,15 +1678,18 @@ body.dark-theme {
   to { opacity: 1; transform: translateY(0); }
 }
 
-.toast.toast-success {
+.toast.toast-success,
+.toast.success {
   border-left: 3px solid var(--accent-success);
 }
 
-.toast.toast-error {
+.toast.toast-error,
+.toast.error {
   border-left: 3px solid var(--accent-danger);
 }
 
-.toast.toast-info {
+.toast.toast-info,
+.toast.info {
   border-left: 3px solid var(--accent-primary);
 }
 

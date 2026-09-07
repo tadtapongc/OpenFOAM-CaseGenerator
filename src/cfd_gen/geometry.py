@@ -6,7 +6,6 @@ No geometry-specific tuning required.
 
 from __future__ import annotations
 
-import math
 from typing import Any
 
 from cfd_gen.stl_utils import BBox

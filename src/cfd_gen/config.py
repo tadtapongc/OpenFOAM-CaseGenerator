@@ -392,7 +392,7 @@ def validate(cfg: dict[str, Any], project_dir: Path) -> tuple[list[str], list[st
         positive("mesh_params", key, integer=True, allow_zero=True)
     positive("layers", "n_layers", integer=True, allow_zero=True)
     positive("solver", "purge_write", integer=True, allow_zero=True)
-    for key, value in cfg.get("domain", {}).items():
+    for key in cfg.get("domain", {}):
         if key.endswith("_factor"):
             positive("domain", key)
     for key in ("ground_plane", "ground_clearance", "symmetry_plane", "centerline"):

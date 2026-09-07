@@ -629,6 +629,9 @@ class TestWebAPI(unittest.TestCase):
         parser.add_argument("--no-browser", action="store_true")
         parser.add_argument("--restart", action="store_true")
         args = parser.parse_args(["--port", "8888", "--no-browser", "--restart"])
+        self.assertEqual(args.port, 8888)
+        self.assertTrue(args.no_browser)
+        self.assertTrue(args.restart)
     def test_stl_and_case_check_exists(self):
         """Test STL and Case existence checking APIs."""
         # Check existing STL

@@ -1007,13 +1007,6 @@ class CFDApp {
     this.showToast(`Auto Symmetry Plane set to center (${axisName} = ${center} m)`, 'success');
   }
 
-  zeroSymmetryPlane() {
-    this.setVal('cfg-symmetry-plane', 0.0);
-    this.activeConfig.symmetry_plane = 0.0;
-    this.buildConfigFromVisualForm();
-    this.showToast('Symmetry Plane set to CAD Origin (0.0 m)', 'info');
-  }
-
   async updateDomainBoxVisualization(autoFit = false) {
     if (!this.viewer) return;
     try {
@@ -1063,7 +1056,6 @@ class CFDApp {
     }
 
     this.viewer.clearSTLs();
-    let loadedCount = 0;
 
     for (const filename of stlsToLoad) {
       try {
@@ -1071,7 +1063,6 @@ class CFDApp {
         if (!res.ok) continue;
         const buffer = await res.arrayBuffer();
         this.viewer.addSTLFromArrayBuffer(buffer, filename);
-        loadedCount++;
       } catch (err) {
         console.warn(`Could not load STL '${filename}' from server:`, err);
       }
@@ -1079,20 +1070,6 @@ class CFDApp {
 
     this.currentSTLBounds = this.viewer.getCombinedBoundingBox();
     await this.updateDomainBoxVisualization(autoFit);
-  }
-
-  async loadSTLGeometryFromServer(filename) {
-    if (!this.viewer || !filename) return;
-    try {
-      const res = await fetch(`/api/stl/file/${encodeURIComponent(filename)}`);
-      if (!res.ok) return;
-      const buffer = await res.arrayBuffer();
-      this.viewer.addSTLFromArrayBuffer(buffer, filename);
-      this.currentSTLBounds = this.viewer.getCombinedBoundingBox();
-      await this.updateDomainBoxVisualization(false);
-    } catch (err) {
-      console.warn('Could not auto-load STL file geometry:', err);
-    }
   }
 
   async handleSTLFiles(files) {
@@ -1216,7 +1193,7 @@ class CFDApp {
       chip.innerHTML = `
         <span class="stl-chip-dot" style="background: ${color}; width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px;"></span>
         <span>${filename}</span>
-        <span class="btn-remove" title="Remove">&times;</span>
+        <span class="stl-chip-remove btn-remove" title="Remove">&times;</span>
       `;
 
       // Clicking chip highlights part in 3D viewer
@@ -1633,7 +1610,6 @@ class CFDApp {
   // SSH Cluster Connection Modal
   // -------------------------------------------------------------
   bindSSHModal() {
-    const modal = document.getElementById('ssh-modal');
     const openBtn = document.getElementById('btn-open-ssh-modal');
     const closeBtn = document.getElementById('btn-close-ssh-modal');
     const cancelBtn = document.getElementById('btn-cancel-ssh');

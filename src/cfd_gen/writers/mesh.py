@@ -12,7 +12,6 @@ from cfd_gen.geometry import (
     face_assignments,
     face_role,
     flow_axis_index_sign,
-    parse_axis,
     up_axis_index,
 )
 from cfd_gen.writers.base import FOOTER, bool_str, foam_header
@@ -129,7 +128,6 @@ def write_snappy_hex_mesh_dict(cfg: dict[str, Any], case_dir: Path) -> None:
     layers = cfg["layers"]
     quality = cfg["mesh_quality"]
     relaxed = quality.get("relaxed", {})
-    feat = cfg["feature_extract"]
 
     surface_level = mesh["surface_level"]
     edge_level = mesh["edge_level"]

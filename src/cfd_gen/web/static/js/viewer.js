@@ -400,21 +400,6 @@ class STLViewer {
     }, 500);
   }
 
-  loadSTLFromArrayBuffer(buffer, filename = 'geometry.stl', clearExisting = false) {
-    if (clearExisting) {
-      this.clearSTLs();
-    }
-    const info = this.addSTLFromArrayBuffer(buffer, filename);
-    if (info) {
-      if (this.domainMin && this.domainMax) {
-        this.fitView('domain');
-      } else {
-        this.fitView('model');
-      }
-    }
-    return info;
-  }
-
   fitView(target = 'domain') {
     this.currentFocusTarget = target;
     const fov = this.camera.fov * (Math.PI / 180);

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import io
 import json
 import logging
 import math
@@ -20,18 +19,15 @@ from typing import Any, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from cfd_gen.config import DEFAULT_CONFIG, deep_merge, find_stl, load_config, validate
+from cfd_gen.config import DEFAULT_CONFIG, deep_merge, find_stl, validate
 from cfd_gen.geometry import (
     FIDELITY_PRESETS,
     compute_domain_box,
-    compute_mesh_params,
-    face_assignments,
     flow_axis_index_sign,
-    parse_axis,
     up_axis_index,
 )
 from cfd_gen.postproc.forces import (
@@ -1330,7 +1326,7 @@ def main() -> None:
         if is_cfd_studio:
             old_pid = get_pid_on_port(target_port)
             print(f"[*] Found existing CFD Studio running on port {target_port} (PID {old_pid or 'unknown'}).")
-            print(f"[*] Restarting server to ensure latest code is active...")
+            print("[*] Restarting server to ensure latest code is active...")
             if old_pid and old_pid != os.getpid():
                 kill_process_tree(old_pid)
                 time.sleep(1.0)
