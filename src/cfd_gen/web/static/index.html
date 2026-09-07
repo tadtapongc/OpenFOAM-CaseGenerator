@@ -498,52 +498,175 @@
               <div class="form-grid">
                 
                 <div class="form-group col-span-2">
-                  <label class="switch-control">
-                    <input type="checkbox" id="chk-enable-overrides">
-                    <span class="switch-slider"></span>
-                    <span class="switch-label">Enable Manual Dictionary Overrides</span>
-                  </label>
-                  <span class="field-hint">Overrides are commented out by default. Standard presets automatically calculate optimal mesh levels and numerical schemes.</span>
+                  <div class="overrides-banner">
+                    <div class="overrides-banner-content">
+                      <span class="overrides-banner-title">Selective Dictionary Overrides</span>
+                      <span class="overrides-banner-desc">Leave any field blank to follow the selected fidelity preset &amp; universal defaults. Values entered here selectively override presets (matching <code>configs/config.json</code>).</span>
+                    </div>
+                    <button type="button" class="btn btn-outline btn-xs" id="btn-clear-all-overrides" title="Reset all overrides to blank / preset defaults">Clear All Overrides</button>
+                  </div>
                 </div>
 
-                <div class="alert alert-info col-span-2" id="overrides-disabled-notice">
-                  <strong>Built-in Presets Active:</strong> Numerical schemes, turbulence models, and mesh refinement are driven by the selected fidelity preset.
-                </div>
-
-                <!-- Mesh Params Overrides -->
-                <div id="overrides-controls-container" class="col-span-2 form-grid" style="display: none;">
-                  <div class="form-group col-span-2">
-                    <h4 class="section-subtitle">Mesh Parameter Overrides</h4>
-                    <span class="field-hint">Custom cell refinement levels overriding fidelity preset defaults.</span>
+                <!-- Comprehensive Overrides Container (Always Open) -->
+                <div id="overrides-controls-container" class="col-span-2 form-grid">
+                  
+                  <!-- 1. Mesh Params Overrides -->
+                  <div class="form-group col-span-2 overrides-section-header">
+                    <h4 class="section-subtitle">1. Mesh Parameter Overrides</h4>
+                    <span class="field-hint">Custom cell refinement levels overriding fidelity presets. Leave empty to use active fidelity preset.</span>
                   </div>
 
                   <div class="form-group">
                     <label for="cfg-override-basecell">Base Cell Size (m)</label>
-                    <input type="number" id="cfg-override-basecell" class="input" step="0.01" value="0.10">
+                    <input type="number" id="cfg-override-basecell" class="input" step="0.01" placeholder="Auto / Preset (0.10)">
+                    <span class="field-hint">Background hex cell size</span>
                   </div>
 
                   <div class="form-group">
                     <label>Surface Refinement Levels [min, max]</label>
                     <div class="dual-input-row">
-                      <input type="number" id="cfg-override-surf-min" class="input" value="4" min="1" max="10">
-                      <input type="number" id="cfg-override-surf-max" class="input" value="5" min="1" max="10">
+                      <input type="number" id="cfg-override-surf-min" class="input" min="1" max="10" placeholder="Min (4)">
+                      <input type="number" id="cfg-override-surf-max" class="input" min="1" max="10" placeholder="Max (5)">
                     </div>
+                    <span class="field-hint">Min and max octree surface refinement</span>
                   </div>
 
                   <div class="form-group">
                     <label for="cfg-override-edge">Edge Refinement Level</label>
-                    <input type="number" id="cfg-override-edge" class="input" value="6" min="1" max="10">
+                    <input type="number" id="cfg-override-edge" class="input" min="1" max="10" placeholder="Auto / Preset (6)">
+                    <span class="field-hint">Feature edge refinement level</span>
                   </div>
 
                   <div class="form-group">
                     <label for="cfg-override-nearwake">Near Wake Refinement Level</label>
-                    <input type="number" id="cfg-override-nearwake" class="input" value="3" min="0" max="8">
+                    <input type="number" id="cfg-override-nearwake" class="input" min="0" max="8" placeholder="Auto / Preset (3)">
+                    <span class="field-hint">Refinement immediately behind geometry</span>
                   </div>
 
                   <div class="form-group">
                     <label for="cfg-override-farwake">Far Wake Refinement Level</label>
-                    <input type="number" id="cfg-override-farwake" class="input" value="1" min="0" max="8">
+                    <input type="number" id="cfg-override-farwake" class="input" min="0" max="8" placeholder="Auto / Preset (1)">
+                    <span class="field-hint">Refinement level down to outlet</span>
                   </div>
+
+                  <!-- 2. Fluid Properties Overrides -->
+                  <div class="form-group col-span-2 overrides-section-header">
+                    <h4 class="section-subtitle">2. Fluid Property Overrides</h4>
+                    <span class="field-hint">Physical medium properties. Defaults to sea-level air at 20&deg;C.</span>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="cfg-override-fluid-nu">Kinematic Viscosity (&nu;)</label>
+                    <div class="input-with-unit">
+                      <input type="number" id="cfg-override-fluid-nu" class="input" step="any" placeholder="Auto (1.516e-5)">
+                      <span class="unit-label">m&sup2;/s</span>
+                    </div>
+                    <span class="field-hint">Kinematic viscosity (e.g. 1.516e-5)</span>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="cfg-override-fluid-rho">Density (&rho;)</label>
+                    <div class="input-with-unit">
+                      <input type="number" id="cfg-override-fluid-rho" class="input" step="any" placeholder="Auto (1.225)">
+                      <span class="unit-label">kg/m&sup3;</span>
+                    </div>
+                    <span class="field-hint">Air density (e.g. 1.225)</span>
+                  </div>
+
+                  <!-- 3. Turbulence Modeling Overrides -->
+                  <div class="form-group col-span-2 overrides-section-header">
+                    <h4 class="section-subtitle">3. Turbulence Modeling Overrides</h4>
+                    <span class="field-hint">RANS closure model and freestream inlet turbulence estimation.</span>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="cfg-override-turb-model">Turbulence Model</label>
+                    <select id="cfg-override-turb-model" class="input">
+                      <option value="">Auto / Preset (kOmegaSST)</option>
+                      <option value="kOmegaSST">kOmegaSST (Recommended / Universal)</option>
+                      <option value="SpalartAllmaras">SpalartAllmaras (1-Equation)</option>
+                      <option value="kEpsilon">kEpsilon (Standard 2-Equation)</option>
+                      <option value="realizableKE">realizableKE</option>
+                    </select>
+                    <span class="field-hint">RAS model in turbulenceProperties</span>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="cfg-override-turb-intensity">Turbulence Intensity (I)</label>
+                    <input type="number" id="cfg-override-turb-intensity" class="input" step="any" placeholder="Auto (0.005)">
+                    <span class="field-hint">Ratio of velocity fluctuation (0.005 = 0.5%)</span>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="cfg-override-turb-nut-ratio">Turbulent Viscosity Ratio (&nu;<sub>t</sub> / &nu;)</label>
+                    <input type="number" id="cfg-override-turb-nut-ratio" class="input" step="any" placeholder="Auto (10)">
+                    <span class="field-hint">Freestream nut ratio (default 10)</span>
+                  </div>
+
+                  <!-- 4. Solver & Iteration Overrides -->
+                  <div class="form-group col-span-2 overrides-section-header">
+                    <h4 class="section-subtitle">4. Solver &amp; Iteration Overrides</h4>
+                    <span class="field-hint">simpleFoam execution limits and output cadence. Leave blank to follow fidelity preset.</span>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="cfg-override-solver-endtime">End Time (Iterations)</label>
+                    <div class="input-with-unit">
+                      <input type="number" id="cfg-override-solver-endtime" class="input" step="1" min="1" placeholder="Auto / Preset (1500)">
+                      <span class="unit-label">iters</span>
+                    </div>
+                    <span class="field-hint">Max simpleFoam iterations</span>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="cfg-override-solver-writeinterval">Write Interval</label>
+                    <div class="input-with-unit">
+                      <input type="number" id="cfg-override-solver-writeinterval" class="input" step="1" min="1" placeholder="Auto / Preset (500)">
+                      <span class="unit-label">iters</span>
+                    </div>
+                    <span class="field-hint">Solution write-out frequency</span>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="cfg-override-solver-purgewrite">Purge Write</label>
+                    <input type="number" id="cfg-override-solver-purgewrite" class="input" step="1" min="0" placeholder="Auto (2)">
+                    <span class="field-hint">Retain last N timesteps on disk (0 = keep all)</span>
+                  </div>
+
+                  <!-- 5. Aerodynamic Force References Overrides -->
+                  <div class="form-group col-span-2 overrides-section-header">
+                    <h4 class="section-subtitle">5. Aerodynamic Force References Overrides</h4>
+                    <span class="field-hint">Reference dimensions and moment center for force coefficients (Cd, Cl, Cm).</span>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="cfg-override-ref-lref">Reference Length (lRef)</label>
+                    <div class="input-with-unit">
+                      <input type="number" id="cfg-override-ref-lref" class="input" step="any" placeholder="Auto (1.0)">
+                      <span class="unit-label">m</span>
+                    </div>
+                    <span class="field-hint">Pitching moment reference length</span>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="cfg-override-ref-aref">Reference Area (Aref)</label>
+                    <div class="input-with-unit">
+                      <input type="number" id="cfg-override-ref-aref" class="input" step="any" placeholder="Auto (1.0)">
+                      <span class="unit-label">m&sup2;</span>
+                    </div>
+                    <span class="field-hint">Frontal / planform area for Cd, Cl</span>
+                  </div>
+
+                  <div class="form-group col-span-2">
+                    <label>Center of Rotation (CofR) [X, Y, Z] (m)</label>
+                    <div class="triple-input-row">
+                      <input type="number" id="cfg-override-ref-cofr-x" class="input" step="any" placeholder="X: 0.0">
+                      <input type="number" id="cfg-override-ref-cofr-y" class="input" step="any" placeholder="Y: 0.0">
+                      <input type="number" id="cfg-override-ref-cofr-z" class="input" step="any" placeholder="Z: 0.0">
+                    </div>
+                    <span class="field-hint">Moment origin for pitching, yawing, and rolling moment coefficients</span>
+                  </div>
+
                 </div>
 
               </div>

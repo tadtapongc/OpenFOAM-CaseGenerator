@@ -108,6 +108,18 @@ def save_cluster_config(cfg: dict[str, Any]) -> None:
         log.warning("Could not persist cluster credentials: %s", exc)
 
 
+def merge_config_with_defaults(raw_cfg: dict[str, Any]) -> dict[str, Any]:
+    """Merge user configuration and selective overrides on top of DEFAULT_CONFIG."""
+    clean_cfg = {k: v for k, v in raw_cfg.items() if not k.startswith("_")}
+    overrides = clean_cfg.pop("overrides", {})
+    if not isinstance(overrides, dict):
+        raise ValueError("'overrides' must be an object")
+    merged = deep_merge(DEFAULT_CONFIG, clean_cfg)
+    if overrides:
+        merged = deep_merge(merged, overrides)
+    return merged
+
+
 # -------------------------------------------------------------
 # Pydantic Request Models
 # -------------------------------------------------------------
@@ -151,7 +163,10 @@ class GenerateCaseRequest(BaseModel):
 async def api_geometry_domain_box(req: DomainBoxRequest) -> dict[str, Any]:
     """Compute and preview the OpenFOAM wind tunnel domain box."""
     cfg = req.config
-    merged = deep_merge(DEFAULT_CONFIG, {k: v for k, v in cfg.items() if not k.startswith("_")})
+    try:
+        merged = merge_config_with_defaults(cfg)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid configuration format: {exc}")
 
     bounds_tuple = None
     if req.bounds and "min" in req.bounds and "max" in req.bounds:
@@ -321,7 +336,7 @@ async def api_config_load_file(filename: str = "config.json") -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"Config file {safe_filename} not found")
     try:
         content = json.loads(path.read_text(encoding="utf-8"))
-        merged = deep_merge(DEFAULT_CONFIG, {k: v for k, v in content.items() if not k.startswith("_")})
+        merged = merge_config_with_defaults(content)
         return {
             "filename": safe_filename,
             "raw_config": content,
@@ -428,7 +443,10 @@ async def api_case_generate_and_submit(req: GenerateCaseRequest) -> dict[str, An
         raise HTTPException(status_code=400, detail="case_name must contain only alphanumeric characters, underscores, and hyphens")
 
     # 1. Validate config
-    merged = deep_merge(DEFAULT_CONFIG, {k: v for k, v in cfg.items() if not k.startswith("_")})
+    try:
+        merged = merge_config_with_defaults(cfg)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid configuration format: {exc}")
     errors, warnings = validate(merged, PROJECT_ROOT)
     if errors:
         raise HTTPException(status_code=400, detail=f"Config validation errors: {', '.join(errors)}")

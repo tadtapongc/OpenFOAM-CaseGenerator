@@ -25,6 +25,7 @@ from cfd_gen.web.server import (
     api_telemetry_logs,
     api_list_cases,
     api_case_delete,
+    merge_config_with_defaults,
     ssh_client,
 )
 from cfd_gen.web.ssh_client import ClusterSSHClient
@@ -504,6 +505,109 @@ class TestWebAPI(unittest.TestCase):
                 self.assertEqual(res[0]["name"], "case_remote_1")
                 self.assertEqual(res[0]["latest_iter"], 500)
                 self.assertEqual(res[0]["downforce"], 300.0)
+
+    def test_merge_config_with_defaults_selective_overrides(self):
+        """Test that selective overrides only change specified keys and leave others at defaults."""
+        user_cfg = {
+            "case_name": "test_selective",
+            "stl_files": ["sample_wing.stl"],
+            "overrides": {
+                "fluid": {
+                    "rho": 1.18,
+                },
+                "solver": {
+                    "end_time": 999,
+                },
+            },
+        }
+        merged = merge_config_with_defaults(user_cfg)
+        # Overridden fields
+        self.assertEqual(merged["fluid"]["rho"], 1.18)
+        self.assertEqual(merged["solver"]["end_time"], 999)
+        # Un-overridden fields in same sections remain at universal defaults
+        self.assertEqual(merged["fluid"]["nu"], 1.516e-5)
+        self.assertEqual(merged["solver"]["write_interval"], 400)
+        # Un-overridden sections remain at universal defaults
+        self.assertEqual(merged["turbulence"]["model"], "kOmegaSST")
+        self.assertEqual(merged["force_refs"]["lRef"], 1.0)
+
+    def test_merge_config_with_defaults_all_five_sections(self):
+        """Test overrides across all 5 sections matching configs/config.json."""
+        user_cfg = {
+            "case_name": "test_full_overrides",
+            "stl_files": ["sample_wing.stl"],
+            "overrides": {
+                "mesh_params": {
+                    "base_cell_size": 0.08,
+                    "surface_level": [5, 6],
+                    "edge_level": 7,
+                    "near_wake_level": 4,
+                    "far_wake_level": 2,
+                },
+                "fluid": {
+                    "nu": 1.45e-5,
+                    "rho": 1.20,
+                },
+                "turbulence": {
+                    "model": "SpalartAllmaras",
+                    "intensity": 0.01,
+                    "nut_ratio": 12,
+                },
+                "solver": {
+                    "end_time": 1200,
+                    "write_interval": 300,
+                    "purge_write": 3,
+                },
+                "force_refs": {
+                    "lRef": 1.25,
+                    "Aref": 0.85,
+                    "CofR": [0.1, 0.0, 0.5],
+                },
+            },
+        }
+        merged = merge_config_with_defaults(user_cfg)
+        self.assertEqual(merged["mesh_params"]["base_cell_size"], 0.08)
+        self.assertEqual(merged["mesh_params"]["surface_level"], [5, 6])
+        self.assertEqual(merged["fluid"]["nu"], 1.45e-5)
+        self.assertEqual(merged["fluid"]["rho"], 1.20)
+        self.assertEqual(merged["turbulence"]["model"], "SpalartAllmaras")
+        self.assertEqual(merged["solver"]["end_time"], 1200)
+        self.assertEqual(merged["solver"]["write_interval"], 300)
+        self.assertEqual(merged["force_refs"]["lRef"], 1.25)
+        self.assertEqual(merged["force_refs"]["CofR"], [0.1, 0.0, 0.5])
+
+    def test_case_generate_with_overrides(self):
+        """Test that api_case_generate_and_submit applies overrides to generated case."""
+        case_name = "test_case_override_gen"
+        req = GenerateCaseRequest(
+            config={
+                "case_name": case_name,
+                "stl_files": ["sample_wing.stl"],
+                "flow": {"velocity": 20.0, "direction": "-z", "ground": True},
+                "outputs": {"drag_axis": "-z", "downforce_axis": "-y"},
+                "overrides": {
+                    "fluid": {"rho": 1.15},
+                    "solver": {"end_time": 600},
+                },
+            },
+            upload_to_cluster=False,
+            generate_remotely=False,
+            submit_slurm=False,
+            generate_locally=True,
+        )
+        res = asyncio.run(api_case_generate_and_submit(req))
+        self.assertTrue(res.get("success"))
+        case_path = Path("cases") / case_name
+        self.assertTrue(case_path.is_dir())
+        try:
+            control_dict = (case_path / "system" / "controlDict").read_text(encoding="utf-8")
+            self.assertIn("endTime         600;", control_dict)
+            self.assertIn("rhoInf          1.15;", control_dict)
+        finally:
+            shutil.rmtree(case_path, ignore_errors=True)
+            cfg_file = Path("configs") / f"{case_name}.json"
+            if cfg_file.exists():
+                cfg_file.unlink()
 
 
 if __name__ == "__main__":

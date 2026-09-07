@@ -826,6 +826,53 @@ body.dark-theme {
   gap: 8px;
 }
 
+.triple-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.overrides-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-card);
+  border: 1px solid var(--border-default);
+  border-left: 3px solid var(--accent-primary);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  margin-bottom: 8px;
+  gap: 16px;
+}
+
+.overrides-banner-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.overrides-banner-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.overrides-banner-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.overrides-section-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-default);
+  margin-top: 8px;
+  margin-bottom: 2px;
+}
+
 .input-with-unit {
   position: relative;
   display: flex;

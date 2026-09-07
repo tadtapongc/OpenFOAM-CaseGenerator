@@ -67,7 +67,26 @@ class CFDApp {
           _edge_level: 6,
           _near_wake_level: 3,
           _far_wake_level: 1,
-        }
+        },
+        fluid: {
+          _nu: 1.516e-5,
+          _rho: 1.225,
+        },
+        turbulence: {
+          _model: "kOmegaSST",
+          _intensity: 0.005,
+          _nut_ratio: 10,
+        },
+        solver: {
+          _end_time: 800,
+          _write_interval: 400,
+          _purge_write: 2,
+        },
+        force_refs: {
+          _lRef: 1.0,
+          _Aref: 1.0,
+          _CofR: [0.0, 0.0, 0.0],
+        },
       }
     };
 
@@ -166,6 +185,8 @@ class CFDApp {
         card.classList.add('selected');
         const radio = card.querySelector('input[type="radio"]');
         if (radio) radio.checked = true;
+        const fidelity = card.dataset.fidelity || 'standard';
+        this.updateOverridePlaceholders(fidelity);
         this.buildConfigFromVisualForm();
       });
     });
@@ -209,18 +230,10 @@ class CFDApp {
       });
     }
 
-    // Overrides toggle
-    const chkOverrides = document.getElementById('chk-enable-overrides');
-    const overridesContainer = document.getElementById('overrides-controls-container');
-    const noticeBox = document.getElementById('overrides-disabled-notice');
-    if (chkOverrides) {
-      chkOverrides.addEventListener('change', (e) => {
-        const enabled = e.target.checked;
-        if (overridesContainer) overridesContainer.style.display = enabled ? 'grid' : 'none';
-        if (noticeBox) noticeBox.style.display = enabled ? 'none' : 'block';
-        this.buildConfigFromVisualForm();
-      });
-    }
+    // Overrides clear all button
+    document.getElementById('btn-clear-all-overrides')?.addEventListener('click', () => {
+      this.clearAllOverrides();
+    });
 
     // Ground level style selector (2 + 1 styles)
     const groundStyleSelect = document.getElementById('cfg-ground-style');
@@ -371,29 +384,55 @@ class CFDApp {
     this.setCheck('cfg-slurm-tmpdir', slurm.use_tmpdir !== false);
     this.setVal('cfg-slurm-sync', slurm.sync_interval || 15);
 
-    // Overrides (mesh_params)
+    // Overrides handling: populate only overridden fields, leave others blank for preset fallback
     const overrides = cfg.overrides || {};
-    const meshParams = overrides.mesh_params || cfg.mesh_params || null;
-    const hasActiveOverrides = meshParams && Object.keys(meshParams).some((k) => !k.startsWith('_'));
+    const meshParams = overrides.mesh_params || null;
+    const fluid = overrides.fluid || null;
+    const turb = overrides.turbulence || null;
+    const solver = overrides.solver || null;
+    const refs = overrides.force_refs || null;
 
-    const chkOverrides = document.getElementById('chk-enable-overrides');
-    const overridesContainer = document.getElementById('overrides-controls-container');
-    const noticeBox = document.getElementById('overrides-disabled-notice');
-
-    if (chkOverrides) chkOverrides.checked = !!hasActiveOverrides;
-    if (overridesContainer) overridesContainer.style.display = hasActiveOverrides ? 'grid' : 'none';
-    if (noticeBox) noticeBox.style.display = hasActiveOverrides ? 'none' : 'block';
-
-    if (hasActiveOverrides && meshParams) {
-      if (meshParams.base_cell_size !== undefined) this.setVal('cfg-override-basecell', meshParams.base_cell_size);
-      if (Array.isArray(meshParams.surface_level) && meshParams.surface_level.length >= 2) {
-        this.setVal('cfg-override-surf-min', meshParams.surface_level[0]);
-        this.setVal('cfg-override-surf-max', meshParams.surface_level[1]);
-      }
-      if (meshParams.edge_level !== undefined) this.setVal('cfg-override-edge', meshParams.edge_level);
-      if (meshParams.near_wake_level !== undefined) this.setVal('cfg-override-nearwake', meshParams.near_wake_level);
-      if (meshParams.far_wake_level !== undefined) this.setVal('cfg-override-farwake', meshParams.far_wake_level);
+    // 1. Mesh Params
+    this.setVal('cfg-override-basecell', meshParams?.base_cell_size ?? '');
+    if (Array.isArray(meshParams?.surface_level) && meshParams.surface_level.length >= 2) {
+      this.setVal('cfg-override-surf-min', meshParams.surface_level[0]);
+      this.setVal('cfg-override-surf-max', meshParams.surface_level[1]);
+    } else {
+      this.setVal('cfg-override-surf-min', '');
+      this.setVal('cfg-override-surf-max', '');
     }
+    this.setVal('cfg-override-edge', meshParams?.edge_level ?? '');
+    this.setVal('cfg-override-nearwake', meshParams?.near_wake_level ?? '');
+    this.setVal('cfg-override-farwake', meshParams?.far_wake_level ?? '');
+
+    // 2. Fluid Properties
+    this.setVal('cfg-override-fluid-nu', fluid?.nu ?? '');
+    this.setVal('cfg-override-fluid-rho', fluid?.rho ?? '');
+
+    // 3. Turbulence Modeling
+    this.setVal('cfg-override-turb-model', turb?.model ?? '');
+    this.setVal('cfg-override-turb-intensity', turb?.intensity ?? '');
+    this.setVal('cfg-override-turb-nut-ratio', turb?.nut_ratio ?? '');
+
+    // 4. Solver & Iterations
+    this.setVal('cfg-override-solver-endtime', solver?.end_time ?? '');
+    this.setVal('cfg-override-solver-writeinterval', solver?.write_interval ?? '');
+    this.setVal('cfg-override-solver-purgewrite', solver?.purge_write ?? '');
+
+    // 5. Force References
+    this.setVal('cfg-override-ref-lref', refs?.lRef ?? '');
+    this.setVal('cfg-override-ref-aref', refs?.Aref ?? '');
+    if (Array.isArray(refs?.CofR) && refs.CofR.length >= 3) {
+      this.setVal('cfg-override-ref-cofr-x', refs.CofR[0]);
+      this.setVal('cfg-override-ref-cofr-y', refs.CofR[1]);
+      this.setVal('cfg-override-ref-cofr-z', refs.CofR[2]);
+    } else {
+      this.setVal('cfg-override-ref-cofr-x', '');
+      this.setVal('cfg-override-ref-cofr-y', '');
+      this.setVal('cfg-override-ref-cofr-z', '');
+    }
+
+    this.updateOverridePlaceholders(fidelity);
 
     // Render active STL chips (reconcile placeholders with available server geometries)
     const newStls = cfg.stl_files || [];
@@ -521,21 +560,88 @@ class CFDApp {
       sync_interval: parseInt(this.getVal('cfg-slurm-sync'), 10) || 15,
     };
 
-    // Overrides handling (clean comment by default, active only if checked)
-    const isOverridesEnabled = this.getCheck('chk-enable-overrides');
-    if (isOverridesEnabled) {
-      cfg.overrides = {
-        mesh_params: {
-          base_cell_size: parseFloat(this.getVal('cfg-override-basecell')) || 0.10,
-          surface_level: [
-            parseInt(this.getVal('cfg-override-surf-min'), 10) || 4,
-            parseInt(this.getVal('cfg-override-surf-max'), 10) || 5,
-          ],
-          edge_level: parseInt(this.getVal('cfg-override-edge'), 10) || 6,
-          near_wake_level: parseInt(this.getVal('cfg-override-nearwake'), 10) || 3,
-          far_wake_level: parseInt(this.getVal('cfg-override-farwake'), 10) || 1,
-        },
-      };
+    // Selective Overrides handling:
+    // Only include fields that have a value entered. Blank fields follow presets / universal defaults.
+    const getOptionalStr = (id) => {
+      const v = this.getVal(id);
+      return (v !== null && v !== undefined && String(v).trim() !== '') ? String(v).trim() : null;
+    };
+    const getOptionalFloat = (id) => {
+      const v = getOptionalStr(id);
+      if (v === null) return null;
+      const parsed = parseFloat(v);
+      return isNaN(parsed) ? null : parsed;
+    };
+    const getOptionalInt = (id) => {
+      const v = getOptionalStr(id);
+      if (v === null) return null;
+      const parsed = parseInt(v, 10);
+      return isNaN(parsed) ? null : parsed;
+    };
+
+    const overrides = {};
+
+    // 1. Mesh Params
+    const meshOverrides = {};
+    const baseCell = getOptionalFloat('cfg-override-basecell');
+    if (baseCell !== null) meshOverrides.base_cell_size = baseCell;
+    const surfMin = getOptionalInt('cfg-override-surf-min');
+    const surfMax = getOptionalInt('cfg-override-surf-max');
+    if (surfMin !== null || surfMax !== null) {
+      meshOverrides.surface_level = [surfMin ?? 4, surfMax ?? 5];
+    }
+    const edgeLevel = getOptionalInt('cfg-override-edge');
+    if (edgeLevel !== null) meshOverrides.edge_level = edgeLevel;
+    const nearWake = getOptionalInt('cfg-override-nearwake');
+    if (nearWake !== null) meshOverrides.near_wake_level = nearWake;
+    const farWake = getOptionalInt('cfg-override-farwake');
+    if (farWake !== null) meshOverrides.far_wake_level = farWake;
+    if (Object.keys(meshOverrides).length > 0) overrides.mesh_params = meshOverrides;
+
+    // 2. Fluid
+    const fluidOverrides = {};
+    const nu = getOptionalFloat('cfg-override-fluid-nu');
+    if (nu !== null) fluidOverrides.nu = nu;
+    const rho = getOptionalFloat('cfg-override-fluid-rho');
+    if (rho !== null) fluidOverrides.rho = rho;
+    if (Object.keys(fluidOverrides).length > 0) overrides.fluid = fluidOverrides;
+
+    // 3. Turbulence
+    const turbOverrides = {};
+    const turbModel = getOptionalStr('cfg-override-turb-model');
+    if (turbModel) turbOverrides.model = turbModel;
+    const turbIntensity = getOptionalFloat('cfg-override-turb-intensity');
+    if (turbIntensity !== null) turbOverrides.intensity = turbIntensity;
+    const nutRatio = getOptionalFloat('cfg-override-turb-nut-ratio');
+    if (nutRatio !== null) turbOverrides.nut_ratio = nutRatio;
+    if (Object.keys(turbOverrides).length > 0) overrides.turbulence = turbOverrides;
+
+    // 4. Solver
+    const solverOverrides = {};
+    const endTime = getOptionalInt('cfg-override-solver-endtime');
+    if (endTime !== null) solverOverrides.end_time = endTime;
+    const writeInterval = getOptionalInt('cfg-override-solver-writeinterval');
+    if (writeInterval !== null) solverOverrides.write_interval = writeInterval;
+    const purgeWrite = getOptionalInt('cfg-override-solver-purgewrite');
+    if (purgeWrite !== null) solverOverrides.purge_write = purgeWrite;
+    if (Object.keys(solverOverrides).length > 0) overrides.solver = solverOverrides;
+
+    // 5. Force Refs
+    const refsOverrides = {};
+    const lRef = getOptionalFloat('cfg-override-ref-lref');
+    if (lRef !== null) refsOverrides.lRef = lRef;
+    const Aref = getOptionalFloat('cfg-override-ref-aref');
+    if (Aref !== null) refsOverrides.Aref = Aref;
+    const cofrX = getOptionalFloat('cfg-override-ref-cofr-x');
+    const cofrY = getOptionalFloat('cfg-override-ref-cofr-y');
+    const cofrZ = getOptionalFloat('cfg-override-ref-cofr-z');
+    if (cofrX !== null || cofrY !== null || cofrZ !== null) {
+      refsOverrides.CofR = [cofrX ?? 0.0, cofrY ?? 0.0, cofrZ ?? 0.0];
+    }
+    if (Object.keys(refsOverrides).length > 0) overrides.force_refs = refsOverrides;
+
+    if (Object.keys(overrides).length > 0) {
+      cfg.overrides = overrides;
       delete cfg._comment_overrides;
       delete cfg._optional_overrides_example;
     } else {
@@ -548,6 +654,25 @@ class CFDApp {
           _edge_level: 6,
           _near_wake_level: 3,
           _far_wake_level: 1,
+        },
+        fluid: {
+          _nu: 1.516e-5,
+          _rho: 1.225,
+        },
+        turbulence: {
+          _model: "kOmegaSST",
+          _intensity: 0.005,
+          _nut_ratio: 10,
+        },
+        solver: {
+          _end_time: 800,
+          _write_interval: 400,
+          _purge_write: 2,
+        },
+        force_refs: {
+          _lRef: 1.0,
+          _Aref: 1.0,
+          _CofR: [0.0, 0.0, 0.0],
         },
       };
     }
@@ -734,6 +859,56 @@ class CFDApp {
         setTimeout(() => this.viewer.onResize(), 150);
       });
     }
+  }
+
+  updateOverridePlaceholders(fidelity = 'standard') {
+    const presets = {
+      fast: { base_cell: '0.15', surf_min: '3', surf_max: '4', edge: '5', nearwake: '3', farwake: '1', endtime: '800', writeint: '400' },
+      standard: { base_cell: '0.10', surf_min: '4', surf_max: '5', edge: '6', nearwake: '3', farwake: '1', endtime: '1500', writeint: '500' },
+      fine: { base_cell: '0.06', surf_min: '5', surf_max: '6', edge: '7', nearwake: '3', farwake: '1', endtime: '2500', writeint: '500' },
+    };
+    const p = presets[fidelity] || presets.standard;
+
+    const setPlaceholder = (id, text) => {
+      const el = document.getElementById(id);
+      if (el) el.placeholder = text;
+    };
+
+    setPlaceholder('cfg-override-basecell', `Auto / Preset (${p.base_cell})`);
+    setPlaceholder('cfg-override-surf-min', `Min (${p.surf_min})`);
+    setPlaceholder('cfg-override-surf-max', `Max (${p.surf_max})`);
+    setPlaceholder('cfg-override-edge', `Auto / Preset (${p.edge})`);
+    setPlaceholder('cfg-override-nearwake', `Auto / Preset (${p.nearwake})`);
+    setPlaceholder('cfg-override-farwake', `Auto / Preset (${p.farwake})`);
+    setPlaceholder('cfg-override-solver-endtime', `Auto / Preset (${p.endtime})`);
+    setPlaceholder('cfg-override-solver-writeinterval', `Auto / Preset (${p.writeint})`);
+  }
+
+  clearAllOverrides() {
+    const overrideIds = [
+      'cfg-override-basecell',
+      'cfg-override-surf-min',
+      'cfg-override-surf-max',
+      'cfg-override-edge',
+      'cfg-override-nearwake',
+      'cfg-override-farwake',
+      'cfg-override-fluid-nu',
+      'cfg-override-fluid-rho',
+      'cfg-override-turb-model',
+      'cfg-override-turb-intensity',
+      'cfg-override-turb-nut-ratio',
+      'cfg-override-solver-endtime',
+      'cfg-override-solver-writeinterval',
+      'cfg-override-solver-purgewrite',
+      'cfg-override-ref-lref',
+      'cfg-override-ref-aref',
+      'cfg-override-ref-cofr-x',
+      'cfg-override-ref-cofr-y',
+      'cfg-override-ref-cofr-z',
+    ];
+    overrideIds.forEach((id) => this.setVal(id, ''));
+    this.buildConfigFromVisualForm();
+    this.showToast('All overrides cleared. Falling back to fidelity presets & defaults.', 'info');
   }
 
   async autoSymmetryPlaneCenter() {
