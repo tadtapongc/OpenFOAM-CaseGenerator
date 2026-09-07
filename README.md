@@ -712,9 +712,7 @@ The estimate for $k_0$ assumes isotropic turbulence. The viscosity-ratio relatio
         "GCC/11.3.0",
         "OpenMPI/4.1.4-GCC-11.3.0"
     ],
-    "openfoam_source": "$HOME/OpenFOAM/OpenFOAM-v2606/etc/bashrc",  // OpenFOAM environment activation script
-    "use_tmpdir": false,                 // Standard HPC practice: false = run in-place on parallel scratch; true = node-local scratch ($TMPDIR)
-    "sync_interval": 15                  // Periodic sync interval in seconds (only used if use_tmpdir: true)
+    "openfoam_source": "$HOME/OpenFOAM/OpenFOAM-v2606/etc/bashrc"  // OpenFOAM environment activation script
 }
 ```
 
@@ -1137,20 +1135,14 @@ The generated `run.sh` script targets SLURM. Adjust its queue, modules, OpenFOAM
 sbatch run.sh
 ```
 
-### Scratch, Sync, and Recovery Behavior
+### Execution and Fault Recovery
 
-1. **Optional Scratch Execution**:
-   - With `use_tmpdir` enabled, the script copies the case into a temporary directory, preferring writable `$TMPDIR`, then `/dev/shm`, then the system temporary directory.
-   - Storage type, capacity, persistence, and accessibility depend on the cluster. The script does not establish multi-node access to node-local scratch.
-2. **Pruned Background Sync Loop**:
-   - A background sync loop copies `postProcessing/` force logs and solver logs back to the submit directory every 15 seconds.
-   - Internal `processor*` trees are excluded from the periodic sync. Full results are copied back during cleanup.
-3. **Signal Handling and Recovery Attempts**:
-   - Handlers for `SIGTERM`, `SIGINT`, and script exit attempt to stop background tasks, reconstruct the latest solver results when applicable, and copy scratch results back.
-   - Recovery depends on available time and functioning storage. `SIGKILL` and node failure cannot be handled by these traps.
-4. **Scratch Location Record (`.running_location`)**:
-   - Before scratch execution, the script records the host and directory. It retains this record and scratch data when reconstruction or copy-back fails.
-   - The record helps locate retained files; it is not a backup and cannot preserve data if the scratch storage is lost or removed by the cluster.
+1. **Direct In-Place Execution**:
+   - The script runs directly in the case directory on your parallel filesystem, eliminating file-copy overhead and scaling seamlessly across single or multi-node allocations.
+2. **Node-Local Shared Memory for Open MPI**:
+   - Open MPI session directory and shared-memory backing files are automatically routed to node-local `/dev/shm` or `/tmp`, eliminating mmap lock contention and avoiding network filesystem warnings.
+3. **Signal Handling and Fault Recovery**:
+   - Handlers for `SIGTERM`, `SIGINT`, and script exit stop background monitoring tasks and automatically attempt latest-time reconstruction (`reconstructPar -latestTime`) if a parallel run is interrupted, preserving processor results.
 
 ---
 

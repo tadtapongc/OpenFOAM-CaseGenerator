@@ -92,10 +92,10 @@ esac
                     "FOAM_INST_DIR": "", "FAIL_STAGE": "", "COPYBACK_FAIL": "0",
                     "WAIT_SOLVER": "0", "SOLVER_STATUS": "0", "RECONSTRUCT_STATUS": "0"}
 
-    def generate(self, scratch=False):
+    def generate(self):
         cfg = copy.deepcopy(DEFAULT_CONFIG)
         cfg["parallel"]["n_procs"] = 2
-        cfg["slurm"].update(use_tmpdir=scratch, openfoam_source=None, openfoam_module=None)
+        cfg["slurm"].update(openfoam_source=None, openfoam_module=None)
         write_scripts(cfg, self.case)
 
     def run_script(self, name, **env):
@@ -111,11 +111,10 @@ esac
                 os.kill(int(path.read_text()), 0)
 
     def test_all_generated_shell_syntax(self):
-        for scratch in (False, True):
-            self.generate(scratch)
-            for name in ("Allrun", "Allrun.parallel", "Allclean", "run.sh"):
-                result = subprocess.run(["bash", "-n", str(self.case/name)], capture_output=True, text=True)
-                self.assertEqual(result.returncode, 0, result.stderr)
+        self.generate()
+        for name in ("Allrun", "Allrun.parallel", "Allclean", "run.sh"):
+            result = subprocess.run(["bash", "-n", str(self.case/name)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_serial_solver_failure_is_reported(self):
         self.generate()
@@ -145,47 +144,28 @@ esac
         self.assertTrue((self.case/"processor0/state").exists())
         self.assert_monitor_stopped()
 
-    def test_slurm_scratch_reconstruction_failure_keeps_both_copies(self):
-        self.generate(True)
-        result = self.run_script("run.sh", RECONSTRUCT_STATUS="23")
-        self.assertNotEqual(result.returncode, 0, result.stdout+result.stderr)
-        self.assertTrue((self.case/"processor0/state").exists())
-        self.assertTrue((self.case/".running_location").exists())
-        self.assertEqual(len(list(self.scratch.glob("*/processor0/state"))), 1)
-        self.assert_monitor_stopped()
-
-    def test_slurm_copyback_failure_retains_scratch_and_location(self):
-        self.generate(True)
-        result = self.run_script("run.sh", COPYBACK_FAIL="1")
-        self.assertNotEqual(result.returncode, 0, result.stdout+result.stderr)
-        self.assertTrue((self.case/".running_location").exists())
-        self.assertEqual(len(list(self.scratch.glob("*/reconstructed"))), 1)
-
     def test_slurm_solver_failure_survives_successful_cleanup(self):
-        self.generate(True)
+        self.generate()
         result = self.run_script("run.sh", SOLVER_STATUS="17")
         self.assertEqual(result.returncode, 17, result.stdout+result.stderr)
         self.assertTrue((self.case/"reconstructed").exists())
-        self.assertFalse(list(self.scratch.iterdir()))
 
-    def test_slurm_scratch_success_syncs_and_cleans(self):
-        self.generate(True)
+    def test_slurm_success(self):
+        self.generate()
         result = self.run_script("run.sh")
         self.assertEqual(result.returncode, 0, result.stdout+result.stderr)
         self.assertTrue((self.case/"reconstructed").exists())
-        self.assertFalse(list(self.scratch.iterdir()))
-        self.assertFalse((self.case/".running_location").exists())
         self.assert_monitor_stopped()
 
     def test_failed_meshing_preserves_mesh_processors(self):
-        self.generate(True)
+        self.generate()
         result = self.run_script("run.sh", FAIL_STAGE="snappyHexMesh")
         self.assertEqual(result.returncode, 31, result.stdout+result.stderr)
         self.assertTrue((self.case/"processor0/state").exists())
         self.assertFalse((self.case/"reconstructed").exists())
 
     def test_sigterm_attempts_recovery_without_losing_failed_results(self):
-        self.generate(True)
+        self.generate()
         proc = subprocess.Popen(["bash", str(self.case/"run.sh")], cwd=self.case,
                                 env={**self.env, "WAIT_SOLVER": "1", "RECONSTRUCT_STATUS": "23"},
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
@@ -199,7 +179,6 @@ esac
             stdout, stderr = proc.communicate(timeout=10)
             self.assertEqual(proc.returncode, 143, stdout+stderr)
             self.assertTrue((self.case/"processor0/state").exists())
-            self.assertEqual(len(list(self.scratch.glob("*/processor0/state"))), 1)
         finally:
             if proc.poll() is None:
                 os.killpg(proc.pid, signal.SIGKILL)

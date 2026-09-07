@@ -56,8 +56,6 @@ class CFDApp {
           "OpenMPI/4.1.4-GCC-11.3.0"
         ],
         openfoam_source: "$HOME/OpenFOAM/OpenFOAM-v2606/etc/bashrc",
-        use_tmpdir: false,
-        sync_interval: 15,
       },
       _comment_overrides: "Expert overrides — all fields below have built-in defaults in fidelity presets. Uncomment only if manual tuning is needed.",
       _optional_overrides_example: {
@@ -387,8 +385,7 @@ class CFDApp {
       this.setVal('cfg-slurm-modules', 'GCC/11.3.0, OpenMPI/4.1.4-GCC-11.3.0');
     }
 
-    this.setCheck('cfg-slurm-tmpdir', Boolean(slurm.use_tmpdir));
-    this.setVal('cfg-slurm-sync', slurm.sync_interval || 15);
+
 
     // Overrides handling: populate only overridden fields, leave others blank for preset fallback
     const overrides = cfg.overrides || {};
@@ -569,8 +566,6 @@ class CFDApp {
       mem_per_cpu: this.getVal('cfg-slurm-mem'),
       openfoam_module: modules,
       openfoam_source: this.getVal('cfg-slurm-source'),
-      use_tmpdir: this.getCheck('cfg-slurm-tmpdir'),
-      sync_interval: parseInt(this.getVal('cfg-slurm-sync'), 10) || 15,
     };
 
     // Selective Overrides handling:

@@ -83,8 +83,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "cpus_per_task": 1,
         "openfoam_module": None,
         "openfoam_source": "$HOME/OpenFOAM/OpenFOAM-v2606/etc/bashrc",
-        "use_tmpdir": False,
-        "sync_interval": 15,
     },
 
     # Solver settings (conservative, never-diverge)
@@ -380,7 +378,7 @@ def validate(cfg: dict[str, Any], project_dir: Path) -> tuple[list[str], list[st
         "fluid": ("nu", "rho"), "turbulence": ("intensity", "nut_ratio"),
         "mesh_params": ("base_cell_size",), "solver": ("end_time", "write_interval"),
         "layers": ("expansion_ratio", "first_layer_thickness", "min_thickness"),
-        "force_refs": ("lRef", "Aref"), "slurm": ("sync_interval",),
+        "force_refs": ("lRef", "Aref"),
     }.items():
         for key in keys:
             positive(section, key)
