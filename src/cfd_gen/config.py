@@ -79,11 +79,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "partition": "cpu",
         "nodes": 1,
         "time": "auto",
-        "mem_per_cpu": "3G",
+        "mem_per_cpu": "2G",
         "cpus_per_task": 1,
         "openfoam_module": None,
         "openfoam_source": "$HOME/OpenFOAM/OpenFOAM-v2606/etc/bashrc",
-        "use_tmpdir": True,
+        "use_tmpdir": False,
         "sync_interval": 15,
     },
 

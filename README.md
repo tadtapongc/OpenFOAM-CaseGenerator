@@ -713,8 +713,8 @@ The estimate for $k_0$ assumes isotropic turbulence. The viscosity-ratio relatio
         "OpenMPI/4.1.4-GCC-11.3.0"
     ],
     "openfoam_source": "$HOME/OpenFOAM/OpenFOAM-v2606/etc/bashrc",  // OpenFOAM environment activation script
-    "use_tmpdir": true,                  // Use scratch storage; check availability and capacity on your cluster
-    "sync_interval": 15                  // Periodic sync interval in seconds for forces and logs
+    "use_tmpdir": false,                 // Standard HPC practice: false = run in-place on parallel scratch; true = node-local scratch ($TMPDIR)
+    "sync_interval": 15                  // Periodic sync interval in seconds (only used if use_tmpdir: true)
 }
 ```
 

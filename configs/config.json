@@ -72,10 +72,7 @@
             "GCC/11.3.0",
             "OpenMPI/4.1.4-GCC-11.3.0"
         ],
-        "openfoam_source": "$HOME/OpenFOAM/OpenFOAM-v2606/etc/bashrc",
-        "_use_tmpdir": "true = run in fast node scratch ($TMPDIR) with live sync; false = run in-place in case dir",
-        "use_tmpdir": true,
-        "sync_interval": 15
+        "openfoam_source": "$HOME/OpenFOAM/OpenFOAM-v2606/etc/bashrc"
     },
 
     "_section_overrides": "--- 7. Expert Overrides (Optional) ---",

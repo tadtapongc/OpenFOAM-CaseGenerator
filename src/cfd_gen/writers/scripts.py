@@ -194,14 +194,14 @@ def write_scripts(cfg: dict[str, Any], case_dir: Path) -> None:
     partition = slurm.get("partition", "cpu")
     nodes = slurm.get("nodes", 1)
     time_limit = slurm.get("time", "04:00:00")
-    mem_per_cpu = slurm.get("mem_per_cpu", "3G")
+    mem_per_cpu = slurm.get("mem_per_cpu", "2G")
     cpus_per_task = slurm.get("cpus_per_task", 1)
     openfoam_module = slurm.get("openfoam_module", None)
     openfoam_source = slurm.get(
         "openfoam_source",
         "$HOME/OpenFOAM/OpenFOAM-v2606/etc/bashrc"
     )
-    use_tmpdir = slurm.get("use_tmpdir", True)
+    use_tmpdir = slurm.get("use_tmpdir", False)
     sync_interval = slurm.get("sync_interval", 15)
 
     # ---- convergence_monitor.py (self-contained) ----
