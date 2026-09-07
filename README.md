@@ -171,8 +171,12 @@ python -m cfd_gen.web.server --port 8000
 
 Key CLI arguments for `cfd_gen.web.server`:
 - `--host <ip>`: Bind address (default: `127.0.0.1`).
-- `--port <port>`: Port to listen on (default: `8000`; automatically increments to next available port if busy).
+- `--port <port>`: Port to listen on (default: `8000`).
+- `--restart`: Automatically terminate an existing CFD Studio instance on the port and restart.
 - `--no-browser`: Do not automatically open the default web browser on launch.
+
+> [!TIP]
+> **Intelligent Port Supervisor**: If port `8000` is already occupied by a previously running CFD Studio process, the launcher automatically detects the process, cleans up the old process tree, and restarts immediately. If occupied by an unrelated application, it automatically advances to the next available open port.
 
 ---
 
@@ -287,20 +291,21 @@ The Cases Archive provides a centralized view of all simulation cases residing o
 - **Summary Stat Cards**:
   At-a-glance KPI metrics showing:
   - **Total Cases**: Total count across local storage and remote clusters.
-  - **Converged & Solved**: Simulations that satisfied the $\pm 1.5\%$ force convergence stability threshold.
+  - **Converged & Solved**: Simulations that satisfied the $\pm 0.5\%$ force convergence stability threshold.
   - **Active / Solving**: Simulations currently running or meshing.
   - **Ready / Meshed**: Cases generated and awaiting execution.
 - **Real-Time Search & Status Filter Pills**:
   Filter cases instantly by name, geometry filename, fidelity preset, or status using the search bar and filter pills (`All`, `Converged`, `Completed`, `Solving`, `Generated`).
 - **Comprehensive Case Data Table**:
   - **Case & Setup**: Case name, fidelity badge (`standard`, `fast`, `fine`), MPI core count (`32p`), and geometry tags.
-  - **Status Badges**: Color-coded badges (`● CONVERGED`, `⚡ SOLVING`, `✓ COMPLETED`, `⬡ MESHED`, `○ GENERATED`).
+  - **Status Badges**: Color-coded badges (`● CONVERGED`, `⚡ SOLVING`, `✓ COMPLETED`, `⬡ MESHED`, `○ GENERATED`, `⏳ QUEUED`, `✗ FAILED`).
   - **Flow Conditions**: Freestream velocity in km/h and m/s, along with flow direction vector.
   - **Aerodynamic Results**: Color-coded badges displaying final $F_y$ (downforce), $F_z$ (drag), and $L/D$ (aero efficiency).
   - **Progress**: Current solver iteration count.
-  - **Location & Modified**: `Local` vs `Cluster` indicator with formatted timestamp (`YYYY-MM-DD HH:MM`).
+  - **Location & Modified**: `Local`, `Cluster`, or `Local & Cluster` indicator with formatted timestamp (`YYYY-MM-DD HH:MM`).
 - **Actions**:
   - **📊 Live Telemetry**: One-click jump to the Telemetry dashboard with the selected case loaded for real-time convergence and log monitoring.
+  - **🗑️ Delete Case**: Synchronously removes case directories across local storage and the remote cluster via SSH.
 
 ---
 
@@ -715,24 +720,46 @@ The estimate for $k_0$ assumes isotropic turbulence. The viscosity-ratio relatio
 
 ### Expert Overrides
 
-Configuration values can be supplied in an `"overrides"` block or as direct parameter mappings. The writers must support the selected options; changing a model name alone does not generate fields for a different turbulence model:
+Configuration values can be customized either via an explicit `"overrides"` block or directly inside section keys.
 
+> [!IMPORTANT]
+> **Preset Precedence**: Any value explicitly specified by the user in `overrides` or directly inside a section (e.g. `solver.end_time`, `layers.n_layers`, `mesh_params.base_cell_size`) **strictly overrides** the fidelity preset defaults (`fast`, `standard`, `fine`). You can select `fidelity: "standard"` while overriding only specific parameters.
+
+#### Style A — Explicit `"overrides"` Block (Recommended for Modular Sweeps)
 ```jsonc
-"overrides": {
-    "relaxation": {
-        "fields": {
-            "p": 0.7                     // Pressure under-relaxation factor
+{
+    "case_name": "wing_study_high_res",
+    "stl_files": ["wing.stl"],
+    "fidelity": "standard",
+    "overrides": {
+        "solver": {
+            "end_time": 600              // Run for 600 iterations instead of default 1500
         },
-        "equations": {
-            "U": 0.7,                    // Velocity momentum equation relaxation factor
-            "k": 0.5,                    // Turbulent kinetic energy equation relaxation factor
-            "omega": 0.5                 // Specific dissipation rate equation relaxation factor
+        "layers": {
+            "n_layers": 7,               // Inflate 7 prism layers instead of standard 5
+            "expansion_ratio": 1.25      // Custom layer geometric growth ratio
+        },
+        "fluid": {
+            "rho": 1.15                  // High-altitude or heated air density in kg/m³
         }
+    }
+}
+```
+
+#### Style B — Direct Section Overrides
+```jsonc
+{
+    "case_name": "chassis_overrides",
+    "stl_files": ["chassis.stl"],
+    "fidelity": "standard",
+    "solver": {
+        "end_time": 800,
+        "write_interval": 200
     },
     "mesh_params": {
-        "base_cell_size": 0.08,          // Custom background hexahedral cell dimension in meters
-        "surface_level": [4, 6],         // Min and max surface refinement levels on vehicle STL
-        "edge_level": 7                  // Feature edge refinement level on wing trailing edges / flaps
+        "base_cell_size": 0.08,          // Finer background mesh (80 mm instead of 100 mm)
+        "surface_level": [4, 6],         // Refine surface to level 6 (1.25 mm)
+        "edge_level": 7                  // Feature edge refinement at 0.625 mm
     }
 }
 ```
@@ -1187,19 +1214,31 @@ The force CLI does not calculate front-axle load percentage. Derive aerodynamic 
 
 ## Automated Regression Tests
 
-The suite uses Python's `unittest`. Its plotting test requires the optional `matplotlib` dependency. Shell-script tests require a POSIX environment with Bash and are skipped on native Windows:
+The repository includes a comprehensive automated test suite consisting of **70 tests** implemented via Python's standard `unittest` framework:
 
 ```bash
-python -m pip install matplotlib
+# Run all automated tests:
 python -m unittest discover -s tests -v
 ```
 
-The tests exercise selected cases for:
-- Configuration errors, axis settings, and missing geometry files.
-- Domain derivation and ground/symmetry boundary alignment.
-- STL bounds, triangle counts, and preservation of vertex text during copying.
-- Force and residual parsing across restarts and malformed rows.
-- Generated shell syntax, monitor cleanup, and recovery behavior using fake OpenFOAM, MPI, and file-transfer commands.
+The test suite is organized into three specialized test modules:
+1. **[tests/test_regressions.py](file:///c:/Users/tadta/OneDrive/Documents/projects/OpenFOAM-CaseGenerator/tests/test_regressions.py) (30 Tests)**:
+   - Verifies configuration ingestion, default merging, and input validation.
+   - Tests geometric domain box derivation, symmetry clipping, and ground elevation alignment.
+   - Tests streaming STL inspection, facet counting, bounding boxes, and verbatim vertex copying.
+   - Tests multi-stage trajectory stitching across solver restarts and rolling average calculation.
+   - Validates that `convergence_monitor.py` has all Python type annotations dynamically stripped via AST for cluster portability on Python 3.6+.
+2. **[tests/test_shell_scripts.py](file:///c:/Users/tadta/OneDrive/Documents/projects/OpenFOAM-CaseGenerator/tests/test_shell_scripts.py) (11 Tests, POSIX Bash)**:
+   - Uses an isolated dummy OpenFOAM binary harness to test `Allrun`, `Allrun.parallel`, `Allclean`, and `run.sh` under real bash shells.
+   - Validates background monitor sub-process cleanup on exit/SIGINT/SIGTERM.
+   - Tests SLURM scratch RAM disk (`$TMPDIR`) execution, periodic `rsync` logging, and partial solution recovery on interruption (`reconstructPar -latestTime`).
+   *(Skipped automatically on native Windows systems).*
+3. **[tests/test_web_api.py](file:///c:/Users/tadta/OneDrive/Documents/projects/OpenFOAM-CaseGenerator/tests/test_web_api.py) (29 Tests)**:
+   - Verifies FastAPI REST endpoints, schema templates, and default config responses.
+   - Tests directory traversal attack defenses on configuration and STL file paths.
+   - Validates credential security (ensuring cluster passwords are never exposed in API responses).
+   - Tests mock SSH and SFTP cluster operations (SLURM queue parsing, remote job dispatching, cancellation).
+   - Validates force telemetry extraction, symmetry doubling, and logarithmic residual parsing.
 
 These tests do not execute OpenFOAM, measure large-file memory consumption, establish solver compatibility, or validate aerodynamic predictions.
 
