@@ -4,6 +4,8 @@ set -e
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 cd "$DIR"
 
+export PYTHONPATH="$DIR/src:${PYTHONPATH:-}"
+
 echo "======================================================================"
 echo "   OpenFOAM Studio - Case Generator & Cluster Dispatcher"
 echo "======================================================================"
@@ -23,12 +25,15 @@ fi
 
 source "$VENV_DIR/bin/activate"
 
-echo "[*] Checking web dependencies..."
-pip install -e ".[web]" --quiet
+if ! python3 -c "import fastapi, uvicorn, paramiko" &> /dev/null; then
+    echo "[*] Installing required web dependencies..."
+    pip install -e ".[web]"
+fi
 
 echo ""
 echo "[*] Starting CFD Studio Web Server..."
 echo "[*] Browser will open automatically at http://127.0.0.1:8000"
 echo ""
 
-python3 -m cfd_gen.web.server
+python3 -m cfd_gen.web.server "$@"
+

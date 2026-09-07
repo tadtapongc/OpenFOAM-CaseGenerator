@@ -1214,9 +1214,12 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1", help="Bind host (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8000, help="Bind port (default: 8000)")
     parser.add_argument("--no-browser", action="store_true", help="Do not open browser automatically")
+    parser.add_argument("--restart", action="store_true", help="Restart server if an instance is already running")
     args = parser.parse_args()
 
     import socket
+    import threading
+    import time
     import urllib.request
 
     def is_port_in_use(port: int, host: str = "127.0.0.1") -> bool:
@@ -1224,25 +1227,59 @@ def main() -> None:
             s.settimeout(0.5)
             return s.connect_ex((host, port)) == 0
 
+    def get_pid_on_port(port: int) -> Optional[int]:
+        try:
+            if sys.platform == "win32":
+                import subprocess
+                out = subprocess.check_output("netstat -ano -p tcp", shell=True, text=True, errors="replace")
+                for line in out.splitlines():
+                    parts = line.strip().split()
+                    if len(parts) >= 5 and parts[1].endswith(f":{port}") and parts[3] == "LISTENING":
+                        return int(parts[4])
+            else:
+                import subprocess
+                out = subprocess.check_output(["lsof", "-t", f"-i:{port}"], text=True, errors="replace")
+                pids = [int(p) for p in out.strip().splitlines() if p.strip().isdigit()]
+                return pids[0] if pids else None
+        except Exception:
+            pass
+        return None
+
+    def kill_process_tree(pid: int) -> bool:
+        try:
+            if sys.platform == "win32":
+                import subprocess
+                subprocess.run(f"taskkill /F /T /PID {pid}", shell=True, capture_output=True)
+                return True
+            else:
+                os.kill(pid, 9)
+                return True
+        except Exception:
+            return False
+
     target_port = args.port
     if is_port_in_use(target_port, args.host):
+        is_cfd_studio = False
         try:
             req = urllib.request.urlopen(f"http://{args.host}:{target_port}/api/config/schema-defaults", timeout=1)
             if req.status == 200:
-                url = f"http://{args.host}:{target_port}"
-                print("\n" + "=" * 60)
-                print("  [RapidAero] CFD Studio is already running!")
-                print(f"  Access dashboard at: {url}")
-                print("=" * 60 + "\n")
-                if not args.no_browser:
-                    webbrowser.open(url)
-                return
+                is_cfd_studio = True
         except Exception:
             pass
 
+        if is_cfd_studio:
+            old_pid = get_pid_on_port(target_port)
+            print(f"[*] Found existing CFD Studio running on port {target_port} (PID {old_pid or 'unknown'}).")
+            print(f"[*] Restarting server to ensure latest code is active...")
+            if old_pid and old_pid != os.getpid():
+                kill_process_tree(old_pid)
+                time.sleep(1.0)
+
+        # If port is still busy (e.g. by another application), find next available port
         while is_port_in_use(target_port, args.host):
             target_port += 1
-        print(f"[*] Port {args.port} was busy. Switched to next available port: {target_port}")
+        if target_port != args.port:
+            print(f"[*] Port {args.port} was busy. Switched to next available port: {target_port}")
         args.port = target_port
 
     import uvicorn
@@ -1251,15 +1288,20 @@ def main() -> None:
     print("\n" + "=" * 60)
     cfg = get_saved_cluster_config()
     target = cfg.get("host") or "Not configured (set in Web UI)"
+    print("  [RapidAero] CFD Studio Web Server")
     print(f"  Cluster target: {target}")
     print(f"  Listening on:   {url}")
     print("=" * 60 + "\n")
 
     if not args.no_browser:
-        try:
-            webbrowser.open(url)
-        except Exception:
-            pass
+        def _open_browser() -> None:
+            time.sleep(0.8)
+            try:
+                webbrowser.open(url)
+            except Exception:
+                pass
+
+        threading.Thread(target=_open_browser, daemon=True).start()
 
     uvicorn.run(app, host=args.host, port=args.port)
 

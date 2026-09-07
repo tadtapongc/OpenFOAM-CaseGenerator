@@ -1,12 +1,18 @@
 @echo off
 setlocal enabledelayedexpansion
 
-title Rapidamente CFD Studio - OpenFOAM Case Generator
+title OpenFOAM Studio - Case Generator and Cluster Dispatcher
 
 echo ======================================================================
-echo    OpenFOAM Studio - Case Generator & Cluster Dispatcher
+echo    OpenFOAM Studio - Case Generator and Cluster Dispatcher
 echo ======================================================================
 echo.
+
+:: Ensure working directory is the script's directory
+cd /d "%~dp0"
+
+:: Set PYTHONPATH so src/ is always discovered cleanly
+set "PYTHONPATH=%~dp0src;%PYTHONPATH%"
 
 :: Check for Python
 where python >nul 2>nul
@@ -34,15 +40,28 @@ if not exist "%VENV_DIR%\Scripts\activate.bat" (
 :: Activate virtualenv
 call "%VENV_DIR%\Scripts\activate.bat"
 
-:: Check and install dependencies
-echo [*] Checking web dependencies...
-pip install -e ".[web]" --quiet
+:: Check and install dependencies if missing
+python -c "import fastapi, uvicorn, paramiko" >nul 2>nul
+if %ERRORLEVEL% neq 0 (
+    echo [*] Checking and installing web dependencies...
+    pip install -e ".[web]"
+    if %ERRORLEVEL% neq 0 (
+        echo [ERROR] Failed to install dependencies.
+        pause
+        exit /b 1
+    )
+)
 
 echo.
 echo [*] Starting CFD Studio Web Server...
 echo [*] Browser will open automatically at http://127.0.0.1:8000
 echo.
 
-python -m cfd_gen.web.server
+python -m cfd_gen.web.server %*
 
-pause
+if %ERRORLEVEL% neq 0 (
+    echo.
+    echo [ERROR] Server exited with error code %ERRORLEVEL%.
+    pause
+)
+

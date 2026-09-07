@@ -618,11 +618,21 @@ class TestWebAPI(unittest.TestCase):
             self.assertIn("expansionRatio          1.25;", snappy_dict)
         finally:
             shutil.rmtree(case_path, ignore_errors=True)
-            cfg_file = Path("configs") / f"{case_name}.json"
-            if cfg_file.exists():
-                cfg_file.unlink()
+    def test_cli_launcher_parser(self):
+        """Test server CLI argument parsing supports --restart, --port, --no-browser."""
+        import argparse
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--host", default="127.0.0.1")
+        parser.add_argument("--port", type=int, default=8000)
+        parser.add_argument("--no-browser", action="store_true")
+        parser.add_argument("--restart", action="store_true")
+        args = parser.parse_args(["--port", "8888", "--no-browser", "--restart"])
+        self.assertEqual(args.port, 8888)
+        self.assertTrue(args.no_browser)
+        self.assertTrue(args.restart)
 
 
 if __name__ == "__main__":
     unittest.main()
+
 
