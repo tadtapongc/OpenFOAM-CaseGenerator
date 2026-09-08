@@ -714,13 +714,15 @@ async def api_telemetry_forces(case_name: str) -> dict[str, Any]:
     converged, d_pct, f_pct, d_avg, f_avg = check_convergence(drags, downforces)
     ld_ratio = (f_avg / d_avg) if abs(d_avg) > 1e-3 else 0.0
 
-    # Downsample points if there are thousands, to keep browser rendering butter-smooth
     max_pts = 400
     if len(times) > max_pts:
         step = math.ceil(len(times) / max_pts)
-        times_sub = times[::step]
-        drags_sub = drags[::step]
-        downforces_sub = downforces[::step]
+        sub_indices = list(range(0, len(times), step))
+        if sub_indices[-1] != len(times) - 1:
+            sub_indices.append(len(times) - 1)
+        times_sub = [times[i] for i in sub_indices]
+        drags_sub = [drags[i] for i in sub_indices]
+        downforces_sub = [downforces[i] for i in sub_indices]
     else:
         times_sub = times
         drags_sub = drags
@@ -843,7 +845,6 @@ async def api_telemetry_residuals(case_name: str) -> dict[str, Any]:
         find_cmd = (
             f"cd {shlex.quote(ssh_client.remote_repo_path)} && "
             f"find cases/{shlex.quote(case_name)}/postProcessing/residuals "
-            f"cases/{shlex.quote(case_name)}/processor*/postProcessing/residuals "
             f"\\( -name 'solverInfo.dat' -o -name 'residuals.dat' \\) 2>/dev/null | sort -V"
         )
         code, out, _ = await asyncio.to_thread(ssh_client.run_command, find_cmd, timeout=5)
@@ -984,6 +985,8 @@ async def api_telemetry_logs(case_name: str, log_type: str = "simpleFoam", lines
         "case_name": case_name,
         "log_type": log_type,
         "content": content or f"No entries in {filename} yet.",
+        "log_file": filename,
+        "size_bytes": len((content or "").encode("utf-8")),
     }
 
 
@@ -1164,6 +1167,9 @@ async def api_list_cases() -> list[dict[str, Any]]:
                 if cname in cases_dict:
                     local_entry = cases_dict[cname]
                     local_entry["location"] = "Local & Cluster"
+                    if rc.get("modified_ts", 0) > local_entry.get("modified_ts", 0):
+                        local_entry["modified_ts"] = rc["modified_ts"]
+                        local_entry["modified"] = rc.get("modified", local_entry["modified"])
                     # If remote has simulation activity or results, update local entry
                     if final_status in ("Solving", "Meshing", "Queued", "Converged", "Completed", "Failed") or rc.get("latest_iter") is not None:
                         local_iter = local_entry.get("latest_iter") or 0

@@ -433,8 +433,6 @@ if cases_dir.is_dir():
 
         # Read forces
         force_files = sorted(d.glob("postProcessing/forces/*/force.dat"))
-        if not force_files:
-            force_files = sorted(d.glob("processor*/postProcessing/forces/*/force.dat"))
 
         has_forces = len(force_files) > 0
         latest_iter = None

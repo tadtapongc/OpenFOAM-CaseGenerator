@@ -130,9 +130,6 @@ class CFDApp {
       if (this.telemetryPollingActive && activeTab && activeTab.dataset.tab === 'telemetry-tab') {
         this.pollTelemetry();
       }
-      if (activeTab && activeTab.dataset.tab === 'cases-tab') {
-        this.loadCasesArchive();
-      }
     }, 4000);
   }
 
@@ -1919,9 +1916,9 @@ class CFDApp {
       if (data.has_data) {
         if (forcesOverlay) forcesOverlay.style.display = 'none';
 
-        this.setValText('kpi-downforce', data.downforce_avg);
+        this.setKpiVal('kpi-downforce', data.downforce_avg, 'N');
         this.setValText('kpi-downforce-variation', `±${data.downforce_pct}% variation`);
-        this.setValText('kpi-drag', data.drag_avg);
+        this.setKpiVal('kpi-drag', data.drag_avg, 'N');
         this.setValText('kpi-drag-variation', `±${data.drag_pct}% variation`);
         this.setValText('kpi-ld', data.ld_ratio);
         this.setValText('kpi-iter', data.latest_iteration);
@@ -1946,9 +1943,9 @@ class CFDApp {
           this.charts.clear();
         }
 
-        this.setValText('kpi-downforce', '--');
+        this.setKpiVal('kpi-downforce', '--', 'N');
         this.setValText('kpi-downforce-variation', '±--% variation');
-        this.setValText('kpi-drag', '--');
+        this.setKpiVal('kpi-drag', '--', 'N');
         this.setValText('kpi-drag-variation', '±--% variation');
         this.setValText('kpi-ld', '--');
         this.setValText('kpi-iter', '0');
@@ -2069,24 +2066,28 @@ class CFDApp {
       // Populate Telemetry Case dropdown if cases exist
       if (select) {
         const currentVal = select.value;
-        select.innerHTML = '';
-        if (this.archiveCases.length === 0) {
-          const opt = document.createElement('option');
-          opt.value = '';
-          opt.textContent = '-- No cases generated yet --';
-          select.appendChild(opt);
-        } else {
-          this.archiveCases.forEach((c) => {
+        const newSig = this.archiveCases.map(c => `${c.name}:${c.location}:${c.status}:${c.converged}`).join('|');
+        if (select.dataset.caseSig !== newSig) {
+          select.dataset.caseSig = newSig;
+          select.innerHTML = '';
+          if (this.archiveCases.length === 0) {
             const opt = document.createElement('option');
-            opt.value = c.name;
-            const statusIcon = c.converged ? '✓' : (c.status && c.status.toLowerCase() === 'solving') ? '⚡' : '○';
-            opt.textContent = `${statusIcon} ${c.name} (${c.location})`;
+            opt.value = '';
+            opt.textContent = '-- No cases generated yet --';
             select.appendChild(opt);
-          });
-          if (currentVal && this.archiveCases.some(c => c.name === currentVal)) {
-            select.value = currentVal;
           } else {
-            select.value = this.archiveCases[0].name;
+            this.archiveCases.forEach((c) => {
+              const opt = document.createElement('option');
+              opt.value = c.name;
+              const statusIcon = c.converged ? '✓' : (c.status && c.status.toLowerCase() === 'solving') ? '⚡' : '○';
+              opt.textContent = `${statusIcon} ${c.name} (${c.location})`;
+              select.appendChild(opt);
+            });
+            if (currentVal && this.archiveCases.some(c => c.name === currentVal)) {
+              select.value = currentVal;
+            } else {
+              select.value = this.archiveCases[0].name;
+            }
           }
         }
       }
@@ -2173,8 +2174,9 @@ class CFDApp {
 
       // Flow conditions
       let velDisplay = '--';
-      if (typeof c.velocity === 'number') {
-        velDisplay = `${(c.velocity * 3.6).toFixed(1)} km/h (${c.velocity.toFixed(1)} m/s)`;
+      const velNum = typeof c.velocity === 'number' ? c.velocity : parseFloat(c.velocity);
+      if (!isNaN(velNum)) {
+        velDisplay = `${(velNum * 3.6).toFixed(1)} km/h (${velNum.toFixed(1)} m/s)`;
       } else if (c.velocity) {
         velDisplay = c.velocity;
       }
@@ -2269,6 +2271,13 @@ class CFDApp {
   setValText(id, text) {
     const el = document.getElementById(id);
     if (el) el.textContent = text;
+  }
+
+  setKpiVal(id, val, unit = 'N') {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const displayVal = (val !== null && val !== undefined) ? val : '--';
+    el.innerHTML = `${displayVal} <span class="kpi-unit">${unit}</span>`;
   }
 
   getCheck(id) {

@@ -659,8 +659,103 @@ class TestWebAPI(unittest.TestCase):
             if cfg_file.exists():
                 cfg_file.unlink()
 
+    def test_telemetry_logs_api_contract(self):
+        """Test that api_telemetry_logs returns log_file and size_bytes metadata."""
+        case_dir = Path("cases") / "test_log_contract"
+        case_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            log_file = case_dir / "log.simpleFoam"
+            log_file.write_text("Iteration 1\nIteration 2\nDone.\n", encoding="utf-8")
+            res = asyncio.run(api_telemetry_logs("test_log_contract", "simpleFoam"))
+            self.assertEqual(res["case_name"], "test_log_contract")
+            self.assertEqual(res["log_type"], "simpleFoam")
+            self.assertEqual(res["log_file"], "log.simpleFoam")
+            self.assertGreater(res["size_bytes"], 0)
+            self.assertIn("Iteration 2", res["content"])
+        finally:
+            shutil.rmtree(case_dir, ignore_errors=True)
+
+    def test_telemetry_forces_downsampling_preserves_last_point(self):
+        """Test that downsampling preserves the final iteration point when len > 400."""
+        case_dir = Path("cases") / "test_downsampling_case"
+        forces_dir = case_dir / "postProcessing" / "forces" / "0"
+        forces_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            # Generate 550 lines of force data
+            lines = ["# Time (f_px f_py f_pz) (f_vx f_vy f_vz) (f_porx f_pory f_porz)"]
+            for i in range(1, 551):
+                lines.append(f"{i} (0 -50 20) (0 -5 2) (0 0 0)")
+            (forces_dir / "force.dat").write_text("\n".join(lines), encoding="utf-8")
+
+            res = asyncio.run(api_telemetry_forces("test_downsampling_case"))
+            self.assertTrue(res["has_data"])
+            self.assertEqual(res["total_iterations"], 550)
+            self.assertEqual(res["latest_iteration"], 550)
+            # Downsampled series must end with the final iteration 550
+            series_times = res["series"]["iterations"]
+            self.assertLessEqual(len(series_times), 401)
+            self.assertEqual(series_times[-1], 550)
+        finally:
+            shutil.rmtree(case_dir, ignore_errors=True)
+
+    def test_api_list_cases_remote_modified_timestamp_update(self):
+        """Test that remote cases with newer modified_ts update local_entry and sort properly."""
+        case_dir = Path("cases") / "test_sort_case"
+        case_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            # Mock remote case with future timestamp
+            remote_case = {
+                "name": "test_sort_case",
+                "status": "Solving",
+                "latest_iter": 700,
+                "modified": "2026-09-08 12:00:00",
+                "modified_ts": 1900000000.0,
+                "fidelity": "standard",
+                "velocity": "20.0",
+                "direction": "-z",
+                "n_procs": 32,
+                "stl": "wing.stl",
+                "has_forces": True,
+                "has_residuals": True,
+                "converged": False,
+                "downforce": 120.5,
+                "drag": 45.2,
+                "ld_ratio": 2.66,
+            }
+            with patch.object(ClusterSSHClient, "is_connected", new_callable=PropertyMock, return_value=True):
+                with patch.object(ClusterSSHClient, "list_remote_cases_detailed", return_value=[remote_case]):
+                    cases = asyncio.run(api_list_cases())
+                    matched = next((c for c in cases if c["name"] == "test_sort_case"), None)
+                    self.assertIsNotNone(matched)
+                    self.assertEqual(matched["location"], "Local & Cluster")
+                    self.assertEqual(matched["status"], "Solving")
+                    self.assertEqual(matched["latest_iter"], 700)
+                    self.assertEqual(matched["modified_ts"], 1900000000.0)
+                    self.assertEqual(matched["modified"], "2026-09-08 12:00:00")
+                    # Should be sorted first due to high modified_ts
+                    self.assertEqual(cases[0]["name"], "test_sort_case")
+        finally:
+            shutil.rmtree(case_dir, ignore_errors=True)
+
+    def test_remote_residuals_find_command_no_processor_dirs(self):
+        """Test that remote find residuals command does not query processor* subdirectories."""
+        captured_cmds = []
+
+        def mock_run_command(cmd, timeout=5):
+            captured_cmds.append(cmd)
+            return (1, "", "")
+
+        with patch.object(ClusterSSHClient, "is_connected", new_callable=PropertyMock, return_value=True):
+            with patch.object(ClusterSSHClient, "run_command", side_effect=mock_run_command):
+                asyncio.run(api_telemetry_residuals("test_case"))
+                find_cmds = [c for c in captured_cmds if "find cases/" in c]
+                self.assertTrue(len(find_cmds) > 0)
+                self.assertNotIn("processor*", find_cmds[0])
+                self.assertIn("cases/test_case/postProcessing/residuals", find_cmds[0])
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
