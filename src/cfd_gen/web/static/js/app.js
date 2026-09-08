@@ -2054,9 +2054,18 @@ class CFDApp {
 
       // Update Summary Stat Cards
       const total = this.archiveCases.length;
-      const converged = this.archiveCases.filter(c => c.converged || (c.status && c.status.toLowerCase() === 'converged')).length;
-      const solving = this.archiveCases.filter(c => c.status && ['solving', 'meshing', 'queued', 'completing'].includes(c.status.toLowerCase())).length;
-      const ready = this.archiveCases.filter(c => !c.converged && c.status && !['solving', 'meshing', 'queued', 'completing', 'converged', 'failed'].includes(c.status.toLowerCase())).length;
+      const converged = this.archiveCases.filter(c => {
+        const s = (c.status || '').toLowerCase();
+        return c.converged || s === 'converged' || s === 'completed';
+      }).length;
+      const solving = this.archiveCases.filter(c => {
+        const s = (c.status || '').toLowerCase();
+        return ['solving', 'meshing', 'queued', 'completing'].includes(s);
+      }).length;
+      const ready = this.archiveCases.filter(c => {
+        const s = (c.status || '').toLowerCase();
+        return ['generated', 'meshed', 'ready'].includes(s);
+      }).length;
 
       this.setValText('stat-total-cases', total);
       this.setValText('stat-converged-cases', converged);
@@ -2111,7 +2120,7 @@ class CFDApp {
       filtered = filtered.filter(c => {
         const s = (c.status || '').toLowerCase();
         if (f === 'converged') return c.converged || s === 'converged';
-        if (f === 'completed') return s === 'completed' || c.converged || s === 'converged';
+        if (f === 'completed') return s === 'completed';
         if (f === 'solving') return ['solving', 'meshing', 'queued', 'completing'].includes(s);
         if (f === 'failed') return s === 'failed';
         if (f === 'generated') return ['generated', 'meshed', 'ready'].includes(s);

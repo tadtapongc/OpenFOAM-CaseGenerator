@@ -990,6 +990,18 @@ async def api_telemetry_logs(case_name: str, log_type: str = "simpleFoam", lines
     }
 
 
+def read_file_tail(file_path: Path, max_bytes: int = 8192) -> str:
+    """Read the tail of a file efficiently without loading the whole file into memory."""
+    try:
+        size = file_path.stat().st_size
+        with open(file_path, "rb") as f:
+            if size > max_bytes:
+                f.seek(size - max_bytes)
+            return f.read().decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
+
 @app.get("/api/cases")
 async def api_list_cases() -> list[dict[str, Any]]:
     """List simulation cases from local directory and cluster with comprehensive metadata."""
@@ -1076,35 +1088,31 @@ async def api_list_cases() -> list[dict[str, Any]]:
             log_simple = d / "log.simpleFoam"
             if log_simple.is_file():
                 has_residuals = True
-                try:
-                    with open(log_simple, encoding="utf-8", errors="replace") as f:
-                        lines = f.readlines()
-                        tail = "".join(lines[-30:])
-                        if "End" in tail or "Finalising parallel run" in tail:
-                            status = "Converged" if converged else "Completed"
-                        elif any(err in tail for err in ["FOAM FATAL", "Fatal error", "FOAM aborting", "sigFpe", "SIGFPE", "Floating point exception"]):
-                            status = "Failed"
-                        elif status != "Converged":
-                            status = "Solving"
-                except Exception:
-                    pass
+                tail = read_file_tail(log_simple)
+                if "End" in tail or "Finalising parallel run" in tail:
+                    status = "Converged" if converged else "Completed"
+                elif any(err in tail for err in ["FOAM FATAL", "Fatal error", "FOAM aborting", "sigFpe", "SIGFPE", "Floating point exception"]):
+                    status = "Failed"
+                elif status != "Converged":
+                    # If modified in the last 3 minutes, it's actively solving; otherwise terminated
+                    if (datetime.now().timestamp() - st.st_mtime) < 180:
+                        status = "Solving"
+                    else:
+                        status = "Completed" if (latest_iter and latest_iter > 0) else "Failed"
 
             # Check mesher stage if still generated
             if status == "Generated":
                 log_snappy = d / "log.snappyHexMesh"
                 if log_snappy.is_file():
-                    try:
-                        with open(log_snappy, encoding="utf-8", errors="replace") as f:
-                            lines = f.readlines()
-                            tail = "".join(lines[-30:])
-                            if "End" in tail or "Finalising parallel run" in tail:
-                                status = "Meshed"
-                            elif any(err in tail for err in ["FOAM FATAL", "Fatal error", "FOAM aborting", "sigFpe", "SIGFPE"]):
-                                status = "Failed"
-                            else:
-                                status = "Meshing"
-                    except Exception:
+                    tail = read_file_tail(log_snappy)
+                    if "End" in tail or "Finalising parallel run" in tail:
                         status = "Meshed"
+                    elif any(err in tail for err in ["FOAM FATAL", "Fatal error", "FOAM aborting", "sigFpe", "SIGFPE"]):
+                        status = "Failed"
+                    elif (datetime.now().timestamp() - st.st_mtime) < 180:
+                        status = "Meshing"
+                    else:
+                        status = "Failed"
                 elif has_mesh:
                     status = "Meshed"
 
@@ -1146,7 +1154,8 @@ async def api_list_cases() -> list[dict[str, Any]]:
                 sjob = slurm_by_name.get(cname)
                 if not sjob:
                     for jn, job_obj in slurm_by_name.items():
-                        if jn == cname or jn.startswith(cname) or cname.startswith(jn):
+                        # Only match prefix if the scheduler truncated a long job name (>= 8 chars)
+                        if len(jn) >= 8 and cname.startswith(jn):
                             sjob = job_obj
                             break
 
@@ -1162,7 +1171,20 @@ async def api_list_cases() -> list[dict[str, Any]]:
                     elif st in ("FAILED", "NODE_FAIL", "TIMEOUT", "CANCELLED"):
                         slurm_status = "Failed"
 
-                final_status = slurm_status or rc.get("status", "Generated")
+                disk_status = rc.get("status", "Generated")
+                # Clean up zombie "Solving" / "Meshing" status if not active in SLURM or within last 3 mins
+                if not sjob and disk_status in ("Solving", "Meshing"):
+                    now_ts = datetime.now().timestamp()
+                    is_active = (now_ts - rc.get("modified_ts", 0)) < 180
+                    if not is_active:
+                        if rc.get("converged"):
+                            disk_status = "Converged"
+                        elif rc.get("latest_iter") is not None and rc.get("latest_iter", 0) > 0:
+                            disk_status = "Completed"
+                        else:
+                            disk_status = "Failed"
+
+                final_status = slurm_status or disk_status
 
                 if cname in cases_dict:
                     local_entry = cases_dict[cname]

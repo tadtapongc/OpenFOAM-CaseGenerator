@@ -382,6 +382,16 @@ def parse_axis(axis_str):
     idx = AXIS_MAP.get(s.lstrip("+-"), 0)
     return idx, sign
 
+def read_tail(fpath, max_bytes=8192):
+    try:
+        sz = fpath.stat().st_size
+        with open(str(fpath), "rb") as f:
+            if sz > max_bytes:
+                f.seek(sz - max_bytes)
+            return f.read().decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
 results = []
 if cases_dir.is_dir():
     for d in sorted(cases_dir.iterdir()):
@@ -499,31 +509,21 @@ if cases_dir.is_dir():
         has_mesh = (d / "constant" / "polyMesh" / "points").is_file()
 
         if log_simple.is_file():
-            try:
-                with open(str(log_simple), encoding="utf-8", errors="replace") as f:
-                    lines = f.readlines()
-                    tail = "".join(lines[-30:])
-                    if "End" in tail or "Finalising parallel run" in tail:
-                        status = "Converged" if converged else "Completed"
-                    elif any(err in tail for err in ["FOAM FATAL", "Fatal error", "FOAM aborting", "sigFpe", "SIGFPE", "Floating point exception"]):
-                        status = "Failed"
-                    else:
-                        status = "Solving"
-            except Exception:
-                status = "Solving" if not converged else "Converged"
+            tail = read_tail(log_simple)
+            if "End" in tail or "Finalising parallel run" in tail:
+                status = "Converged" if converged else "Completed"
+            elif any(err in tail for err in ["FOAM FATAL", "Fatal error", "FOAM aborting", "sigFpe", "SIGFPE", "Floating point exception"]):
+                status = "Failed"
+            else:
+                status = "Solving"
         elif (d / "log.snappyHexMesh").is_file():
-            try:
-                with open(str(d / "log.snappyHexMesh"), encoding="utf-8", errors="replace") as f:
-                    lines = f.readlines()
-                    tail = "".join(lines[-30:])
-                    if "End" in tail or "Finalising parallel run" in tail:
-                        status = "Meshed"
-                    elif any(err in tail for err in ["FOAM FATAL", "Fatal error", "FOAM aborting", "sigFpe", "SIGFPE"]):
-                        status = "Failed"
-                    else:
-                        status = "Meshing"
-            except Exception:
+            tail = read_tail(d / "log.snappyHexMesh")
+            if "End" in tail or "Finalising parallel run" in tail:
                 status = "Meshed"
+            elif any(err in tail for err in ["FOAM FATAL", "Fatal error", "FOAM aborting", "sigFpe", "SIGFPE"]):
+                status = "Failed"
+            else:
+                status = "Meshing"
         elif has_mesh:
             status = "Meshed"
 

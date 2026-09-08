@@ -753,6 +753,71 @@ class TestWebAPI(unittest.TestCase):
                 self.assertNotIn("processor*", find_cmds[0])
                 self.assertIn("cases/test_case/postProcessing/residuals", find_cmds[0])
 
+    def test_slurm_job_matching_no_short_prefix_collision(self):
+        """Test that a short SLURM job name ('EV') does not match a longer case name ('EV_TUR50')."""
+        remote_case = {
+            "name": "EV_TUR50",
+            "status": "Generated",
+            "latest_iter": 0,
+            "modified": "2026-09-08 07:00:00",
+            "modified_ts": 1000.0,
+            "fidelity": "standard",
+            "velocity": "20.0",
+            "direction": "-z",
+            "n_procs": 32,
+            "stl": "wing.stl",
+            "has_forces": False,
+            "has_residuals": False,
+            "converged": False,
+            "downforce": None,
+            "drag": None,
+            "ld_ratio": None,
+        }
+        # SLURM queue has an active job named 'EV', not 'EV_TUR50'
+        slurm_queue = [
+            {"job_id": "12345", "name": "EV", "state": "RUNNING"}
+        ]
+        with patch.object(ClusterSSHClient, "is_connected", new_callable=PropertyMock, return_value=True):
+            with patch.object(ClusterSSHClient, "get_slurm_queue", return_value=slurm_queue):
+                with patch.object(ClusterSSHClient, "list_remote_cases_detailed", return_value=[remote_case]):
+                    cases = asyncio.run(api_list_cases())
+                    matched = next((c for c in cases if c["name"] == "EV_TUR50"), None)
+                    self.assertIsNotNone(matched)
+                    # Must NOT have been hijacked by the 'EV' job into 'Solving'
+                    self.assertNotEqual(matched["status"], "Solving")
+                    self.assertNotEqual(matched["status"], "Queued")
+                    self.assertEqual(matched["status"], "Generated")
+
+    def test_inactive_remote_case_zombie_solving_transition(self):
+        """Test that an inactive remote case without a SLURM job transitions from Solving to Completed."""
+        remote_case = {
+            "name": "dead_solving_case",
+            "status": "Solving",
+            "latest_iter": 650,
+            "modified": "2026-09-08 00:00:00",
+            "modified_ts": 1000.0,  # Old timestamp (> 3 mins ago)
+            "fidelity": "standard",
+            "velocity": "20.0",
+            "direction": "-z",
+            "n_procs": 32,
+            "stl": "wing.stl",
+            "has_forces": True,
+            "has_residuals": True,
+            "converged": False,
+            "downforce": 150.0,
+            "drag": 60.0,
+            "ld_ratio": 2.5,
+        }
+        # Empty SLURM queue (job finished or killed)
+        with patch.object(ClusterSSHClient, "is_connected", new_callable=PropertyMock, return_value=True):
+            with patch.object(ClusterSSHClient, "get_slurm_queue", return_value=[]):
+                with patch.object(ClusterSSHClient, "list_remote_cases_detailed", return_value=[remote_case]):
+                    cases = asyncio.run(api_list_cases())
+                    matched = next((c for c in cases if c["name"] == "dead_solving_case"), None)
+                    self.assertIsNotNone(matched)
+                    # Must transition to Completed rather than being stuck on Solving
+                    self.assertEqual(matched["status"], "Completed")
+
 
 if __name__ == "__main__":
     unittest.main()
