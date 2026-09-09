@@ -42,13 +42,13 @@ The Studio will automatically open in your browser at `http://127.0.0.1:8000`.
    - Rotate, pan, and zoom in the 3D viewport.
    - The yellow wireframe box is the **computational domain** (wind tunnel). It automatically resizes whenever you change padding or car dimensions.
 3. **Configure Flow & Physics**:
-   - **Velocity**: Set freestream speed (e.g. `20 m/s` for FSAE).
-   - **Fidelity Preset**: Choose mesh quality:
-     - `Coarse` (~500k cells): Quick sanity check in minutes.
-     - `Standard` (~2M–4M cells): Balanced engineering iteration.
-     - `Fine` (~8M+ cells): Detailed final design study.
-   - **Ground & Ride Height**: Set moving ground plane velocity and wheel contact height.
-   - **Symmetry Plane**: Enable half-car simulation along $X=0$ to cut cell count and solve time by 50%.
+   - **Velocity**: Set freestream speed in m/s (e.g. `20 m/s` for FSAE, `16.67 m/s` = 60 km/h).
+   - **Fidelity Preset**: Choose mesh quality preset:
+     - `fast` (~2–4M cells, ~10 min): Quick design sanity check.
+     - `standard` (~6–9M cells, ~30–60 min): Balanced sweet spot for Formula Student aero package iteration. *(Recommended)*
+     - `fine` (~12–16M cells, ~2–4 hrs): High-resolution final aerodynamic validation.
+   - **Ground & Ride Height**: Set moving ground plane (`true`/`false`) and road clearance/elevation.
+   - **Symmetry Plane**: Enable half-car simulation along $X=0$ (or offset) to cut cell count and solve time by 50%.
 
 ---
 
@@ -76,21 +76,23 @@ stl/my_wing.stl
 ---
 
 ### Step 2: Configure Your Case
-Copy or edit `configs/config.json`:
+Copy or edit `configs/config.json`. A clean, minimal working example:
 ```json
 {
   "case_name": "front_wing_iter1",
-  "stl_names": ["my_wing"],
+  "stl_files": ["my_wing.stl"],
+  "fidelity": "standard",
   "flow": {
     "velocity": 20.0,
-    "flow_axis": "-z",
-    "up_axis": "+y"
+    "direction": "-z",
+    "ground": true
   },
-  "fidelity": "standard",
-  "domain": {
-    "ground_plane": "auto",
-    "symmetry_plane": 0.0
+  "outputs": {
+    "drag_axis": "-z",
+    "downforce_axis": "-y"
   },
+  "domain_box": "auto",
+  "symmetry_plane": 0.0,
   "parallel": {
     "n_procs": 8
   }
@@ -132,12 +134,17 @@ cd cases/front_wing_iter1
 ```
 
 The script automatically executes:
-1. `surfaceFeatureExtract` (captures sharp aerodynamic edges)
-2. `blockMesh` (creates background wind tunnel mesh)
-3. `snappyHexMesh` (snaps mesh to vehicle surfaces & refines wake boxes)
-4. `checkMesh` (verifies mesh quality)
-5. `potentialFoam` (initializes smooth velocity field)
-6. `simpleFoam` (incompressible turbulent Navier-Stokes solver with force auto-stop)
+1. `surfaceFeatureExtract` (extracts sharp aerodynamic feature lines)
+2. `blockMesh` (generates hexahedral background domain mesh)
+3. `decomposePar` (distributes domain across MPI ranks)
+4. `snappyHexMesh -overwrite` (conforming body snapping, distance shells, wake boxes & boundary layers in parallel)
+5. `checkMesh` (checks mesh quality & orthogonality in parallel)
+6. `reconstructParMesh` & `renumberMesh` (unifies and renumbers mesh bandwidth)
+7. `decomposePar` (redistributes final mesh for solver)
+8. `potentialFoam` (initializes divergence-free potential velocity field)
+9. `convergence_monitor.py` (background process tracking force convergence)
+10. `simpleFoam` (incompressible turbulent Navier-Stokes with SIMPLEC and $k$-$\omega$ SST)
+11. `reconstructPar` (collates parallel time steps back to reconstructed case)
 
 ---
 
@@ -174,7 +181,7 @@ python read_forces.py --compare
    - If your car or wing is symmetric and running straight (zero yaw angle), simulate half the car along $X=0$.
    - This cuts mesh cell count in half and doubles your simulation turnaround speed. RapidFOAM automatically doubles forces back to full-car values in summaries.
 4. **Auto-Stop Convergence**:
-   - RapidFOAM monitors force oscillation. Once drag and downforce vary by less than $\pm 1\%$ over the last 100 iterations, it cleanly stops the solver (`stopAt writeNow;`), saving compute hours on your cluster.
+   - RapidFOAM runs `convergence_monitor.py` in the background. Once drag and downforce variation drops below $\pm 0.5\%$ over a rolling window of 200 iterations (after a minimum of 300 iterations), it sets `stopAt writeNow;` to cleanly finish the solver, saving precious HPC compute hours.
 
 ---
 
