@@ -2,19 +2,35 @@
 
 OpenFOAM external aerodynamics automation suite and Web Studio developed for **Rapidamente Formula Student** (Chulalongkorn University).
 
-RapidFOAM automates the end-to-end OpenFOAM workflow for vehicle aerodynamics: CAD STL geometry ingestion, automatic wind tunnel domain sizing, `snappyHexMesh` refinement (surfaces, feature edges, distance shells, two-stage wake boxes, and boundary layer inflation), `simpleFoam` case configuration (SIMPLEC, k-omega SST), parallel execution, and real-time aerodynamic force telemetry (Drag, Downforce, L/D, Cd, Cl).
+RapidFOAM streamlines the OpenFOAM workflow for external vehicle aerodynamics: CAD STL ingestion, domain bounding box calculation, `snappyHexMesh` refinement dictionary generation (surfaces, feature edges, distance shells, two-stage wake boxes, and boundary layers), `simpleFoam` steady-state case setup (SIMPLEC, k-omega SST), execution scripts, and real-time force convergence monitoring (Drag, Downforce, L/D).
 
 ---
 
 ## Features
 
-- **Automated Case Generation**: Generates complete, ready-to-run OpenFOAM cases (`0/`, `constant/`, `system/`, and shell scripts) from a single JSON configuration.
-- **Smart Domain & Mesh Sizing**: Automatically bounds the virtual wind tunnel around input STL geometries, configures wake refinement boxes, and sets up boundary layer inflation.
-- **Fidelity Presets**: Built-in mesh templates (`fast`, `standard`, `fine`) calibrated for rapid concept screening versus high-resolution validation.
-- **Symmetry Plane Support**: Half-car simulations along `x = 0` cut mesh count and compute time in half, with automatic force scaling back to full-car values in summaries and plots.
-- **Interactive Web Studio**: Three.js 3D domain visualizer, interactive config editor, live convergence telemetry, and 1-click remote HPC cluster dispatching via SSH/SLURM.
-- **Live Telemetry & Auto-Stop**: Convergence monitor tracks rolling force variation and signals `stopAt writeNow;` once drag and downforce stabilize within +/- 0.5%, saving compute hours.
-- **Post-Processing CLI**: Tabulate aerodynamic forces, plot live convergence curves, and compare multiple case iterations side-by-side.
+- **Case Directory Generation**: Generates complete OpenFOAM case structures (`0/`, `constant/`, `system/`) and execution scripts from a single JSON configuration.
+- **Domain & Mesh Parameter Derivation**: Derives wind tunnel dimensions from STL bounding boxes, creates two-stage wake refinement regions (`nearWakeBox`, `farWakeBox`), distance shells, and boundary layer controls.
+- **Mesh Fidelity Presets**: Predefined configuration presets (`fast`, `standard`, `fine`) targeting different cell count budgets and turnaround times.
+- **Symmetry Plane Support**: Half-car simulations (e.g. `x = 0`) cut mesh cell count roughly in half, with automatic 2x force scaling in summaries and comparison tables.
+- **Web Studio Interface**: Browser-based UI with Three.js 3D domain visualization, interactive parameter editor, real-time convergence charts, and remote SLURM cluster job submission over SSH.
+- **Convergence Auto-Stop**: Background monitor tracks rolling force variation and signals `stopAt writeNow;` once drag and downforce stabilize within a user-defined threshold (default +/- 0.5%).
+- **Post-Processing CLI**: Tabulates aerodynamic forces (Drag, Downforce, L/D), plots live convergence curves, and compares multiple case iterations side-by-side.
+
+---
+
+## OpenFOAM Compatibility & Environment
+
+### Supported OpenFOAM Versions
+
+- **Primary Target**: **ESI-OpenCFD releases (OpenFOAM v2006, v2106, v2206, v2306, v2406)**
+  - The generated dictionaries utilize OpenCFD syntax conventions (such as `libs (forces);` function objects and modern Open MPI process binding options).
+- **OpenFOAM Foundation (v8, v9, v10, v11)**:
+  - The core solvers (`simpleFoam`, `snappyHexMesh`, `blockMesh`, `surfaceFeatureExtract`) and boundary condition structures are largely compatible. Note that minor syntax differences (such as function object library naming like `"libforces.so"`) may apply depending on the specific release.
+
+### Environment Configuration
+The path to your OpenFOAM installation is configured in `configs/config.json` under `"slurm"`:
+- `openfoam_source`: Path to your OpenFOAM environment script (e.g. `"$HOME/OpenFOAM/OpenFOAM-v2306/etc/bashrc"` or `"/opt/openfoam2206/etc/bashrc"`).
+- `openfoam_module`: List of environment modules to load on HPC clusters (e.g. `["GCC/11.3.0", "OpenMPI/4.1.4-GCC-11.3.0"]` or `["OpenFOAM/v2206-foss-2022a"]`), or `null` if sourcing directly.
 
 ---
 
@@ -23,7 +39,7 @@ RapidFOAM automates the end-to-end OpenFOAM workflow for vehicle aerodynamics: C
 ### Prerequisites
 
 - **Python**: 3.9 or higher
-- **OpenFOAM**: OpenFOAM v2006+ (e.g. v2006, v2206, v2306, v2406) or OpenFOAM 8/9/10/11 installed on the execution machine or cluster.
+- **OpenFOAM**: Installed locally or on the remote cluster (see compatibility above).
 
 ### Setup
 
@@ -50,13 +66,13 @@ Installed console scripts:
 
 ## Usage
 
-RapidFOAM can be run through the interactive browser-based Studio or directly via the command line.
+RapidFOAM can be run through the interactive Web Studio or via the command line.
 
 ### Web Studio
 
-The Web Studio provides a 3D visual viewport to inspect wind tunnel dimensions, edit flow conditions, generate cases, and manage remote HPC runs.
+The Web Studio provides a 3D viewport to inspect domain sizing, edit flow conditions, generate cases, and manage remote HPC jobs.
 
-- **Windows**: Double-click `run_app.bat` (or execute `run_app.bat` in CMD / PowerShell).
+- **Windows**: Run `run_app.bat` (or double-click it in Windows Explorer).
 - **Linux / macOS**: Run `./run_app.sh` in terminal.
 - **Direct Command**:
   ```bash
@@ -67,12 +83,12 @@ The Web Studio provides a 3D visual viewport to inspect wind tunnel dimensions, 
 
 Open `http://127.0.0.1:8000` in your browser.
 
-1. **Upload Geometry**: Drag and drop ASCII STL files into the 3D viewer. Multiple components (e.g. chassis, front wing, rear wing) can be viewed together.
-2. **Set Parameters**: Adjust velocity, fidelity preset, ground clearance, and symmetry plane. The yellow wireframe domain updates dynamically in the 3D viewport.
+1. **Upload Geometry**: Drop ASCII STL files into the 3D viewer. Multiple components (e.g. chassis, front wing, rear wing) can be viewed together.
+2. **Configure Parameters**: Adjust velocity, fidelity preset, ground clearance, and symmetry planes. The yellow wireframe domain updates dynamically in the 3D viewport.
 3. **Run Locally or on HPC**:
    - Click **Generate Case** to build the case directory under `cases/<case_name>/`.
-   - Use the **Cluster SSH** dialog to connect to your remote SLURM cluster, transfer the case, and monitor the queue.
-4. **Monitor Telemetry**: Watch residual histories and force curves stream in real time.
+   - Use the **Cluster SSH** dialog to connect to a remote SLURM cluster, transfer the case files, and submit the batch job.
+4. **Monitor Telemetry**: Watch force histories (Drag, Downforce) and residuals update as the case solves.
 
 ---
 
@@ -81,20 +97,22 @@ Open `http://127.0.0.1:8000` in your browser.
 For headless servers, batch sweeps, or automated pipelines:
 
 #### 1. Initialize Workspace (Optional)
-To create a clean starter directory structure with sample configs:
+To create a starter directory structure with a sample configuration:
 ```bash
 python setup_case.py --init
 ```
-This sets up `stl/`, `cases/`, and `configs/config.json`.
+This creates `stl/`, `cases/`, and `configs/config.json`.
 
-#### 2. Add Geometry
+#### 2. Place CAD Geometry
 Export your geometry as an **ASCII STL** in **meters** and place it in the `stl/` folder:
 ```bash
 stl/my_wing.stl
 ```
 
+> **Geometry Note**: `snappyHexMesh` requires clean, watertight surface geometry without open holes or self-intersecting triangles. Check and repair CAD exports before meshing.
+
 #### 3. Configure Case
-Edit `configs/config.json` or create a new JSON config:
+Edit `configs/config.json` or create a case-specific JSON config:
 
 ```json
 {
@@ -118,48 +136,45 @@ Edit `configs/config.json` or create a new JSON config:
 }
 ```
 
-#### 4. Preview (Dry Run)
-Inspect domain bounds, estimated cell sizing, and boundary assignments without writing files:
+#### 4. Preview Settings (Dry Run)
+Inspect domain extents, estimated base cell sizes, and boundary assignments without writing files:
 ```bash
 python setup_case.py configs/config.json --dry-run
-# or using the CLI shortcut:
+# or:
 rapidfoam-setup configs/config.json -n
 ```
 
 #### 5. Generate Case
-Create the complete OpenFOAM case directory structure:
+Generate the complete OpenFOAM case directory:
 ```bash
 python setup_case.py configs/config.json
 ```
 This generates `cases/<case_name>/` containing `0/`, `constant/`, `system/`, and execution scripts:
-- `Allrun.parallel`: Full parallel pipeline (MPI)
-- `Allrun`: Serial pipeline
-- `Allclean`: Resets the case directory and restores initial fields
-- `run.sh`: Ready-to-submit SLURM cluster batch script (`sbatch run.sh`)
-- `convergence_monitor.py`: Standalone monitor script embedded in the case
+- `Allrun.parallel`: MPI parallel execution script
+- `Allrun`: Single-core execution script
+- `Allclean`: Resets the case directory and restores initial condition fields
+- `run.sh`: SLURM batch submission script (`sbatch run.sh`)
+- `convergence_monitor.py`: Embedded auto-stop monitor script
 
 #### 6. Run the Simulation
-Navigate to the generated case directory and start the solver:
+Navigate to the case directory and execute the run script:
 
 ```bash
 cd cases/front_wing_v1
 
-# Parallel execution using MPI:
+# Run in parallel using MPI:
 ./Allrun.parallel
-
-# Or single-core:
-./Allrun
 
 # Or submit to a SLURM cluster:
 sbatch run.sh
 ```
 
-The run script executes the standard OpenFOAM external aero pipeline:
-1. `surfaceFeatureExtract` (extracts sharp feature edges to `.eMesh`)
+The script executes the standard OpenFOAM external aerodynamics pipeline:
+1. `surfaceFeatureExtract` (extracts feature edges to `.eMesh`)
 2. `blockMesh` (creates background hexahedral mesh)
 3. `decomposePar` (splits domain across MPI ranks)
 4. `snappyHexMesh -overwrite` (surface snapping, refinement regions, boundary layers in parallel)
-5. `checkMesh` (verifies mesh orthogonality and aspect ratio)
+5. `checkMesh` (verifies mesh orthogonality and quality metrics)
 6. `reconstructParMesh` & `renumberMesh` (assembles and renumbers mesh)
 7. `decomposePar` (redistributes mesh for solver ranks)
 8. `potentialFoam` (initializes divergence-free flow field)
@@ -167,8 +182,8 @@ The run script executes the standard OpenFOAM external aero pipeline:
 10. `simpleFoam` (incompressible SIMPLEC solver with k-omega SST)
 11. `reconstructPar` (collates parallel results back to root time directories)
 
-#### 7. Read Aerodynamic Forces
-Extract forces, check convergence, or generate plots:
+#### 7. Post-Process Aerodynamic Forces
+Extract forces, verify convergence, or generate plots:
 
 ```bash
 # Print force summary table (Drag, Downforce, L/D):
@@ -202,21 +217,25 @@ Key settings available in `configs/config.json`:
 | `stl_files` | `list` | List of STL filenames in `stl/` | Required |
 | `fidelity` | `string` | Mesh preset: `"fast"`, `"standard"`, or `"fine"` | `"standard"` |
 | `flow.velocity` | `float` | Freestream velocity in m/s | `16.67` (~60 km/h) |
-| `flow.direction` | `string` | Flow direction vector (`"-z"`, `"+x"`, etc.) | `"-z"` |
+| `flow.direction` | `string` | Flow direction vector (`"-z"`, `"+x"`, `"-x"`, etc.) | `"-z"` |
 | `flow.ground` | `bool` | Enable moving ground wall at freestream speed | `true` |
+| `outputs.drag_axis` | `string` | Axis along which drag force is reported | `"-z"` |
+| `outputs.downforce_axis` | `string` | Axis along which downforce (-lift) is reported | `"-y"` |
 | `domain_box` | `string` / `dict` | `"auto"` or explicit `{"min": [x,y,z], "max": [x,y,z]}` | `"auto"` |
 | `symmetry_plane` | `float` / `null` | Coordinate for symmetry split (e.g. `0.0`), or omit for full 3D | `null` |
 | `ground_clearance` | `float` | Relative road gap in meters below lowest STL point | Lowest vertex |
 | `ground_plane` | `float` | Fixed CAD elevation coordinate of ground (takes precedence over clearance) | `null` |
 | `parallel.n_procs` | `int` | Number of CPU cores for MPI decomposition | `10` |
 
-### Fidelity Presets
+### Mesh Fidelity Presets
 
-| Preset | Base Cell | Surface Levels | Edge Level | Boundary Layers | Max Iterations | Target Cells | Typical Runtime |
+| Preset | Base Cell | Surface Levels | Edge Level | Boundary Layers | Max Iterations | Target Cells | Estimated Runtime* |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `fast` | 0.15 m | [3, 4] | 5 | 3 | 800 | ~2–4 M | ~5–10 min (16–32 cores) |
-| `standard` | 0.10 m | [4, 5] | 6 | 5 | 1500 | ~6–9 M | ~30–60 min (32 cores) |
+| `fast` | 0.15 m | [3, 4] | 5 | 3 | 800 | ~2–4 M | ~5–10 min |
+| `standard` | 0.10 m | [4, 5] | 6 | 5 | 1500 | ~6–9 M | ~30–60 min |
 | `fine` | 0.08 m | [5, 6] | 7 | 6 | 3000 | ~12–16 M | ~2–4 hrs |
+
+*\* Runtime estimates based on typical Formula Student half-car models on a 32-core cluster node. Actual solve time depends on geometry complexity, core count, and convergence rate.*
 
 ---
 
@@ -224,22 +243,35 @@ Key settings available in `configs/config.json`:
 
 ### STL Format & Units
 - **Format**: Geometry files must be in **ASCII STL** format. Binary STLs should be converted in CAD before running (e.g. SolidWorks: *Save As → STL → Options → Output: ASCII*).
-- **Units**: OpenFOAM assumes geometry coordinates are in **meters**. If CAD is exported in millimeters (mm), scale geometry by `0.001` before running, or use:
+- **Units**: OpenFOAM assumes geometry coordinates are in **meters**. If CAD is exported in millimeters (mm), scale geometry by `0.001` before running:
   ```bash
   surfaceTransformPoints -scale '(0.001 0.001 0.001)' input.stl output.stl
   ```
 
-### Coordinate Orientation
-- **X axis**: Lateral / spanwise.
-- **Y axis**: Vertical / height above ground.
-- **Z axis**: Streamwise / longitudinal (freestream air travels along `-Z`).
-- Drag axis: `-Z`. Downforce axis: `-Y` (negative lift).
+### Coordinate System & Axis Flexibility
+RapidFOAM supports arbitrary coordinate systems by configuring flow and force directions to match your CAD orientation:
+
+- **Default Formula Student Convention**:
+  - Longitudinal flow: along `-Z` (`"flow.direction": "-z"`, `"outputs.drag_axis": "-z"`)
+  - Vertical / height: `+Y` (`"outputs.downforce_axis": "-y"`)
+  - Lateral / spanwise: `X` (symmetry plane at `x = 0`)
+- **Alternative Orientations**: If your CAD model is oriented differently (for example, flow along `+X` and height along `+Z` in aerospace conventions), update `flow.direction`, `drag_axis`, and `downforce_axis` in `configs/config.json`:
+  ```json
+  "flow": {
+    "direction": "+x"
+  },
+  "outputs": {
+    "drag_axis": "+x",
+    "downforce_axis": "-z"
+  }
+  ```
+  The generator automatically maps inlet, outlet, ground, and lateral boundaries, and aligns upstream/downstream domain padding with the active flow axis.
 
 ### Symmetry Planes
-For straight-line running conditions (zero yaw), a half-car model with a symmetry plane at `x = 0` cuts cell count by roughly 50%. RapidFOAM automatically detects symmetry and outputs both half-model values and full-car projected values (multiplied by 2) in summary tables and comparisons.
+For straight-line running conditions (zero yaw), a half-car model with a symmetry plane at `x = 0` cuts cell count by roughly 50%. When a symmetry boundary is present, RapidFOAM reports both the simulated half-model values and the projected full-car values (multiplied by 2) in summaries and comparison tables.
 
 ### Convergence Auto-Stop
-The background monitor (`convergence_monitor.py`) inspects force outputs every 10 seconds. Once drag and downforce variation remains within +/- 0.5% over a 200-iteration rolling window (after at least 300 iterations), the monitor writes `stopAt writeNow;` to `system/controlDict` to gracefully terminate the solve.
+The background monitor (`convergence_monitor.py`) inspects force outputs every 10 seconds. Once drag and downforce variation remains within +/- 0.5% over a 200-iteration rolling window (after at least 300 iterations), the monitor writes `stopAt writeNow;` to `system/controlDict` to terminate the solve gracefully and write final results.
 
 ---
 
