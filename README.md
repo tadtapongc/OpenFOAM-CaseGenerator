@@ -1,85 +1,104 @@
-# RapidFOAM 🏎️💨
+# RapidFOAM
 
-> **Rapid External Aerodynamics & OpenFOAM Automation Suite**  
-> Developed for **Rapidamente Formula Student** (Chulalongkorn University).
+OpenFOAM external aerodynamics automation suite and Web Studio developed for **Rapidamente Formula Student** (Chulalongkorn University).
 
-RapidFOAM automates the entire OpenFOAM workflow for external vehicle aerodynamics. Give it an STL file and a simple config, and it automatically builds the wind tunnel domain, sets up `snappyHexMesh`, configures the `simpleFoam` solver, sets boundary conditions, and provides real-time force telemetry ($C_D$, $C_L$).
-
----
-
-## Quick Start: Which way do you want to use it?
-
-You can use RapidFOAM in two ways:
-1. **[RapidFOAM Studio (Web GUI)](#1-rapidfoam-studio-interactive-web-gui---recommended)**: Visual 3D viewport, real-time domain sizing, live convergence graphs, and 1-click HPC cluster dispatching. *(Recommended)*
-2. **[Command-Line Interface (CLI)](#2-command-line-interface-cli)**: Fast, scriptable, zero-GUI workflow using simple terminal commands.
+RapidFOAM automates the end-to-end OpenFOAM workflow for vehicle aerodynamics: CAD STL geometry ingestion, automatic wind tunnel domain sizing, `snappyHexMesh` refinement (surfaces, feature edges, distance shells, two-stage wake boxes, and boundary layer inflation), `simpleFoam` case configuration (SIMPLEC, k-omega SST), parallel execution, and real-time aerodynamic force telemetry (Drag, Downforce, L/D, Cd, Cl).
 
 ---
 
-## 1. RapidFOAM Studio (Interactive Web GUI) — *Recommended*
+## Features
 
-The Web Studio gives you a full visual environment in your browser without having to edit JSON or OpenFOAM dictionary files by hand.
+- **Automated Case Generation**: Generates complete, ready-to-run OpenFOAM cases (`0/`, `constant/`, `system/`, and shell scripts) from a single JSON configuration.
+- **Smart Domain & Mesh Sizing**: Automatically bounds the virtual wind tunnel around input STL geometries, configures wake refinement boxes, and sets up boundary layer inflation.
+- **Fidelity Presets**: Built-in mesh templates (`fast`, `standard`, `fine`) calibrated for rapid concept screening versus high-resolution validation.
+- **Symmetry Plane Support**: Half-car simulations along `x = 0` cut mesh count and compute time in half, with automatic force scaling back to full-car values in summaries and plots.
+- **Interactive Web Studio**: Three.js 3D domain visualizer, interactive config editor, live convergence telemetry, and 1-click remote HPC cluster dispatching via SSH/SLURM.
+- **Live Telemetry & Auto-Stop**: Convergence monitor tracks rolling force variation and signals `stopAt writeNow;` once drag and downforce stabilize within +/- 0.5%, saving compute hours.
+- **Post-Processing CLI**: Tabulate aerodynamic forces, plot live convergence curves, and compare multiple case iterations side-by-side.
 
-### Step 1: Launch the Studio
+---
 
-- **Windows**: Double-click `run_app.bat` (or run `run_app.bat` in PowerShell/CMD).
-- **Linux / macOS**: Run `./run_app.sh` in your terminal.
-- **Direct Python**:
+## Installation
+
+### Prerequisites
+
+- **Python**: 3.9 or higher
+- **OpenFOAM**: OpenFOAM v2006+ (e.g. v2006, v2206, v2306, v2406) or OpenFOAM 8/9/10/11 installed on the execution machine or cluster.
+
+### Setup
+
+Clone the repository and install RapidFOAM in editable mode:
+
+```bash
+git clone https://github.com/tadtapongc/RapidFOAM.git
+cd RapidFOAM
+
+# Core CLI tools only:
+pip install -e .
+
+# With Web Studio and plotting dependencies:
+pip install -e ".[web,plot]"
+```
+
+Installed console scripts:
+- `rapidfoam-setup` (or `rapidfoam`): Case generator CLI
+- `rapidfoam-forces`: Force analysis and post-processing CLI
+- `rapidfoam-monitor`: Standalone convergence auto-stop monitor
+- `rapidfoam-studio` (or `rapidfoam-web`): Interactive Web Studio server
+
+---
+
+## Usage
+
+RapidFOAM can be run through the interactive browser-based Studio or directly via the command line.
+
+### Web Studio
+
+The Web Studio provides a 3D visual viewport to inspect wind tunnel dimensions, edit flow conditions, generate cases, and manage remote HPC runs.
+
+- **Windows**: Double-click `run_app.bat` (or execute `run_app.bat` in CMD / PowerShell).
+- **Linux / macOS**: Run `./run_app.sh` in terminal.
+- **Direct Command**:
   ```bash
-  pip install -e ".[web]"
   rapidfoam-studio
-  # or: python -m rapidfoam.web.server
+  # or:
+  python -m rapidfoam.web.server
   ```
-The Studio will automatically open in your browser at `http://127.0.0.1:8000`.
+
+Open `http://127.0.0.1:8000` in your browser.
+
+1. **Upload Geometry**: Drag and drop ASCII STL files into the 3D viewer. Multiple components (e.g. chassis, front wing, rear wing) can be viewed together.
+2. **Set Parameters**: Adjust velocity, fidelity preset, ground clearance, and symmetry plane. The yellow wireframe domain updates dynamically in the 3D viewport.
+3. **Run Locally or on HPC**:
+   - Click **Generate Case** to build the case directory under `cases/<case_name>/`.
+   - Use the **Cluster SSH** dialog to connect to your remote SLURM cluster, transfer the case, and monitor the queue.
+4. **Monitor Telemetry**: Watch residual histories and force curves stream in real time.
 
 ---
 
-### Step 2: Set Up Your Simulation
+### Command-Line Interface (CLI)
 
-1. **Upload or Select STL**:
-   - In the **3D Viewer** panel, upload your CAD export (`.stl`).
-   - You can upload multiple STL files (e.g., chassis, front wing, rear wing) to inspect multi-element assemblies together.
-2. **Inspect the 3D Wind Tunnel**:
-   - Rotate, pan, and zoom in the 3D viewport.
-   - The yellow wireframe box is the **computational domain** (wind tunnel). It automatically resizes whenever you change padding or car dimensions.
-3. **Configure Flow & Physics**:
-   - **Velocity**: Set freestream speed in m/s (e.g. `20 m/s` for FSAE, `16.67 m/s` = 60 km/h).
-   - **Fidelity Preset**: Choose mesh quality preset:
-     - `fast` (~2–4M cells, ~10 min): Quick design sanity check.
-     - `standard` (~6–9M cells, ~30–60 min): Balanced sweet spot for Formula Student aero package iteration. *(Recommended)*
-     - `fine` (~12–16M cells, ~2–4 hrs): High-resolution final aerodynamic validation.
-   - **Ground & Ride Height**: Set moving ground plane (`true`/`false`) and road clearance/elevation.
-   - **Symmetry Plane**: Enable half-car simulation along $X=0$ (or offset) to cut cell count and solve time by 50%.
+For headless servers, batch sweeps, or automated pipelines:
 
----
+#### 1. Initialize Workspace (Optional)
+To create a clean starter directory structure with sample configs:
+```bash
+python setup_case.py --init
+```
+This sets up `stl/`, `cases/`, and `configs/config.json`.
 
-### Step 3: Run & Monitor
-
-- **Local Run**: Click **"Generate Case"** to create a complete OpenFOAM case in `cases/<case_name>/`.
-- **Remote Cluster Run (HPC / SLURM)**:
-  1. Open the **Cluster SSH** dialog (top right).
-  2. Enter your cluster credentials (host, user, password/key).
-  3. Click **"Run on Cluster"** — RapidFOAM transfers the files, queues the SLURM job, and streams progress.
-- **Telemetry Tab**: Watch force convergence (Drag and Downforce) and residual plots update in real time as the solver runs.
-
----
-
-## 2. Command-Line Interface (CLI)
-
-For headless clusters, automated sweeps, or command-line purists.
-
-### Step 1: Place Your CAD Geometry
-Export your geometry as an **ASCII STL** in **meters**, and place it in the `stl/` folder:
+#### 2. Add Geometry
+Export your geometry as an **ASCII STL** in **meters** and place it in the `stl/` folder:
 ```bash
 stl/my_wing.stl
 ```
 
----
+#### 3. Configure Case
+Edit `configs/config.json` or create a new JSON config:
 
-### Step 2: Configure Your Case
-Copy or edit `configs/config.json`. A clean, minimal working example:
 ```json
 {
-  "case_name": "front_wing_iter1",
+  "case_name": "front_wing_v1",
   "stl_files": ["my_wing.stl"],
   "fidelity": "standard",
   "flow": {
@@ -94,121 +113,194 @@ Copy or edit `configs/config.json`. A clean, minimal working example:
   "domain_box": "auto",
   "symmetry_plane": 0.0,
   "parallel": {
-    "n_procs": 8
+    "n_procs": 16
   }
 }
 ```
 
----
-
-### Step 3: Preview (Dry Run)
-Before generating files, preview domain dimensions, mesh sizing, and boundary conditions:
+#### 4. Preview (Dry Run)
+Inspect domain bounds, estimated cell sizing, and boundary assignments without writing files:
 ```bash
 python setup_case.py configs/config.json --dry-run
-# or:
+# or using the CLI shortcut:
 rapidfoam-setup configs/config.json -n
 ```
 
----
-
-### Step 4: Generate Case
-Generate the full OpenFOAM case directory structure:
+#### 5. Generate Case
+Create the complete OpenFOAM case directory structure:
 ```bash
 python setup_case.py configs/config.json
 ```
-This generates a ready-to-run case inside `cases/front_wing_iter1/` with all dictionaries (`0/`, `constant/`, `system/`) and execution scripts (`Allrun`, `Allrun.parallel`, `Allclean`).
+This generates `cases/<case_name>/` containing `0/`, `constant/`, `system/`, and execution scripts:
+- `Allrun.parallel`: Full parallel pipeline (MPI)
+- `Allrun`: Serial pipeline
+- `Allclean`: Resets the case directory and restores initial fields
+- `run.sh`: Ready-to-submit SLURM cluster batch script (`sbatch run.sh`)
+- `convergence_monitor.py`: Standalone monitor script embedded in the case
 
----
-
-### Step 5: Run the Simulation
+#### 6. Run the Simulation
 Navigate to the generated case directory and start the solver:
 
 ```bash
-cd cases/front_wing_iter1
+cd cases/front_wing_v1
 
-# Run in parallel using MPI (uses n_procs specified in config):
+# Parallel execution using MPI:
 ./Allrun.parallel
 
-# Or run on a single core:
+# Or single-core:
 ./Allrun
+
+# Or submit to a SLURM cluster:
+sbatch run.sh
 ```
 
-The script automatically executes:
-1. `surfaceFeatureExtract` (extracts sharp aerodynamic feature lines)
-2. `blockMesh` (generates hexahedral background domain mesh)
-3. `decomposePar` (distributes domain across MPI ranks)
-4. `snappyHexMesh -overwrite` (conforming body snapping, distance shells, wake boxes & boundary layers in parallel)
-5. `checkMesh` (checks mesh quality & orthogonality in parallel)
-6. `reconstructParMesh` & `renumberMesh` (unifies and renumbers mesh bandwidth)
-7. `decomposePar` (redistributes final mesh for solver)
-8. `potentialFoam` (initializes divergence-free potential velocity field)
+The run script executes the standard OpenFOAM external aero pipeline:
+1. `surfaceFeatureExtract` (extracts sharp feature edges to `.eMesh`)
+2. `blockMesh` (creates background hexahedral mesh)
+3. `decomposePar` (splits domain across MPI ranks)
+4. `snappyHexMesh -overwrite` (surface snapping, refinement regions, boundary layers in parallel)
+5. `checkMesh` (verifies mesh orthogonality and aspect ratio)
+6. `reconstructParMesh` & `renumberMesh` (assembles and renumbers mesh)
+7. `decomposePar` (redistributes mesh for solver ranks)
+8. `potentialFoam` (initializes divergence-free flow field)
 9. `convergence_monitor.py` (background process tracking force convergence)
-10. `simpleFoam` (incompressible turbulent Navier-Stokes with SIMPLEC and $k$-$\omega$ SST)
-11. `reconstructPar` (collates parallel time steps back to reconstructed case)
+10. `simpleFoam` (incompressible SIMPLEC solver with k-omega SST)
+11. `reconstructPar` (collates parallel results back to root time directories)
 
----
-
-### Step 6: Post-Process Aerodynamic Forces
-
-Check convergence, calculate drag and downforce, or plot charts:
+#### 7. Read Aerodynamic Forces
+Extract forces, check convergence, or generate plots:
 
 ```bash
-# Print force summary table (Drag, Downforce, Lift-to-Drag ratio):
+# Print force summary table (Drag, Downforce, L/D):
 python read_forces.py
 
-# Show live real-time convergence graph during solve:
+# Specify a particular case directory:
+python read_forces.py cases/front_wing_v1
+
+# Live convergence plot during solve (requires matplotlib):
 python read_forces.py --live
 
-# Save convergence plot as PNG image:
+# Save convergence plot to PNG (saves force_convergence.png):
 python read_forces.py --save
 
-# Compare multiple cases side-by-side in a summary table:
+# Compare all cases in cases/ directory:
 python read_forces.py --compare
+
+# Check convergence status (exit code 0 if converged, 1 if not):
+python read_forces.py --check
 ```
 
 ---
 
-## Must-Know Rules for Formula Student Aerodynamics 💡
+## Configuration Reference
 
-1. **Units Must Be Meters ($m$)**:
-   - OpenFOAM assumes STL coordinates are in **meters**.
-   - *Common mistake*: If your CAD is exported in millimeters ($mm$), a 1.5-meter wing becomes 1,500 meters long! Scale your STL by $0.001$ before running.
-2. **Coordinate Orientation Convention**:
-   - **$+Z$ / $-Z$ (Blue)**: Longitudinal flow direction (freestream air flows along $-Z$).
-   - **$+Y$ (Green)**: Upward vertical axis (height above ground).
-   - **$+X$ (Red)**: Spanwise lateral axis.
-3. **Use Symmetry Planes ($X=0$)**:
-   - If your car or wing is symmetric and running straight (zero yaw angle), simulate half the car along $X=0$.
-   - This cuts mesh cell count in half and doubles your simulation turnaround speed. RapidFOAM automatically doubles forces back to full-car values in summaries.
-4. **Auto-Stop Convergence**:
-   - RapidFOAM runs `convergence_monitor.py` in the background. Once drag and downforce variation drops below $\pm 0.5\%$ over a rolling window of 200 iterations (after a minimum of 300 iterations), it sets `stopAt writeNow;` to cleanly finish the solver, saving precious HPC compute hours.
+Key settings available in `configs/config.json`:
+
+| Parameter | Type | Description | Default |
+| :--- | :--- | :--- | :--- |
+| `case_name` | `string` | Target folder name under `cases/` | Required |
+| `stl_files` | `list` | List of STL filenames in `stl/` | Required |
+| `fidelity` | `string` | Mesh preset: `"fast"`, `"standard"`, or `"fine"` | `"standard"` |
+| `flow.velocity` | `float` | Freestream velocity in m/s | `16.67` (~60 km/h) |
+| `flow.direction` | `string` | Flow direction vector (`"-z"`, `"+x"`, etc.) | `"-z"` |
+| `flow.ground` | `bool` | Enable moving ground wall at freestream speed | `true` |
+| `domain_box` | `string` / `dict` | `"auto"` or explicit `{"min": [x,y,z], "max": [x,y,z]}` | `"auto"` |
+| `symmetry_plane` | `float` / `null` | Coordinate for symmetry split (e.g. `0.0`), or omit for full 3D | `null` |
+| `ground_clearance` | `float` | Relative road gap in meters below lowest STL point | Lowest vertex |
+| `ground_plane` | `float` | Fixed CAD elevation coordinate of ground (takes precedence over clearance) | `null` |
+| `parallel.n_procs` | `int` | Number of CPU cores for MPI decomposition | `10` |
+
+### Fidelity Presets
+
+| Preset | Base Cell | Surface Levels | Edge Level | Boundary Layers | Max Iterations | Target Cells | Typical Runtime |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `fast` | 0.15 m | [3, 4] | 5 | 3 | 800 | ~2–4 M | ~5–10 min (16–32 cores) |
+| `standard` | 0.10 m | [4, 5] | 6 | 5 | 1500 | ~6–9 M | ~30–60 min (32 cores) |
+| `fine` | 0.08 m | [5, 6] | 7 | 6 | 3000 | ~12–16 M | ~2–4 hrs |
 
 ---
 
-## Project Structure Overview
+## Technical Notes & Conventions
+
+### STL Format & Units
+- **Format**: Geometry files must be in **ASCII STL** format. Binary STLs should be converted in CAD before running (e.g. SolidWorks: *Save As → STL → Options → Output: ASCII*).
+- **Units**: OpenFOAM assumes geometry coordinates are in **meters**. If CAD is exported in millimeters (mm), scale geometry by `0.001` before running, or use:
+  ```bash
+  surfaceTransformPoints -scale '(0.001 0.001 0.001)' input.stl output.stl
+  ```
+
+### Coordinate Orientation
+- **X axis**: Lateral / spanwise.
+- **Y axis**: Vertical / height above ground.
+- **Z axis**: Streamwise / longitudinal (freestream air travels along `-Z`).
+- Drag axis: `-Z`. Downforce axis: `-Y` (negative lift).
+
+### Symmetry Planes
+For straight-line running conditions (zero yaw), a half-car model with a symmetry plane at `x = 0` cuts cell count by roughly 50%. RapidFOAM automatically detects symmetry and outputs both half-model values and full-car projected values (multiplied by 2) in summary tables and comparisons.
+
+### Convergence Auto-Stop
+The background monitor (`convergence_monitor.py`) inspects force outputs every 10 seconds. Once drag and downforce variation remains within +/- 0.5% over a 200-iteration rolling window (after at least 300 iterations), the monitor writes `stopAt writeNow;` to `system/controlDict` to gracefully terminate the solve.
+
+---
+
+## Repository Structure
 
 ```text
 RapidFOAM/
 ├── configs/            # Case configuration JSON files
-├── stl/                # Place CAD STL files here
+├── stl/                # CAD geometry files (ASCII STL in meters)
 ├── cases/              # Generated OpenFOAM case directories
-├── src/rapidfoam/      # Core RapidFOAM automation engine & Web Studio
-├── tests/              # Automated test suite (74 unit tests)
-├── run_app.bat         # 1-Click launcher for Windows
-├── run_app.sh          # 1-Click launcher for Linux / Mac
-├── setup_case.py       # CLI case generator entry point
-└── read_forces.py      # CLI force analysis & plotting tool
+├── src/rapidfoam/      # Core RapidFOAM package
+│   ├── config.py       # Config loading, defaults, and input validation
+│   ├── geometry.py     # Domain sizing, fidelity presets, mesh parameters
+│   ├── stl_utils.py    # Streaming ASCII STL inspection and validation
+│   ├── cli.py          # Command-line entry points (setup, forces)
+│   ├── writers/        # OpenFOAM dictionary and execution script generators
+│   │   ├── base.py     # FoamFile headers and formatting helpers
+│   │   ├── constants.py# transportProperties, turbulenceProperties
+│   │   ├── fields.py   # 0/ initial & boundary fields (U, p, k, omega, nut)
+│   │   ├── mesh.py     # blockMeshDict, snappyHexMeshDict, surfaceFeatureExtractDict
+│   │   ├── solver.py   # fvSchemes, fvSolution, controlDict, decomposeParDict
+│   │   └── scripts.py  # Allrun, Allrun.parallel, Allclean, run.sh, convergence_monitor.py
+│   ├── postproc/       # Aerodynamic force analysis & plotting
+│   │   ├── forces.py   # force.dat parser, symmetry scaling, convergence checks
+│   │   ├── plotting.py # Matplotlib static & live convergence plots
+│   │   ├── compare.py  # Multi-case comparison table
+│   │   ├── residuals.py# Residual parser
+│   │   └── convergence_monitor.py # Standalone convergence auto-stop monitor
+│   └── web/            # RapidFOAM Web Studio
+│       ├── server.py   # FastAPI backend & static file server
+│       ├── ssh_client.py # Paramiko SSH/SFTP client for remote SLURM clusters
+│       └── static/     # Web Studio UI (Three.js 3D viewport, telemetry graphs)
+├── tests/              # Automated test suite (74 unit & regression tests)
+├── run_app.bat         # 1-click launcher for Windows
+├── run_app.sh          # 1-click launcher for Linux / macOS
+├── setup_case.py       # Case generator CLI script
+└── read_forces.py      # Force analysis and plotting CLI script
 ```
 
 ---
 
-## Authors & Acknowledgements
+## Testing
 
-Developed for **Rapidamente Formula Student** (Chulalongkorn University).  
-Maintained by Tadtapong C. ([@tadtapongc](https://github.com/tadtapongc)) & Rapidamente Aerodynamics Division.
+Run the automated test suite with Python's standard `unittest`:
+
+```bash
+python -m unittest discover -s tests -v
+```
 
 ---
 
-## OpenFOAM® Trademark Notice
+## Authors
 
-OPENFOAM® is a registered trade mark of OpenCFD Limited. RapidFOAM is an independent project by Rapidamente Formula Student and is not approved or endorsed by OpenCFD Limited.
+- **Tadtapong C.** ([@tadtapongc](https://github.com/tadtapongc)) — Lead Developer & Maintainer
+- **Rapidamente Formula Student** (Chulalongkorn University) — Aerodynamics Division
+
+---
+
+## License
+
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+
+### Trademark Notice
+OPENFOAM® is a registered trademark of OpenCFD Limited. RapidFOAM is an independent project and is not affiliated with, sponsored, or endorsed by OpenCFD Limited.
