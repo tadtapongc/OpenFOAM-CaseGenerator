@@ -6,7 +6,7 @@ import json
 import sys
 from pathlib import Path
 
-from cfd_gen.postproc.forces import (
+from rapidfoam.postproc.forces import (
     axis_index_sign,
     check_convergence,
     find_force_files,

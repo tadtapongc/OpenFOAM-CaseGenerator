@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from cfd_gen.stl_utils import BBox
+from rapidfoam.stl_utils import BBox
 
 # ============================================================
 # AXIS UTILITIES

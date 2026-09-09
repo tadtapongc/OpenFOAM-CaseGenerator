@@ -5,7 +5,7 @@ a trigger file to stop the solver cleanly when both drag and downforce
 variation drop below the threshold.
 
 Usage:
-    python -m cfd_gen.postproc.convergence_monitor [--interval 10] [--config case_config.json]
+    python -m rapidfoam.postproc.convergence_monitor [--interval 10] [--config case_config.json]
 
 The solver must have `runTimeModifiable true` and `writeAtEnd true` in controlDict.
 """
@@ -18,7 +18,7 @@ import sys
 import time
 from pathlib import Path
 
-from cfd_gen.postproc.forces import (
+from rapidfoam.postproc.forces import (
     check_convergence,
     find_force_files,
     load_axis_config,

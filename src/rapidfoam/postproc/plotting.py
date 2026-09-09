@@ -55,7 +55,7 @@ def plot_forces(
     try:
         import matplotlib.pyplot as plt
     except ImportError:
-        sys.exit("ERROR: pip install matplotlib (or: pip install cfd-gen[plot])")
+        sys.exit("ERROR: pip install matplotlib (or: pip install rapidfoam[plot])")
 
     _, axes = plt.subplots(2, 1, figsize=(10, 7), sharex=True)
 
@@ -88,15 +88,15 @@ def live_monitor(
         import matplotlib.pyplot as plt
         from matplotlib.widgets import Button
     except ImportError:
-        sys.exit("ERROR: pip install matplotlib (or: pip install cfd-gen[plot])")
+        sys.exit("ERROR: pip install matplotlib (or: pip install rapidfoam[plot])")
 
-    from cfd_gen.postproc.forces import (
+    from rapidfoam.postproc.forces import (
         check_convergence,
         find_force_files,
         load_axis_config,
         read_forces,
     )
-    from cfd_gen.postproc.residuals import find_residual_files, read_residuals
+    from rapidfoam.postproc.residuals import find_residual_files, read_residuals
 
     drag_idx, drag_sign, df_idx, df_sign, drag_axis, df_axis = load_axis_config(
         config_path, case_dir=case_dir

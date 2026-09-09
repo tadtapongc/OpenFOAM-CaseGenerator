@@ -11,8 +11,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from cfd_gen.geometry import parse_axis
-from cfd_gen.writers.base import FOOTER, bool_str, foam_header
+from rapidfoam.geometry import parse_axis
+from rapidfoam.writers.base import FOOTER, bool_str, foam_header
 
 
 # ============================================================

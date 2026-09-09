@@ -8,7 +8,7 @@ import re
 import statistics
 from pathlib import Path
 
-from cfd_gen.geometry import AXIS_MAP as AXIS_MAP, axis_index_sign
+from rapidfoam.geometry import AXIS_MAP as AXIS_MAP, axis_index_sign
 
 
 def load_axis_config(

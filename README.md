@@ -1,8 +1,10 @@
-# OpenFOAM Case Generator for External Aerodynamics
+# RapidFOAM 🏎️💨
 
-An OpenFOAM case generator for external aerodynamics, with defaults intended for vehicle and Formula Student / FSAE studies.
+### Rapid External Aerodynamics & OpenFOAM Automation Suite for Rapidamente Formula Student (Chulalongkorn University)
 
-Given ASCII STL geometry and a JSON configuration, the generator writes domain bounds, meshing settings, SIMPLEC solver settings, boundary conditions, execution scripts, and force-monitoring tools.
+An end-to-end OpenFOAM case generator, visual telemetry suite, and cluster dispatcher developed for vehicle and Formula Student / FSAE studies by **Rapidamente Formula Student (Chulalongkorn University)**.
+
+Given ASCII STL geometry and a JSON configuration, RapidFOAM writes domain bounds, meshing settings, SIMPLEC solver settings, boundary conditions, execution scripts, and force-monitoring tools.
 
 Case generation and force parsing use the Python standard library. Running simulations requires a compatible OpenFOAM environment; plotting requires `matplotlib`.
 
@@ -15,9 +17,9 @@ The repository includes regression tests for generation, parsing, and script beh
 1. [Key Features](#key-features)
 2. [Quick Start & Requirements](#quick-start--requirements)
    - [System Requirements](#system-requirements)
-   - [Workflow A: OpenFOAM Studio (Interactive Web GUI)](#workflow-a-openfoam-studio-interactive-web-gui)
+   - [Workflow A: RapidFOAM Studio (Interactive Web GUI)](#workflow-a-rapidfoam-studio-interactive-web-gui)
    - [Workflow B: Standard Command-Line Interface (CLI)](#workflow-b-standard-command-line-interface-cli)
-3. [OpenFOAM Studio (Interactive Web GUI)](#openfoam-studio-interactive-web-gui)
+3. [RapidFOAM Studio (Interactive Web GUI)](#rapidfoam-studio-interactive-web-gui)
    - [Launching the Studio](#launching-the-studio)
    - [Interactive 3D WebGL Viewport & Coordinate System](#interactive-3d-webgl-viewport--coordinate-system)
    - [Multi-STL Assembly Visualization & Component Management](#multi-stl-assembly-visualization--component-management)
@@ -80,8 +82,8 @@ The repository includes regression tests for generation, parsing, and script beh
 
 ## Key Features
 
-- **Standard Commands Only**: No custom CLI binary installation needed. Run directly with standard `python setup_case.py`, standard OpenFOAM commands (`blockMesh`, `snappyHexMesh`, `simpleFoam`), and standard `python read_forces.py`.
-- **OpenFOAM Studio Web Application**: Includes an interactive browser-based UI (`run_app.sh` / `run_app.bat`) featuring a 3D geometry viewer, real-time 3D coordinate axes trihedron, live wind tunnel domain box visualization, bidirectional visual config synchronization, and direct remote SSH/SLURM cluster dispatching with local credential security.
+- **Standard Commands Only**: No complex dependencies needed. Run directly with standard `python setup_case.py` (or `rapidfoam-setup`), standard OpenFOAM commands (`blockMesh`, `snappyHexMesh`, `simpleFoam`), and standard `python read_forces.py` (or `rapidfoam-forces`).
+- **RapidFOAM Studio Web Application**: Includes an interactive browser-based UI (`run_app.sh` / `run_app.bat` or `rapidfoam-studio`) featuring a 3D geometry viewer, real-time 3D coordinate axes trihedron, live wind tunnel domain box visualization, bidirectional visual config synchronization, and direct remote SSH/SLURM cluster dispatching with local credential security.
 - **Vehicle-Oriented Defaults**: Configurable domain padding, refinement levels, boundary layers, and wake regions.
 - **Two Wake Refinement Boxes**: A `nearWakeBox` and a coarser `farWakeBox`, with dimensions derived from geometry bounds.
 - **Distance Refinement Shells**: Refinement based on distance from the STL surface (e.g. 25 mm $\rightarrow$ Level 4, 80 mm $\rightarrow$ Level 3 for the standard preset).
@@ -112,7 +114,7 @@ git clone https://github.com/tadtapongc/OpenFOAM-CaseGenerator.git
 cd OpenFOAM-CaseGenerator
 ```
 
-#### Workflow A: OpenFOAM Studio (Interactive Web GUI)
+#### Workflow A: RapidFOAM Studio (Interactive Web GUI)
 
 For a visual, interactive experience with 3D CAD visualization, wind tunnel cage inspection, real-time config editing, and remote cluster submission, run the 1-click launcher:
 
@@ -129,7 +131,8 @@ For a visual, interactive experience with 3D CAD visualization, wind tunnel cage
 - **Cross-Platform / Manual**:
   ```bash
   pip install -e ".[web]"
-  python -m cfd_gen.web.server
+  python -m rapidfoam.web.server
+  # or: rapidfoam-studio
   ```
 The studio will automatically open your default web browser to `http://127.0.0.1:8000`.
 
@@ -150,13 +153,13 @@ With OpenFOAM loaded in your shell, follow [Step 5](#step-5-run-simulation-stand
 
 ---
 
-## OpenFOAM Studio (Interactive Web GUI)
+## RapidFOAM Studio (Interactive Web GUI)
 
-OpenFOAM Studio is a local web application providing an intuitive visual environment for setting up CFD cases, inspecting 3D geometries, validating domain bounds, and dispatching simulations to remote HPC clusters.
+RapidFOAM Studio is a local web application providing an intuitive visual environment for setting up CFD cases, inspecting 3D geometries, validating domain bounds, and dispatching simulations to remote HPC clusters.
 
 ### Launching the Studio
 
-You can launch OpenFOAM Studio via the automated runner scripts or standard Python:
+You can launch RapidFOAM Studio via the automated runner scripts or standard Python:
 
 ```bash
 # Linux / macOS (creates .venv, installs dependencies, launches server)
@@ -166,17 +169,19 @@ You can launch OpenFOAM Studio via the automated runner scripts or standard Pyth
 run_app.bat
 
 # Or direct Python invocation:
-python -m cfd_gen.web.server --port 8000
+python -m rapidfoam.web.server --port 8000
+# Or CLI alias:
+rapidfoam-studio --port 8000
 ```
 
-Key CLI arguments for `cfd_gen.web.server`:
+Key CLI arguments for `rapidfoam.web.server`:
 - `--host <ip>`: Bind address (default: `127.0.0.1`).
 - `--port <port>`: Port to listen on (default: `8000`).
-- `--restart`: Automatically terminate an existing CFD Studio instance on the port and restart.
+- `--restart`: Automatically terminate an existing RapidFOAM Studio instance on the port and restart.
 - `--no-browser`: Do not automatically open the default web browser on launch.
 
 > [!TIP]
-> **Intelligent Port Supervisor**: If port `8000` is already occupied by a previously running CFD Studio process, the launcher automatically detects the process, cleans up the old process tree, and restarts immediately. If occupied by an unrelated application, it automatically advances to the next available open port.
+> **Intelligent Port Supervisor**: If port `8000` is already occupied by a previously running RapidFOAM Studio process, the launcher automatically detects the process, cleans up the old process tree, and restarts immediately. If occupied by an unrelated application, it automatically advances to the next available open port.
 
 ---
 
@@ -216,7 +221,7 @@ The 3D scene adheres strictly to OpenFOAM and SAE vehicle aerodynamics coordinat
 
 Real-world aerodynamic packages (especially in FSAE, GT, and sports car racing) consist of multiple discrete CAD solid files—such as chassis, front wing assembly, rear wing multi-elements, suspension links, and underbody diffusers.
 
-OpenFOAM Studio provides native multi-STL assembly inspection and management:
+RapidFOAM Studio provides native multi-STL assembly inspection and management:
 
 - **Simultaneous Multi-Component Rendering**:
   Load and view multiple independent STL files simultaneously in the virtual wind tunnel without geometry overwriting or ghosting.
@@ -1239,3 +1244,16 @@ These tests do not execute OpenFOAM, measure large-file memory consumption, esta
 ## License
 
 This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+
+---
+
+## Authors & Acknowledgements
+
+Developed for **Rapidamente Formula Student** (Chulalongkorn University).  
+Maintained by Tadtapong C. ([@tadtapongc](https://github.com/tadtapongc)) & Rapidamente Aerodynamics Division.
+
+---
+
+## OpenFOAM® Trademark Notice
+
+OPENFOAM® is a registered trade mark of OpenCFD Limited. RapidFOAM is an independent project by Rapidamente Formula Student and is not approved or endorsed by OpenCFD Limited.

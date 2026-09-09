@@ -10,7 +10,7 @@ import inspect
 from pathlib import Path
 from typing import Any
 
-from cfd_gen.geometry import parse_axis
+from rapidfoam.geometry import parse_axis
 
 MONITOR_CLEANUP = """\
 stop_monitor() {
@@ -47,7 +47,7 @@ class _AnnotationStripper(ast.NodeTransformer):
 
 def _clean_force_helpers() -> str:
     """Extract force readers and strip type annotations for cluster Python 3.6 compatibility."""
-    from cfd_gen.postproc import forces
+    from rapidfoam.postproc import forces
 
     raw_source = "\n\n".join(
         inspect.getsource(func)

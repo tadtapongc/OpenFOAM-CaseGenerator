@@ -6,7 +6,7 @@ import math
 from pathlib import Path
 
 
-from cfd_gen.postproc.forces import _dir_time
+from rapidfoam.postproc.forces import _dir_time
 
 
 def find_residual_files(base_dir: str | Path | None = None) -> list[Path]:

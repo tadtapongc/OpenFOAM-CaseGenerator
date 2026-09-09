@@ -23,27 +23,27 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from cfd_gen.config import DEFAULT_CONFIG, deep_merge, find_stl, validate
-from cfd_gen.geometry import (
+from rapidfoam.config import DEFAULT_CONFIG, deep_merge, find_stl, validate
+from rapidfoam.geometry import (
     FIDELITY_PRESETS,
     compute_domain_box,
     flow_axis_index_sign,
     up_axis_index,
 )
-from cfd_gen.postproc.forces import (
+from rapidfoam.postproc.forces import (
     check_convergence,
     find_force_files,
     is_symmetry_case,
     load_axis_config,
     read_forces,
 )
-from cfd_gen.postproc.residuals import find_residual_files, read_residuals
-from cfd_gen.stl_utils import stl_info
-from cfd_gen.web.ssh_client import ClusterSSHClient
+from rapidfoam.postproc.residuals import find_residual_files, read_residuals
+from rapidfoam.stl_utils import stl_info
+from rapidfoam.web.ssh_client import ClusterSSHClient
 
-log = logging.getLogger("cfd_gen.web")
+log = logging.getLogger("rapidfoam.web")
 
-app = FastAPI(title="OpenFOAM Case Generator Studio", version="1.0.0")
+app = FastAPI(title="RapidFOAM Studio", version="1.0.0")
 
 # Restrict CORS to local origins only to protect credentials and SSH operations
 app.add_middleware(
@@ -55,7 +55,14 @@ app.add_middleware(
 )
 
 ssh_client = ClusterSSHClient()
-CREDENTIALS_FILE = Path.home() / ".cfd_gen_cluster.json"
+CREDENTIALS_FILE = Path.home() / ".rapidfoam_cluster.json"
+# Backwards compatibility: migrate from old file if exists
+_OLD_CREDENTIALS_FILE = Path.home() / ".cfd_gen_cluster.json"
+if not CREDENTIALS_FILE.exists() and _OLD_CREDENTIALS_FILE.exists():
+    try:
+        shutil.copy2(_OLD_CREDENTIALS_FILE, CREDENTIALS_FILE)
+    except Exception:
+        pass
 PROJECT_ROOT = Path.cwd()
 
 CASE_NAME_REGEX = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -518,7 +525,7 @@ async def api_case_generate_and_submit(req: GenerateCaseRequest) -> dict[str, An
 
     # 3. Generate locally if requested
     if req.generate_locally:
-        from cfd_gen.cli import _do_generate
+        from rapidfoam.cli import _do_generate
         try:
             await asyncio.to_thread(_do_generate, local_cfg_path, PROJECT_ROOT, dry_run=False)
             local_actions["generated_locally"] = True
@@ -1294,7 +1301,7 @@ def main() -> None:
         except Exception:
             pass
 
-    parser = argparse.ArgumentParser(description="Launch OpenFOAM Case Generator Studio.")
+    parser = argparse.ArgumentParser(description="Launch RapidFOAM Studio (Rapidamente Formula Student).")
     parser.add_argument("--host", default="127.0.0.1", help="Bind host (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8000, help="Bind port (default: 8000)")
     parser.add_argument("--no-browser", action="store_true", help="Do not open browser automatically")
@@ -1353,7 +1360,7 @@ def main() -> None:
 
         if is_cfd_studio:
             old_pid = get_pid_on_port(target_port)
-            print(f"[*] Found existing CFD Studio running on port {target_port} (PID {old_pid or 'unknown'}).")
+            print(f"[*] Found existing RapidFOAM Studio running on port {target_port} (PID {old_pid or 'unknown'}).")
             print("[*] Restarting server to ensure latest code is active...")
             if old_pid and old_pid != os.getpid():
                 kill_process_tree(old_pid)
@@ -1372,7 +1379,7 @@ def main() -> None:
     print("\n" + "=" * 60)
     cfg = get_saved_cluster_config()
     target = cfg.get("host") or "Not configured (set in Web UI)"
-    print("  [RapidAero] CFD Studio Web Server")
+    print("  RapidFOAM Studio Web Server | Rapidamente Formula Student")
     print(f"  Cluster target: {target}")
     print(f"  Listening on:   {url}")
     print("=" * 60 + "\n")

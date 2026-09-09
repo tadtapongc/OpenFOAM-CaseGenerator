@@ -13,14 +13,14 @@ import time
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from cfd_gen.config import DEFAULT_CONFIG
-from cfd_gen.writers.scripts import write_scripts
+from rapidfoam.config import DEFAULT_CONFIG
+from rapidfoam.writers.scripts import write_scripts
 
 
 @unittest.skipUnless(os.name == "posix" and shutil.which("bash"), "Requires Linux bash")
 class ShellScriptsTest(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="cfd_gen_scripts_")
+        self.temp = tempfile.TemporaryDirectory(prefix="rapidfoam_scripts_")
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.bin = self.root / "bin"

@@ -14,15 +14,15 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from cfd_gen.cli import _do_generate, _do_init
-from cfd_gen.config import load_config, validate
-from cfd_gen.geometry import compute_domain_box, face_assignments
-from cfd_gen.postproc.forces import check_convergence, find_force_files, read_forces, is_symmetry_case
-from cfd_gen.postproc.plotting import _force_stats, _rolling_average
-from cfd_gen.postproc.residuals import read_residuals
-from cfd_gen.postproc.convergence_monitor import monitor
-from cfd_gen.stl_utils import copy_stl, stl_bounds, stl_info, write_stl
-from cfd_gen.writers.scripts import _convergence_monitor_script
+from rapidfoam.cli import _do_generate, _do_init
+from rapidfoam.config import load_config, validate
+from rapidfoam.geometry import compute_domain_box, face_assignments
+from rapidfoam.postproc.forces import check_convergence, find_force_files, read_forces, is_symmetry_case
+from rapidfoam.postproc.plotting import _force_stats, _rolling_average
+from rapidfoam.postproc.residuals import read_residuals
+from rapidfoam.postproc.convergence_monitor import monitor
+from rapidfoam.stl_utils import copy_stl, stl_bounds, stl_info, write_stl
+from rapidfoam.writers.scripts import _convergence_monitor_script
 
 
 def force_row(time, drag, downforce=20):
@@ -59,7 +59,7 @@ class ProjectTest(unittest.TestCase):
             ((0, 0, 1), (10, 0, 0), (11, 0, 0), (10, 1, 3)),
         ])
         case = self.generate(stl_files=["wing.stl", "body.stl"])
-        from cfd_gen.stl_utils import stl_bounds
+        from rapidfoam.stl_utils import stl_bounds
         self.assertEqual(stl_bounds(case / "constant/triSurface/wing.stl")[0][0], 10)
         self.assertEqual(stl_bounds(case / "constant/triSurface/body.stl")[0][0], 0)
 
@@ -232,7 +232,7 @@ class ProjectTest(unittest.TestCase):
         path.parent.mkdir(parents=True)
         path.write_text("".join(f"{t} (10 -20 0) (0 0 0) (0 0 0)\n" for t in range(300)))
         # A second poll would expose incorrect axes without hanging the test.
-        with patch("cfd_gen.postproc.convergence_monitor.time.sleep", side_effect=[None, RuntimeError("second poll")]), contextlib.redirect_stdout(io.StringIO()):
+        with patch("rapidfoam.postproc.convergence_monitor.time.sleep", side_effect=[None, RuntimeError("second poll")]), contextlib.redirect_stdout(io.StringIO()):
             self.assertTrue(monitor(case_dir=case))
         self.assertIn("writeNow", (case / "system/controlDict").read_text())
 
@@ -251,7 +251,7 @@ class ProjectTest(unittest.TestCase):
             "endsolid wing_α\n"
         )
         path.write_bytes(content.encode("utf-8"))
-        from cfd_gen.stl_utils import read_stl
+        from rapidfoam.stl_utils import read_stl
         name, triangles = read_stl(path)
         self.assertEqual(name, "wing_α")
         self.assertEqual(len(triangles), 1)
@@ -261,9 +261,9 @@ class ProjectTest(unittest.TestCase):
             import matplotlib  # noqa: F401
         except ImportError:
             self.skipTest("matplotlib not installed")
-        from cfd_gen.postproc.plotting import live_monitor
+        from rapidfoam.postproc.plotting import live_monitor
         with patch("matplotlib.pyplot.show"), patch(
-            "cfd_gen.postproc.forces.load_axis_config", return_value=(2, -1, 1, -1, "-z", "-y")
+            "rapidfoam.postproc.forces.load_axis_config", return_value=(2, -1, 1, -1, "-z", "-y")
         ):
             with patch("matplotlib.pyplot.subplots") as mock_subplots:
                 import matplotlib.pyplot as plt
@@ -281,13 +281,13 @@ class ProjectTest(unittest.TestCase):
         self.assertTrue((self.root / "cases/test_case").exists())
 
     def test_postproc_unification_and_shared_helpers(self):
-        from cfd_gen.postproc.forces import (
+        from rapidfoam.postproc.forces import (
             _dir_time as forces_dir_time,
             AXIS_MAP as F_AXIS_MAP,
             axis_index_sign as forces_axis_index_sign,
         )
-        from cfd_gen.postproc.residuals import _dir_time as residuals_dir_time
-        from cfd_gen.geometry import (
+        from rapidfoam.postproc.residuals import _dir_time as residuals_dir_time
+        from rapidfoam.geometry import (
             AXIS_MAP as G_AXIS_MAP,
             axis_index_sign as geom_axis_index_sign,
         )

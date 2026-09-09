@@ -3,9 +3,12 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "cfd-gen"
+name = "rapidfoam"
 version = "1.0.0"
-description = "Geometry-agnostic OpenFOAM case generator for external aerodynamics"
+description = "Rapid external aerodynamics and OpenFOAM automation suite for Rapidamente Formula Student"
+authors = [
+    { name = "Tadtapong C. (Rapidamente Formula Student)", email = "tadtapong2549@gmail.com" }
+]
 requires-python = ">=3.9"
 dependencies = []
 
@@ -19,11 +22,18 @@ web = [
 ]
 
 [project.scripts]
-cfd-setup = "cfd_gen.cli:setup_main"
-cfd-forces = "cfd_gen.cli:forces_main"
-cfd-monitor = "cfd_gen.postproc.convergence_monitor:main"
-cfd-web = "cfd_gen.web.server:main"
+rapidfoam = "rapidfoam.cli:setup_main"
+rapidfoam-setup = "rapidfoam.cli:setup_main"
+rapidfoam-forces = "rapidfoam.cli:forces_main"
+rapidfoam-monitor = "rapidfoam.postproc.convergence_monitor:main"
+rapidfoam-studio = "rapidfoam.web.server:main"
+rapidfoam-web = "rapidfoam.web.server:main"
+# Backward-compatible aliases
+cfd-setup = "rapidfoam.cli:setup_main"
+cfd-forces = "rapidfoam.cli:forces_main"
+cfd-monitor = "rapidfoam.postproc.convergence_monitor:main"
+cfd-web = "rapidfoam.web.server:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/cfd_gen"]
+packages = ["src/rapidfoam"]
 

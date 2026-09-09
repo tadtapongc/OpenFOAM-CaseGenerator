@@ -8,13 +8,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from cfd_gen.geometry import (
+from rapidfoam.geometry import (
     face_assignments,
     face_role,
     flow_axis_index_sign,
     up_axis_index,
 )
-from cfd_gen.writers.base import FOOTER, bool_str, foam_header
+from rapidfoam.writers.base import FOOTER, bool_str, foam_header
 
 # ============================================================
 # FACE MAP — hex vertex ordering to face string

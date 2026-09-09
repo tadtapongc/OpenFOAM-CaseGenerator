@@ -1,10 +1,10 @@
 @echo off
 setlocal enabledelayedexpansion
 
-title OpenFOAM Studio - Case Generator and Cluster Dispatcher
+title RapidFOAM Studio - Rapidamente Formula Student
 
 echo ======================================================================
-echo    OpenFOAM Studio - Case Generator and Cluster Dispatcher
+echo    RapidFOAM Studio - Rapidamente Formula Student
 echo ======================================================================
 echo.
 
@@ -53,11 +53,11 @@ if %ERRORLEVEL% neq 0 (
 )
 
 echo.
-echo [*] Starting CFD Studio Web Server...
+echo [*] Starting RapidFOAM Studio Web Server...
 echo [*] Browser will open automatically at http://127.0.0.1:8000
 echo.
 
-python -m cfd_gen.web.server %*
+python -m rapidfoam.web.server %*
 
 if %ERRORLEVEL% neq 0 (
     echo.

@@ -99,8 +99,8 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
         except Exception:
             pass
-    from cfd_gen.config import find_stl, load_config, validate
-    from cfd_gen.geometry import (
+    from rapidfoam.config import find_stl, load_config, validate
+    from rapidfoam.geometry import (
         compute_domain_box,
         compute_mesh_params,
         face_assignments,
@@ -109,7 +109,7 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
         vec_str,
         velocity_vector,
     )
-    from cfd_gen.stl_utils import copy_stl, stl_info
+    from rapidfoam.stl_utils import copy_stl, stl_info
 
     if not cfg_path.exists():
         sys.exit(f"ERROR: {cfg_path} not found")
@@ -221,7 +221,7 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
     # Derive mesh parameters from geometry
     cfg["mesh_params"] = compute_mesh_params(cfg, combined_bounds)
     # Apply fidelity presets conditionally
-    from cfd_gen.geometry import FIDELITY_PRESETS
+    from rapidfoam.geometry import FIDELITY_PRESETS
     fidelity = cfg.get("fidelity", "standard")
     preset = FIDELITY_PRESETS.get(fidelity, FIDELITY_PRESETS["standard"])
     
@@ -309,15 +309,15 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
             sys.exit(1)
 
     # Write all OpenFOAM files
-    from cfd_gen.writers.constants import write_constant
-    from cfd_gen.writers.fields import write_fields
-    from cfd_gen.writers.mesh import (
+    from rapidfoam.writers.constants import write_constant
+    from rapidfoam.writers.fields import write_fields
+    from rapidfoam.writers.mesh import (
         write_block_mesh_dict,
         write_snappy_hex_mesh_dict,
         write_surface_feature_extract_dict,
     )
-    from cfd_gen.writers.scripts import write_scripts
-    from cfd_gen.writers.solver import (
+    from rapidfoam.writers.scripts import write_scripts
+    from rapidfoam.writers.solver import (
         write_control_dict,
         write_decompose_par_dict,
         write_fv_schemes,
@@ -379,8 +379,8 @@ def forces_main() -> None:
     parser.add_argument("--interval", "-i", type=float, default=3, help="Live update interval (s)")
     args = parser.parse_args()
 
-    from cfd_gen.postproc.compare import compare_cases
-    from cfd_gen.postproc.forces import (
+    from rapidfoam.postproc.compare import compare_cases
+    from rapidfoam.postproc.forces import (
         check_convergence,
         find_force_files,
         is_symmetry_case,
@@ -388,7 +388,7 @@ def forces_main() -> None:
         print_summary,
         read_forces,
     )
-    from cfd_gen.postproc.plotting import live_monitor, plot_forces
+    from rapidfoam.postproc.plotting import live_monitor, plot_forces
 
     # Compare mode
     if args.compare:

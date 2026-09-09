@@ -285,7 +285,7 @@ def validate(cfg: dict[str, Any], project_dir: Path) -> tuple[list[str], list[st
     errors: list[str] = []
     warnings: list[str] = []
 
-    from cfd_gen.geometry import FIDELITY_PRESETS, face_assignments, face_role, parse_axis
+    from rapidfoam.geometry import FIDELITY_PRESETS, face_assignments, face_role, parse_axis
 
     # Check containers before dereferencing nested values.
     sections = [key for key, value in DEFAULT_CONFIG.items() if isinstance(value, dict)]

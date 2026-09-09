@@ -7,7 +7,7 @@ cd "$DIR"
 export PYTHONPATH="$DIR/src:${PYTHONPATH:-}"
 
 echo "======================================================================"
-echo "   OpenFOAM Studio - Case Generator & Cluster Dispatcher"
+echo "   RapidFOAM Studio - Rapidamente Formula Student"
 echo "======================================================================"
 echo ""
 
@@ -31,9 +31,9 @@ if ! python3 -c "import fastapi, uvicorn, paramiko" &> /dev/null; then
 fi
 
 echo ""
-echo "[*] Starting CFD Studio Web Server..."
+echo "[*] Starting RapidFOAM Studio Web Server..."
 echo "[*] Browser will open automatically at http://127.0.0.1:8000"
 echo ""
 
-python3 -m cfd_gen.web.server "$@"
+python3 -m rapidfoam.web.server "$@"
 

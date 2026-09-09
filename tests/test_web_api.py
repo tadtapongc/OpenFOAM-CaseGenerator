@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch, PropertyMock
 from fastapi import HTTPException
 
-from cfd_gen.web.server import (
+from rapidfoam.web.server import (
     DomainBoxRequest,
     GenerateCaseRequest,
     JobCancelRequest,
@@ -30,7 +30,7 @@ from cfd_gen.web.server import (
     merge_config_with_defaults,
     ssh_client,
 )
-from cfd_gen.web.ssh_client import ClusterSSHClient
+from rapidfoam.web.ssh_client import ClusterSSHClient
 
 
 class TestWebAPI(unittest.TestCase):
