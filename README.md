@@ -22,14 +22,14 @@ RapidFOAM streamlines the OpenFOAM workflow for external vehicle aerodynamics: C
 
 ### Supported OpenFOAM Versions
 
-- **Primary Target**: **ESI-OpenCFD releases (OpenFOAM v2006, v2106, v2206, v2306, v2406)**
+- **Primary Target**: **ESI-OpenCFD releases (OpenFOAM v2006, v2106, v2206, v2306, v2406, v2606)**
   - The generated dictionaries utilize OpenCFD syntax conventions (such as `libs (forces);` function objects and modern Open MPI process binding options).
 - **OpenFOAM Foundation (v8, v9, v10, v11)**:
   - The core solvers (`simpleFoam`, `snappyHexMesh`, `blockMesh`, `surfaceFeatureExtract`) and boundary condition structures are largely compatible. Note that minor syntax differences (such as function object library naming like `"libforces.so"`) may apply depending on the specific release.
 
 ### Environment Configuration
 The path to your OpenFOAM installation is configured in `configs/config.json` under `"slurm"`:
-- `openfoam_source`: Path to your OpenFOAM environment script (e.g. `"$HOME/OpenFOAM/OpenFOAM-v2306/etc/bashrc"` or `"/opt/openfoam2206/etc/bashrc"`).
+- `openfoam_source`: Path to your OpenFOAM environment script (e.g. `"$HOME/OpenFOAM/OpenFOAM-v2606/etc/bashrc"` or `"/opt/openfoam2606/etc/bashrc"`).
 - `openfoam_module`: List of environment modules to load on HPC clusters (e.g. `["GCC/11.3.0", "OpenMPI/4.1.4-GCC-11.3.0"]` or `["OpenFOAM/v2206-foss-2022a"]`), or `null` if sourcing directly.
 
 ---

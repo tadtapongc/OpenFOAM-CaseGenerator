@@ -6,11 +6,41 @@ build-backend = "hatchling.build"
 name = "rapidfoam"
 version = "1.0.0"
 description = "Rapid external aerodynamics and OpenFOAM automation suite for Rapidamente Formula Student"
+readme = "README.md"
+license = { text = "MIT" }
 authors = [
     { name = "Tadtapong C. (Rapidamente Formula Student)", email = "tadtapong2549@gmail.com" }
 ]
 requires-python = ">=3.9"
 dependencies = []
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Physics",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+]
+keywords = [
+    "openfoam",
+    "cfd",
+    "aerodynamics",
+    "fsae",
+    "formula-student",
+    "snappyhexmesh",
+    "simplefoam",
+]
+
+[project.urls]
+Homepage = "https://github.com/tadtapongc/RapidFOAM"
+Repository = "https://github.com/tadtapongc/RapidFOAM"
+"Bug Tracker" = "https://github.com/tadtapongc/RapidFOAM/issues"
 
 [project.optional-dependencies]
 plot = ["matplotlib>=3.5"]
@@ -36,4 +66,8 @@ cfd-web = "rapidfoam.web.server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/rapidfoam"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
 

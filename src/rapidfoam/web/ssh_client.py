@@ -108,7 +108,7 @@ class ClusterSSHClient:
         self.host = host
         self.port = port
         self.username = username
-        self.remote_repo_path = remote_repo_path or f"/work/home/{username}/Rapidamente/cfd/OpenFOAM-CaseGenerator"
+        self.remote_repo_path = remote_repo_path or f"/work/home/{username}/Rapidamente/cfd/RapidFOAM"
 
         return self.test_connection()
 

@@ -125,7 +125,7 @@ def trigger_stop():
     cd = Path("system/controlDict")
     if not cd.exists():
         return
-    text = cd.read_text()
+    text = cd.read_text(encoding="utf-8")
     lines = text.split("\\n")
     new_lines = []
     for line in lines:
@@ -133,7 +133,7 @@ def trigger_stop():
             new_lines.append("stopAt          writeNow;")
         else:
             new_lines.append(line)
-    cd.write_text("\\n".join(new_lines))
+    cd.write_text("\\n".join(new_lines), encoding="utf-8")
 
 
 def main():

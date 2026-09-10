@@ -34,7 +34,7 @@ def compare_cases(cases_dir: Path | None = None) -> None:
 
     results = []
     for d in case_dirs:
-        with open(d / "case_config.json") as f:
+        with open(d / "case_config.json", encoding="utf-8") as f:
             cfg = json.load(f)
 
         # Support both config formats

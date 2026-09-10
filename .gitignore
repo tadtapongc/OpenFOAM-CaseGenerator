@@ -6,11 +6,15 @@
 cases/*
 !cases/.gitkeep
 
-# All STL geometry files (ignore contents, keep folder)
+# All STL geometry files (ignore contents, keep folder and sample demo STL)
 stl/*
 !stl/.gitkeep
+!stl/geometry.stl
+!stl/geometry.STL
 *.stl
 *.STL
+!stl/geometry.stl
+!stl/geometry.STL
 
 # Configuration files (ignore custom configs, keep default template)
 configs/*

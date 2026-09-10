@@ -48,7 +48,7 @@ def read_residuals(files: list[Path]) -> tuple[dict[str, list[float | None]], li
         file_headers: list[str] = []
         segment_started = False
         try:
-            with open(path) as f:
+            with open(path, encoding="utf-8", errors="replace") as f:
                 for line in f:
                     line = line.strip()
                     if line.startswith("#"):

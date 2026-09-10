@@ -23,13 +23,13 @@ def load_axis_config(
     cfg = None
     base = Path(case_dir) if case_dir else Path(".")
     if config_path and Path(config_path).exists():
-        with open(config_path) as f:
+        with open(config_path, encoding="utf-8") as f:
             cfg = json.load(f)
     elif (base / "case_config.json").exists():
-        with open(base / "case_config.json") as f:
+        with open(base / "case_config.json", encoding="utf-8") as f:
             cfg = json.load(f)
     elif Path("case_config.json").exists():
-        with open("case_config.json") as f:
+        with open("case_config.json", encoding="utf-8") as f:
             cfg = json.load(f)
 
     # Support both old and new config formats
@@ -51,13 +51,13 @@ def is_symmetry_case(config_path: str | None = None, case_dir: str | Path | None
     cfg = None
     base = Path(case_dir) if case_dir else Path(".")
     if config_path and Path(config_path).exists():
-        with open(config_path) as f:
+        with open(config_path, encoding="utf-8") as f:
             cfg = json.load(f)
     elif (base / "case_config.json").exists():
-        with open(base / "case_config.json") as f:
+        with open(base / "case_config.json", encoding="utf-8") as f:
             cfg = json.load(f)
     elif Path("case_config.json").exists():
-        with open("case_config.json") as f:
+        with open("case_config.json", encoding="utf-8") as f:
             cfg = json.load(f)
 
     if cfg:
@@ -70,7 +70,7 @@ def is_symmetry_case(config_path: str | None = None, case_dir: str | Path | None
     boundary_file = base / "constant" / "polyMesh" / "boundary"
     if boundary_file.exists():
         try:
-            content = boundary_file.read_text(errors="replace")
+            content = boundary_file.read_text(encoding="utf-8", errors="replace")
             if re.search(r"\btype\s+symmetry(?:Plane)?\s*;", content):
                 return True
         except Exception:
@@ -141,7 +141,7 @@ def read_forces(
     for path in files:
         segment_started = False
         try:
-            with open(path) as f:
+            with open(path, encoding="utf-8", errors="replace") as f:
                 for line in f:
                     line = line.strip()
                     if not line or line.startswith("#"):

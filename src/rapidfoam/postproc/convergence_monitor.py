@@ -36,7 +36,7 @@ def _write_stop_trigger(case_dir: Path) -> None:
     if not control_dict.exists():
         return
 
-    text = control_dict.read_text()
+    text = control_dict.read_text(encoding="utf-8")
 
     # Replace stopAt line
     lines = text.split("\n")
@@ -48,7 +48,7 @@ def _write_stop_trigger(case_dir: Path) -> None:
         else:
             new_lines.append(line)
 
-    control_dict.write_text("\n".join(new_lines))
+    control_dict.write_text("\n".join(new_lines), encoding="utf-8")
 
 
 def monitor(
