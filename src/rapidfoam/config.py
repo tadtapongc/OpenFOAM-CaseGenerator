@@ -225,8 +225,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "nNonOrthogonalCorrectors": 10,
     },
 
-    # Mesher engine ("snappy" | "cfmesh")
-    "mesher": "snappy",
+    # Mesher engine ("cfmesh" | "snappy")
+    "mesher": "cfmesh",
     "cfmesh": {
         "workflow": "cartesianMesh",
         "feature_angle": 45,
@@ -336,9 +336,9 @@ def validate(cfg: dict[str, Any], project_dir: Path) -> tuple[list[str], list[st
         errors.append("fidelity must be fast, standard, or fine")
 
     # Mesher engine
-    mesher = cfg.get("mesher", "snappy")
+    mesher = cfg.get("mesher", "cfmesh")
     if isinstance(mesher, dict):
-        mesher_type = mesher.get("type", "snappy")
+        mesher_type = mesher.get("type", "cfmesh")
     elif isinstance(mesher, str):
         mesher_type = mesher
     else:

@@ -226,10 +226,10 @@
                 <div class="form-group col-span-2">
                   <label for="cfg-mesher-engine">Mesher Engine</label>
                   <select id="cfg-mesher-engine" class="input">
-                    <option value="snappy" selected>snappyHexMesh (Standard OpenFOAM hex-dominant)</option>
-                    <option value="cfmesh">cfMesh (cartesianMesh — Fast & Robust Boundary Layers)</option>
+                    <option value="cfmesh" selected>cfMesh (cartesianMesh — Fast &amp; Robust Boundary Layers, Recommended)</option>
+                    <option value="snappy">snappyHexMesh (Classic OpenFOAM multi-stage)</option>
                   </select>
-                  <span class="field-hint">cfMesh delivers 2–4× faster meshing with superior boundary layer preservation on sharp aerodynamic edges.</span>
+                  <span class="field-hint">cfMesh is the primary recommended mesher for FSAE and aircraft (3–8× faster, robust boundary layers without edge collapse).</span>
                 </div>
               </div>
             </div>
@@ -608,7 +608,7 @@
                   <!-- 4. Boundary Layer Mesh Overrides -->
                   <div class="form-group col-span-2 overrides-section-header">
                     <h4 class="section-subtitle">4. Boundary Layer Mesh Overrides</h4>
-                    <span class="field-hint">snappyHexMesh prism layer inflation controls for near-wall boundary layer resolution (y+).</span>
+                    <span class="field-hint">Boundary layer prism inflation controls for near-wall boundary layer resolution (y+) (supports cfMesh and snappyHexMesh).</span>
                   </div>
 
                   <div class="form-group">
@@ -887,8 +887,8 @@
           <div class="panel-header-actions">
             <select id="select-log-type" class="input input-xs">
               <option value="simpleFoam">log.simpleFoam (Solver)</option>
-              <option value="snappyHexMesh">log.snappyHexMesh (Mesher)</option>
               <option value="cartesianMesh">log.cartesianMesh (cfMesh)</option>
+              <option value="snappyHexMesh">log.snappyHexMesh (snappyHexMesh)</option>
               <option value="surfaceFeatureEdges">log.surfaceFeatureEdges (Features)</option>
               <option value="potentialFoam">log.potentialFoam (Init)</option>
               <option value="blockMesh">log.blockMesh (Background)</option>

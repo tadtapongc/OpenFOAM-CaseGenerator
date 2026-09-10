@@ -122,6 +122,8 @@ def write_mesh_dict(cfg: dict[str, Any], case_dir: Path) -> None:
     edge_cell = round(base_cell / (2 ** edge_level), 6)
 
     min_cell = min(edge_cell, surf_cell_fine)
+    # Default outer boundary cell size: keep wind tunnel walls coarse at base_cell
+    boundary_cell = float(mesh.get("boundary_cell_size", base_cell))
 
     # Local refinement for vehicle surfaces
     local_ref_lines = []
@@ -130,6 +132,17 @@ def write_mesh_dict(cfg: dict[str, Any], case_dir: Path) -> None:
         {name}
         {{
             cellSize {surf_cell_fine};
+        }}""")
+
+    # Ground refinement: if ground vehicle (FSAE / auto), refine road underneath
+    flow = cfg.get("flow", {})
+    if flow.get("ground", False):
+        ground_patch = patches.get("ground", "ground")
+        ground_cell = float(mesh.get("ground_cell_size", round(base_cell / 2.0, 6)))
+        local_ref_lines.append(f"""\
+        {ground_patch}
+        {{
+            cellSize {ground_cell};
         }}""")
 
     # Refinement regions (wake boxes)
@@ -223,6 +236,17 @@ boundaryLayers
     {{
 {chr(10).join(patch_layer_lines)}
     }}
+
+    optimiseLayer 1;
+
+    optimisationParameters
+    {{
+        nSmoothNormals      3;
+        maxNumIterations    2;
+        featureSizeFactor   0.4;
+        reCalculateNormals  1;
+        relThicknessTol     0.1;
+    }}
 }}
 """
 
@@ -231,7 +255,7 @@ surfaceFile "constant/triSurface/domain.fms";
 
 maxCellSize         {base_cell:.6g};
 minCellSize         {min_cell:.6g};
-boundaryCellSize    {surf_cell_coarse:.6g};
+boundaryCellSize    {boundary_cell:.6g};
 
 localRefinement
 {{

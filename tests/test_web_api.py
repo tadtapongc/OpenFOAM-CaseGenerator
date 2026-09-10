@@ -76,7 +76,7 @@ class TestWebAPI(unittest.TestCase):
         self.assertIn("fast", res["fidelity_presets"])
         self.assertIn("standard", res["fidelity_presets"])
         self.assertIn("available_meshers", res)
-        self.assertEqual(res["available_meshers"], ["snappy", "cfmesh"])
+        self.assertEqual(res["available_meshers"], ["cfmesh", "snappy"])
 
     def test_config_templates(self):
         """Test templates list endpoint."""
@@ -668,6 +668,7 @@ class TestWebAPI(unittest.TestCase):
                 "stl_files": ["sample_wing.stl"],
                 "flow": {"velocity": 20.0, "direction": "-z", "ground": True},
                 "outputs": {"drag_axis": "-z", "downforce_axis": "-y"},
+                "mesher": "snappy",
                 "overrides": {
                     "fluid": {"rho": 1.15},
                     "solver": {"end_time": 600},

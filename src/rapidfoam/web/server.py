@@ -299,7 +299,7 @@ async def api_config_defaults() -> dict[str, Any]:
     """Return default config template and presets for the UI."""
     return {
         "default_config": DEFAULT_CONFIG,
-        "available_meshers": ["snappy", "cfmesh"],
+        "available_meshers": ["cfmesh", "snappy"],
         "fidelity_presets": {
             name: {
                 "desc": p.get("desc", ""),
@@ -709,7 +709,7 @@ async def api_telemetry_forces(case_name: str) -> dict[str, Any]:
                 case_stage = "Meshed"
             if (local_case / "log.simpleFoam").is_file():
                 case_stage = "Solving"
-            elif (local_case / "log.snappyHexMesh").is_file():
+            elif (local_case / "log.cartesianMesh").is_file() or (local_case / "log.snappyHexMesh").is_file():
                 case_stage = "Meshing"
 
         return {

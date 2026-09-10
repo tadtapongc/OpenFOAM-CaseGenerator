@@ -13,6 +13,9 @@
     "_fidelity": "Presets: 'fast' (~2-4M cells, 10 min), 'standard' (~6-9M cells, 45 min, RECOMMENDED for general aerodynamics), 'fine' (~12-16M cells, 2-4 hrs)",
     "fidelity": "standard",
 
+    "_mesher_comment": "Mesher engine: 'cfmesh' (RECOMMENDED for FSAE & aircraft: 3-8x faster, robust boundary layers) or 'snappy' (classic multi-stage)",
+    "mesher": "cfmesh",
+
     "_section_flow": "--- 2. Flow & Operating Conditions ---",
     "flow": {
         "_velocity_comment": "Freestream air velocity in m/s (16.67 m/s ≈ 60 km/h, 20.0 m/s = 72 km/h)",
@@ -56,7 +59,7 @@
 
     "_section_parallel": "--- 5. Parallel Computing ---",
     "parallel": {
-        "_comment": "Number of CPU cores for MPI decomposition, snappyHexMesh meshing, and simpleFoam solving",
+        "_comment": "Number of CPU cores for MPI decomposition, meshing (cfMesh/snappy), and simpleFoam solving",
         "n_procs": 32
     },
 

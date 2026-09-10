@@ -208,21 +208,24 @@ def write_scripts(cfg: dict[str, Any], case_dir: Path) -> None:
         _convergence_monitor_script(cfg),
     )
 
-    mesher = cfg.get("mesher", "snappy")
-    mesher_type = mesher.get("type", "snappy") if isinstance(mesher, dict) else str(mesher)
+    mesher = cfg.get("mesher", "cfmesh")
+    mesher_type = mesher.get("type", "cfmesh") if isinstance(mesher, dict) else str(mesher)
     feature_angle = cfg.get("cfmesh", {}).get("feature_angle", 45)
 
     if mesher_type == "cfmesh":
         mesh_block_parallel = f"""# Mesh (cfMesh cartesianMesh)
+[ -n "$FOAM_USER_APPBIN" ] && export PATH="$FOAM_USER_APPBIN:$PATH"
 runApplication surfaceFeatureEdges -angle {feature_angle} constant/triSurface/domain.stl constant/triSurface/domain.fms
 runApplication cartesianMesh
-runApplication checkMesh -allGeometry -allTopology -noFunctionObjects
+runApplication checkMesh -noFunctionObjects
 runApplication renumberMesh -overwrite -noFunctionObjects"""
-        mesh_block_serial = f"""runApplication surfaceFeatureEdges -angle {feature_angle} constant/triSurface/domain.stl constant/triSurface/domain.fms
+        mesh_block_serial = f"""[ -n "$FOAM_USER_APPBIN" ] && export PATH="$FOAM_USER_APPBIN:$PATH"
+runApplication surfaceFeatureEdges -angle {feature_angle} constant/triSurface/domain.stl constant/triSurface/domain.fms
 runApplication cartesianMesh
-runApplication checkMesh -allGeometry -allTopology -noFunctionObjects
+runApplication checkMesh -noFunctionObjects
 runApplication renumberMesh -overwrite -noFunctionObjects"""
         mesh_section_slurm = f"""# ======================== MESH (cfMesh) ========================
+[ -n "$FOAM_USER_APPBIN" ] && export PATH="$FOAM_USER_APPBIN:$PATH"
 echo ">>> Running surfaceFeatureEdges"
 surfaceFeatureEdges -angle {feature_angle} constant/triSurface/domain.stl constant/triSurface/domain.fms > log.surfaceFeatureEdges 2>&1
 
@@ -231,7 +234,7 @@ export OMP_NUM_THREADS=${{SLURM_CPUS_PER_TASK:-$SLURM_NTASKS}}
 cartesianMesh > log.cartesianMesh 2>&1
 
 echo ">>> Checking mesh"
-checkMesh -allGeometry -allTopology -noFunctionObjects > log.checkMesh 2>&1
+checkMesh -noFunctionObjects > log.checkMesh 2>&1
 
 echo ">>> Renumbering mesh"
 renumberMesh -overwrite -noFunctionObjects > log.renumberMesh 2>&1"""

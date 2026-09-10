@@ -72,6 +72,7 @@ class ProjectTest(unittest.TestCase):
 
     def test_overrides_and_custom_output_directory(self):
         case = self.generate(
+            mesher="snappy",
             case_dir="custom", solver={"end_time": 123}, layers={"n_layers": 2},
             slurm={"time": "04:00:00"},
             mesh_params={"locationInMesh": [0.2, 0.3, 0.4], "maxLoadUnbalance": 0.25},
@@ -153,7 +154,8 @@ class ProjectTest(unittest.TestCase):
         self.assertEqual(implicit, compute_domain_box(cfg, ((0, 0, 0), (1, 1, 3))))
 
     def test_custom_patch_names_have_correct_types_and_alignment(self):
-        case = self.generate(patches={"ground": "road", "symmetry": "centre"},
+        case = self.generate(mesher="snappy",
+                             patches={"ground": "road", "symmetry": "centre"},
                              domain_faces={"-x": "symmetry", "+x": "farField", "-y": "ground",
                                            "+y": "farField", "+z": "inlet", "-z": "outlet"})
         mesh = (case / "system/blockMeshDict").read_text()
@@ -163,7 +165,7 @@ class ProjectTest(unittest.TestCase):
         self.assertIn("    road\n", (case / "0/U").read_text())
 
     def test_positive_ground_and_symmetry_faces(self):
-        case = self.generate(ground_clearance=0.1, symmetry_plane=1,
+        case = self.generate(mesher="snappy", ground_clearance=0.1, symmetry_plane=1,
                              domain_faces={"+x": "symmetry", "-x": "farField", "+y": "ground",
                                            "-y": "farField", "+z": "inlet", "-z": "outlet"})
         cfg = json.loads((case / "case_config.json").read_text())
@@ -380,7 +382,7 @@ class ProjectTest(unittest.TestCase):
             self.assertAlmostEqual(e, a, places=7)
 
     def test_performance_defaults_and_parallel_checkmesh(self):
-        case = self.generate()
+        case = self.generate(mesher="snappy")
         cfg = json.loads((case / "case_config.json").read_text())
         self.assertEqual(cfg["linear_solvers"]["p"]["mergeLevels"], 2)
         self.assertEqual(cfg["relaxation"]["fields"]["p"], 0.7)
@@ -391,6 +393,14 @@ class ProjectTest(unittest.TestCase):
         self.assertIn("runParallel checkMesh", allrun_parallel)
         run_sh = (case / "run.sh").read_text()
         self.assertIn("checkMesh -allGeometry -allTopology -noFunctionObjects -parallel", run_sh)
+
+    def test_default_mesher_is_cfmesh(self):
+        case = self.generate()
+        cfg = json.loads((case / "case_config.json").read_text())
+        self.assertEqual(cfg["mesher"], "cfmesh")
+        self.assertTrue((case / "system/meshDict").exists())
+        self.assertTrue((case / "constant/triSurface/domain.stl").exists())
+        self.assertFalse((case / "system/snappyHexMeshDict").exists())
 
     def test_cfmesh_config_validation(self):
         valid_cfg = load_config(self.config(mesher="cfmesh"))
@@ -421,8 +431,13 @@ class ProjectTest(unittest.TestCase):
         self.assertIn('surfaceFile "constant/triSurface/domain.fms";', mesh_dict_content)
         self.assertIn("maxCellSize", mesh_dict_content)
         self.assertIn("minCellSize", mesh_dict_content)
+        self.assertIn("boundaryCellSize    0.1;", mesh_dict_content)
         self.assertIn("boundaryLayers", mesh_dict_content)
+        self.assertIn("optimiseLayer 1;", mesh_dict_content)
+        self.assertIn("optimisationParameters", mesh_dict_content)
         self.assertIn("renameBoundary", mesh_dict_content)
+        # Ground refinement present when ground is enabled
+        self.assertIn("ground", mesh_dict_content)
 
         # 3. snappyHexMeshDict and blockMeshDict should NOT be generated for cfMesh
         self.assertFalse((case / "system/snappyHexMeshDict").exists())
@@ -433,6 +448,7 @@ class ProjectTest(unittest.TestCase):
 
         # Allrun.parallel verification
         allrun_parallel = (case / "Allrun.parallel").read_text()
+        self.assertIn('export PATH="$FOAM_USER_APPBIN:$PATH"', allrun_parallel)
         self.assertIn("surfaceFeatureEdges -angle 45 constant/triSurface/domain.stl constant/triSurface/domain.fms", allrun_parallel)
         self.assertIn("runApplication cartesianMesh", allrun_parallel)
         self.assertIn("runApplication checkMesh", allrun_parallel)
@@ -444,6 +460,7 @@ class ProjectTest(unittest.TestCase):
 
         # run.sh (SLURM) verification
         run_sh = (case / "run.sh").read_text()
+        self.assertIn('export PATH="$FOAM_USER_APPBIN:$PATH"', run_sh)
         self.assertIn("surfaceFeatureEdges -angle 45 constant/triSurface/domain.stl constant/triSurface/domain.fms", run_sh)
         self.assertIn("cartesianMesh", run_sh)
         self.assertIn("export OMP_NUM_THREADS", run_sh)

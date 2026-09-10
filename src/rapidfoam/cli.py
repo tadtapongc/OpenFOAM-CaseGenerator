@@ -273,8 +273,8 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
         print(f"    Region {r['name']}: Level {r['level']}")
 
     div_u_scheme = cfg.get("schemes", {}).get("div_U", "bounded Gauss limitedLinear 1")
-    mesher = cfg.get("mesher", "snappy")
-    mesher_type = mesher.get("type", "snappy") if isinstance(mesher, dict) else str(mesher)
+    mesher = cfg.get("mesher", "cfmesh")
+    mesher_type = mesher.get("type", "cfmesh") if isinstance(mesher, dict) else str(mesher)
     mesher_name = "cfMesh (cartesianMesh)" if mesher_type == "cfmesh" else "snappyHexMesh"
 
     case_dir = project_dir / cfg["case_dir"] / cfg["case_name"]

@@ -516,6 +516,14 @@ if cases_dir.is_dir():
                 status = "Failed"
             else:
                 status = "Solving"
+        elif (d / "log.cartesianMesh").is_file():
+            tail = read_tail(d / "log.cartesianMesh")
+            if "End" in tail or "Finalising parallel run" in tail:
+                status = "Meshed"
+            elif any(err in tail for err in ["FOAM FATAL", "Fatal error", "FOAM aborting", "sigFpe", "SIGFPE"]):
+                status = "Failed"
+            else:
+                status = "Meshing"
         elif (d / "log.snappyHexMesh").is_file():
             tail = read_tail(d / "log.snappyHexMesh")
             if "End" in tail or "Finalising parallel run" in tail:

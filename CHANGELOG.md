@@ -5,6 +5,20 @@ All notable changes to RapidFOAM will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-09-10
+
+### Added
+- **cfMesh (`cartesianMesh`) Engine**: Integrated cfMesh as an alternative mesher engine for external vehicle and aerospace aerodynamics.
+- **Closed-Manifold Flow Domain Builder**: Automatic generation of watertight domain STL with inward-facing surface normals tagged per boundary role.
+- **Automated `system/meshDict` Synthesis**: Multi-fidelity cell budgeting, surface/edge refinement, and wake refinement boxes for cfMesh.
+- **cfMesh-First Ecosystem**: Set `cfMesh` as the primary default mesher across Web Studio UI, CLI, and configuration templates with `snappyHexMesh` preserved as an optional alternative.
+- **Boundary Layer Normal Optimization**: Enabled `optimiseLayer 1` and normal smoothing heuristics for uncompromised boundary layer extrusion on multi-element wings and trailing edges.
+- **Lean Boundary Cell Budgeting**: Restricting `boundaryCellSize` to base cell size while refining CAD surfaces and ground plane, reducing domain cell count from 10.6M to ~4M cells.
+
+### Fixed
+- Fixed OpenMPI SLURM slot starvation on cluster compute nodes by adding `--oversubscribe` to parallel launcher invocations.
+- Added automatic `$FOAM_USER_APPBIN` PATH propagation in shell execution scripts.
+
 ## [1.0.0] - 2026-09-10
 
 ### Initial Public Release
