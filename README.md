@@ -2,6 +2,10 @@
 
 OpenFOAM® external aerodynamics automation suite and Web Studio developed for **Rapidamente Formula Student** (Chulalongkorn University).
 
+<img width="1292" height="586" alt="RapidFOAM" src="https://github.com/user-attachments/assets/db91bb4b-5261-4cea-a793-a40dfc756ddc" />
+
+https://github.com/user-attachments/assets/caced105-394c-4c8f-b6f1-86d14df9ae85
+
 > **Trademark Notice**  
 > OPENFOAM® is a registered trade mark of OpenCFD Limited, producer and distributor of the OpenFOAM software via [www.openfoam.com](https://www.openfoam.com).  
 > This offering is not approved or endorsed by OpenCFD Limited, producer and distributor of the OpenFOAM software via [www.openfoam.com](https://www.openfoam.com), and owner of the OPENFOAM® and OpenCFD® trade marks.
