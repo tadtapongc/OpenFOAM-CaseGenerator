@@ -62,7 +62,13 @@ case "$name" in
         cp processor0/state reconstructed
         ;;
     mpirun)
-        shift 2
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                --oversubscribe) shift ;;
+                -np) shift 2 ;;
+                *) break ;;
+            esac
+        done
         exec "$@"
         ;;
     python3)
@@ -83,7 +89,8 @@ esac
         tool.chmod(0o755)
         for name in ("surfaceFeatureExtract", "blockMesh", "decomposePar", "snappyHexMesh",
                      "reconstructParMesh", "checkMesh", "renumberMesh", "potentialFoam",
-                     "simpleFoam", "reconstructPar", "mpirun", "python3", "rsync", "module"):
+                     "simpleFoam", "reconstructPar", "mpirun", "python3", "rsync", "module",
+                     "surfaceFeatureEdges", "cartesianMesh"):
             (self.bin / name).symlink_to(tool)
         self.env = {**os.environ, "PATH": str(self.bin) + os.pathsep + os.environ["PATH"],
                     "WM_PROJECT_DIR": str(self.root / "foam"), "SLURM_JOB_ID": "test",
@@ -92,8 +99,9 @@ esac
                     "FOAM_INST_DIR": "", "FAIL_STAGE": "", "COPYBACK_FAIL": "0",
                     "WAIT_SOLVER": "0", "SOLVER_STATUS": "0", "RECONSTRUCT_STATUS": "0"}
 
-    def generate(self):
+    def generate(self, mesher="snappy"):
         cfg = copy.deepcopy(DEFAULT_CONFIG)
+        cfg["mesher"] = mesher
         cfg["parallel"]["n_procs"] = 2
         cfg["slurm"].update(openfoam_source=None, openfoam_module=None)
         write_scripts(cfg, self.case)
@@ -111,10 +119,11 @@ esac
                 os.kill(int(path.read_text()), 0)
 
     def test_all_generated_shell_syntax(self):
-        self.generate()
-        for name in ("Allrun", "Allrun.parallel", "Allclean", "run.sh"):
-            result = subprocess.run(["bash", "-n", str(self.case/name)], capture_output=True, text=True)
-            self.assertEqual(result.returncode, 0, result.stderr)
+        for mesher in ("snappy", "cfmesh"):
+            self.generate(mesher=mesher)
+            for name in ("Allrun", "Allrun.parallel", "Allclean", "run.sh"):
+                result = subprocess.run(["bash", "-n", str(self.case/name)], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, f"{mesher} {name}: {result.stderr}")
 
     def test_serial_solver_failure_is_reported(self):
         self.generate()
@@ -183,6 +192,21 @@ esac
             if proc.poll() is None:
                 os.killpg(proc.pid, signal.SIGKILL)
                 proc.communicate()
+
+    def test_cfmesh_slurm_success(self):
+        self.generate(mesher="cfmesh")
+        result = self.run_script("run.sh")
+        self.assertEqual(result.returncode, 0, result.stdout+result.stderr)
+        self.assertTrue((self.case/"reconstructed").exists())
+        self.assert_monitor_stopped()
+
+    def test_cfmesh_parallel_solver_failure(self):
+        self.generate(mesher="cfmesh")
+        result = self.run_script("Allrun.parallel", SOLVER_STATUS="17")
+        self.assertEqual(result.returncode, 17, result.stdout+result.stderr)
+        self.assertEqual((self.case/"reconstructed").read_text().strip(), "recoverable")
+        self.assertFalse((self.case/"processor0").exists())
+        self.assert_monitor_stopped()
 
 
 if __name__ == "__main__":
