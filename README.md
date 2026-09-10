@@ -1,6 +1,10 @@
 # RapidFOAM
 
-OpenFOAM external aerodynamics automation suite and Web Studio developed for **Rapidamente Formula Student** (Chulalongkorn University).
+OpenFOAM® external aerodynamics automation suite and Web Studio developed for **Rapidamente Formula Student** (Chulalongkorn University).
+
+> **Trademark Notice**  
+> OPENFOAM® is a registered trade mark of OpenCFD Limited, producer and distributor of the OpenFOAM software via [www.openfoam.com](https://www.openfoam.com).  
+> This offering is not approved or endorsed by OpenCFD Limited, producer and distributor of the OpenFOAM software via [www.openfoam.com](https://www.openfoam.com), and owner of the OPENFOAM® and OpenCFD® trade marks.
 
 RapidFOAM streamlines the OpenFOAM workflow for external vehicle aerodynamics: CAD STL ingestion, domain bounding box calculation, `snappyHexMesh` refinement dictionary generation (surfaces, feature edges, distance shells, two-stage wake boxes, and boundary layers), `simpleFoam` steady-state case setup (SIMPLEC, k-omega SST), execution scripts, and real-time force convergence monitoring (Drag, Downforce, L/D).
 
@@ -335,4 +339,6 @@ python -m unittest discover -s tests -v
 This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
 
 ### Trademark Notice
-OPENFOAM® is a registered trademark of OpenCFD Limited. RapidFOAM is an independent project and is not affiliated with, sponsored, or endorsed by OpenCFD Limited.
+OPENFOAM® is a registered trade mark of OpenCFD Limited, producer and distributor of the OpenFOAM software via [www.openfoam.com](https://www.openfoam.com).
+
+This offering is not approved or endorsed by OpenCFD Limited, producer and distributor of the OpenFOAM software via [www.openfoam.com](https://www.openfoam.com), and owner of the OPENFOAM® and OpenCFD® trade marks.
