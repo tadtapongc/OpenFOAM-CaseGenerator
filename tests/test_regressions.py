@@ -392,6 +392,86 @@ class ProjectTest(unittest.TestCase):
         run_sh = (case / "run.sh").read_text()
         self.assertIn("checkMesh -allGeometry -allTopology -noFunctionObjects -parallel", run_sh)
 
+    def test_cfmesh_config_validation(self):
+        valid_cfg = load_config(self.config(mesher="cfmesh"))
+        errors, _ = validate(valid_cfg, self.root)
+        self.assertEqual(errors, [])
+        self.assertEqual(valid_cfg["mesher"], "cfmesh")
+
+        invalid_cfg = load_config(self.config(mesher="unsupported_mesher"))
+        errors, _ = validate(invalid_cfg, self.root)
+        self.assertTrue(any("mesher must be" in e.lower() for e in errors))
+
+    def test_cfmesh_generation_structure_and_artifacts(self):
+        case = self.generate(mesher="cfmesh")
+        # 1. domain.stl generated and contains all bounding box patches and CAD solid
+        domain_stl = case / "constant/triSurface/domain.stl"
+        self.assertTrue(domain_stl.exists(), "domain.stl must exist for cfMesh")
+        domain_content = domain_stl.read_text()
+        self.assertIn("solid inlet", domain_content)
+        self.assertIn("solid outlet", domain_content)
+        self.assertIn("solid ground", domain_content)
+        self.assertIn("solid symmetry", domain_content)
+        self.assertIn("solid body", domain_content)
+
+        # 2. meshDict generated with cfMesh directives
+        mesh_dict = case / "system/meshDict"
+        self.assertTrue(mesh_dict.exists(), "meshDict must be generated for cfMesh")
+        mesh_dict_content = mesh_dict.read_text()
+        self.assertIn('surfaceFile "constant/triSurface/domain.fms";', mesh_dict_content)
+        self.assertIn("maxCellSize", mesh_dict_content)
+        self.assertIn("minCellSize", mesh_dict_content)
+        self.assertIn("boundaryLayers", mesh_dict_content)
+        self.assertIn("renameBoundary", mesh_dict_content)
+
+        # 3. snappyHexMeshDict and blockMeshDict should NOT be generated for cfMesh
+        self.assertFalse((case / "system/snappyHexMeshDict").exists())
+        self.assertFalse((case / "system/blockMeshDict").exists())
+
+    def test_cfmesh_execution_scripts(self):
+        case = self.generate(mesher="cfmesh")
+
+        # Allrun.parallel verification
+        allrun_parallel = (case / "Allrun.parallel").read_text()
+        self.assertIn("surfaceFeatureEdges -angle 45 constant/triSurface/domain.stl constant/triSurface/domain.fms", allrun_parallel)
+        self.assertIn("runApplication cartesianMesh", allrun_parallel)
+        self.assertIn("runApplication checkMesh", allrun_parallel)
+        self.assertIn("runApplication renumberMesh -overwrite", allrun_parallel)
+        self.assertIn("decomposePar", allrun_parallel)
+        self.assertIn("runParallel simpleFoam", allrun_parallel)
+        self.assertNotIn("snappyHexMesh", allrun_parallel)
+        self.assertNotIn("blockMesh", allrun_parallel)
+
+        # run.sh (SLURM) verification
+        run_sh = (case / "run.sh").read_text()
+        self.assertIn("surfaceFeatureEdges -angle 45 constant/triSurface/domain.stl constant/triSurface/domain.fms", run_sh)
+        self.assertIn("cartesianMesh", run_sh)
+        self.assertIn("export OMP_NUM_THREADS", run_sh)
+        self.assertIn("decomposePar", run_sh)
+
+        # Allclean verification
+        allclean = (case / "Allclean").read_text()
+        self.assertIn("constant/triSurface/*.fms", allclean)
+
+    def test_cfmesh_wake_refinement_boxes(self):
+        custom_mesh = {
+            "refinement_regions": [
+                {
+                    "name": "custom_wake",
+                    "min": [0.0, -0.5, -2.0],
+                    "max": [1.5, 0.5, 0.0],
+                    "level": 2,
+                }
+            ]
+        }
+        case = self.generate(mesher="cfmesh", mesh_params=custom_mesh)
+        mesh_dict_content = (case / "system/meshDict").read_text()
+        self.assertIn("objectRefinements", mesh_dict_content)
+        self.assertIn("custom_wake", mesh_dict_content)
+        self.assertIn("type box;", mesh_dict_content)
+        self.assertIn("cellSize", mesh_dict_content)
+
 
 if __name__ == "__main__":
     unittest.main()
+

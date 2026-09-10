@@ -75,6 +75,8 @@ class TestWebAPI(unittest.TestCase):
         self.assertIn("fidelity_presets", res)
         self.assertIn("fast", res["fidelity_presets"])
         self.assertIn("standard", res["fidelity_presets"])
+        self.assertIn("available_meshers", res)
+        self.assertEqual(res["available_meshers"], ["snappy", "cfmesh"])
 
     def test_config_templates(self):
         """Test templates list endpoint."""
@@ -107,6 +109,39 @@ class TestWebAPI(unittest.TestCase):
         res = asyncio.run(api_get_stl_file("sample_wing.stl"))
         self.assertEqual(res.status_code, 200)
         self.assertTrue(Path(res.path).exists())
+
+    def test_geometry_domain_box(self):
+        """Test computing wind tunnel domain box from geometry bounds."""
+        res = asyncio.run(api_geometry_domain_box())
+        self.assertIn("domain_box", res)
+        self.assertIn("min", res["domain_box"])
+        self.assertIn("max", res["domain_box"])
+        self.assertIn("bounds", res)
+
+    def test_auto_symmetry_plane_calculation(self):
+        """Test calculation of auto symmetry plane from geometry bounds."""
+        res = asyncio.run(api_auto_symmetry_plane())
+        self.assertIn("symmetry_plane", res)
+        self.assertIn("bounds", res)
+        self.assertIsInstance(res["symmetry_plane"], (int, float))
+
+    def test_ground_clearance_styles(self):
+        """Test 2 + 1 ground clearance styles: None (touching CAD bottom), Relative, and Absolute."""
+        # Style 0: Default touching CAD bottom
+        cfg0 = {"flow": {"ground": True}, "case_name": "t0", "stl_files": ["sample_wing.stl"]}
+        res0 = asyncio.run(api_geometry_domain_box(cfg0))
+        cad_bottom_y = res0["bounds"]["min"][1]
+        self.assertAlmostEqual(res0["domain_box"]["min"][1], cad_bottom_y, places=4)
+
+        # Style 1: Relative ground clearance (35mm above ground -> ground is cad_bottom - 0.035)
+        cfg1 = {"flow": {"ground": True}, "ground_clearance": 0.035, "case_name": "t1", "stl_files": ["sample_wing.stl"]}
+        res1 = asyncio.run(api_geometry_domain_box(cfg1))
+        self.assertAlmostEqual(res1["domain_box"]["min"][1], cad_bottom_y - 0.035, places=4)
+
+        # Style 2: Absolute ground plane (y = -0.5)
+        cfg2 = {"flow": {"ground": True}, "ground_plane": -0.5, "case_name": "t2", "stl_files": ["sample_wing.stl"]}
+        res2 = asyncio.run(api_geometry_domain_box(cfg2))
+        self.assertAlmostEqual(res2["domain_box"]["min"][1], -0.5, places=4)
 
     def test_validation_endpoint(self):
         """Test generating/validating a config."""
@@ -186,11 +221,48 @@ class TestWebAPI(unittest.TestCase):
         self.assertTrue(res["local_actions"].get("generated_locally"))
         self.assertTrue((test_case_dir / "system" / "controlDict").is_file())
 
+    def test_local_case_generation_cfmesh(self):
+        """Test local case generation with cfMesh engine via Web API."""
+        case_name = "test_case_cfmesh_web_gen"
+        test_cfg_path = Path(f"configs/{case_name}.json")
+        test_case_dir = Path(f"cases/{case_name}")
+        self.addCleanup(lambda: test_cfg_path.unlink(missing_ok=True))
+        self.addCleanup(lambda: shutil.rmtree(test_case_dir, ignore_errors=True))
+
+        valid_cfg = {
+            "case_name": case_name,
+            "stl_files": ["sample_wing.stl"],
+            "mesher": "cfmesh",
+            "flow": {"velocity": 20.0, "direction": "-z", "ground": True},
+            "outputs": {"drag_axis": "-z", "downforce_axis": "-y"},
+            "parallel": {"n_procs": 8},
+        }
+
+        req = GenerateCaseRequest(
+            config=valid_cfg,
+            upload_to_cluster=False,
+            generate_remotely=False,
+            submit_slurm=False,
+            generate_locally=True,
+        )
+        res = asyncio.run(api_case_generate_and_submit(req))
+        self.assertTrue(res["success"])
+        self.assertTrue(res["local_actions"].get("generated_locally"))
+        self.assertTrue((test_case_dir / "system" / "meshDict").is_file())
+        self.assertTrue((test_case_dir / "constant" / "triSurface" / "domain.stl").is_file())
+        self.assertFalse((test_case_dir / "system" / "snappyHexMeshDict").exists())
+
     def test_telemetry_logs_whitelist(self):
-        """Test that arbitrary log_types are rejected."""
+        """Test that arbitrary log_types are rejected and cfMesh logs are accepted."""
         with self.assertRaises(HTTPException) as ctx:
             asyncio.run(api_telemetry_logs("my_case", log_type="malicious_type"))
         self.assertEqual(ctx.exception.status_code, 400)
+
+        # Valid cfMesh log types should not trigger 400
+        res_cm = asyncio.run(api_telemetry_logs("nonexistent_case", log_type="cartesianMesh"))
+        self.assertEqual(res_cm["log_file"], "log.cartesianMesh")
+        res_sfe = asyncio.run(api_telemetry_logs("nonexistent_case", log_type="surfaceFeatureEdges"))
+        self.assertEqual(res_sfe["log_file"], "log.surfaceFeatureEdges")
 
     def test_telemetry_forces_and_convergence(self):
         """Test telemetry forces calculation and symmetry scaling."""

@@ -20,6 +20,7 @@ class CFDApp {
       stl_files: ["geometry.stl"],
       stl_dir: "stl",
       case_dir: "cases",
+      mesher: "snappy",
       fidelity: "standard",
       flow: {
         velocity: 16.67,
@@ -291,6 +292,7 @@ class CFDApp {
 
     // General
     this.setVal('cfg-case-name', cfg.case_name || 'my_case');
+    this.setVal('cfg-mesher-engine', cfg.mesher || 'snappy');
 
     const fidelity = cfg.fidelity || 'standard';
     document.querySelectorAll('.fidelity-card').forEach((card) => {
@@ -467,6 +469,7 @@ class CFDApp {
 
     // General
     cfg.case_name = this.getVal('cfg-case-name') || 'my_case';
+    cfg.mesher = this.getVal('cfg-mesher-engine') || 'snappy';
 
     const selectedFidelityCard = document.querySelector('.fidelity-card.selected');
     cfg.fidelity = selectedFidelityCard ? selectedFidelityCard.dataset.fidelity : 'standard';

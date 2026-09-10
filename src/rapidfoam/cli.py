@@ -273,23 +273,28 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
         print(f"    Region {r['name']}: Level {r['level']}")
 
     div_u_scheme = cfg.get("schemes", {}).get("div_U", "bounded Gauss limitedLinear 1")
+    mesher = cfg.get("mesher", "snappy")
+    mesher_type = mesher.get("type", "snappy") if isinstance(mesher, dict) else str(mesher)
+    mesher_name = "cfMesh (cartesianMesh)" if mesher_type == "cfmesh" else "snappyHexMesh"
 
     case_dir = project_dir / cfg["case_dir"] / cfg["case_name"]
     # Dry run — stop here
     if dry_run:
         print(f"\n  DRY RUN — would generate: {case_dir}")
+        print(f"    Mesher:     {mesher_name}")
         print(f"    Velocity:   {cfg['flow']['velocity']:.2f} m/s  U={vec_str(vel)}")
         print(f"    k={k:.5g}  ω={omega:.5g}  νt={nut:.5g}")
         print(f"    Surfaces:   {', '.join(stl_names)}")
-        print(f"    Pipeline:   potentialFoam → simpleFoam ({end_time} iters, {div_u_scheme})")
+        print(f"    Pipeline:   {mesher_name} → potentialFoam → simpleFoam ({end_time} iters, {div_u_scheme})")
         return
 
     # Generate case
     print(f"\n{'='*60}")
     print(f"  Generating: {case_dir}")
+    print(f"  Mesher:   {mesher_name}")
     print(f"  Velocity: {cfg['flow']['velocity']:.2f} m/s | Cell: {mesh['base_cell_size']} m")
     print(f"  Surfaces: {', '.join(stl_names)}")
-    print(f"  Pipeline: potentialFoam → simpleFoam ({end_time} iters, {div_u_scheme})")
+    print(f"  Pipeline: {mesher_name} → potentialFoam → simpleFoam ({end_time} iters, {div_u_scheme})")
     print(f"{'='*60}")
 
     # Create directories
@@ -324,9 +329,17 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
         write_fv_solution,
     )
 
-    write_block_mesh_dict(cfg, case_dir)
-    write_surface_feature_extract_dict(cfg, case_dir)
-    write_snappy_hex_mesh_dict(cfg, case_dir)
+    if mesher_type == "cfmesh":
+        from rapidfoam.writers.cfmesh import generate_domain_stl, write_mesh_dict
+        generate_domain_stl(cfg, case_dir, stl_pairs)
+        write_mesh_dict(cfg, case_dir)
+        print("    ✓ domain.stl (wind tunnel box + CAD)")
+        print("    ✓ system/meshDict (cfMesh)")
+    else:
+        write_block_mesh_dict(cfg, case_dir)
+        write_surface_feature_extract_dict(cfg, case_dir)
+        write_snappy_hex_mesh_dict(cfg, case_dir)
+
     write_control_dict(cfg, case_dir)
     write_fv_schemes(cfg, case_dir)
     write_fv_solution(cfg, case_dir)

@@ -208,6 +208,71 @@ def write_scripts(cfg: dict[str, Any], case_dir: Path) -> None:
         _convergence_monitor_script(cfg),
     )
 
+    mesher = cfg.get("mesher", "snappy")
+    mesher_type = mesher.get("type", "snappy") if isinstance(mesher, dict) else str(mesher)
+    feature_angle = cfg.get("cfmesh", {}).get("feature_angle", 45)
+
+    if mesher_type == "cfmesh":
+        mesh_block_parallel = f"""# Mesh (cfMesh cartesianMesh)
+runApplication surfaceFeatureEdges -angle {feature_angle} constant/triSurface/domain.stl constant/triSurface/domain.fms
+runApplication cartesianMesh
+runApplication checkMesh -allGeometry -allTopology -noFunctionObjects
+runApplication renumberMesh -overwrite -noFunctionObjects"""
+        mesh_block_serial = f"""runApplication surfaceFeatureEdges -angle {feature_angle} constant/triSurface/domain.stl constant/triSurface/domain.fms
+runApplication cartesianMesh
+runApplication checkMesh -allGeometry -allTopology -noFunctionObjects
+runApplication renumberMesh -overwrite -noFunctionObjects"""
+        mesh_section_slurm = f"""# ======================== MESH (cfMesh) ========================
+echo ">>> Running surfaceFeatureEdges"
+surfaceFeatureEdges -angle {feature_angle} constant/triSurface/domain.stl constant/triSurface/domain.fms > log.surfaceFeatureEdges 2>&1
+
+echo ">>> Running cartesianMesh"
+export OMP_NUM_THREADS=${{SLURM_CPUS_PER_TASK:-$SLURM_NTASKS}}
+cartesianMesh > log.cartesianMesh 2>&1
+
+echo ">>> Checking mesh"
+checkMesh -allGeometry -allTopology -noFunctionObjects > log.checkMesh 2>&1
+
+echo ">>> Renumbering mesh"
+renumberMesh -overwrite -noFunctionObjects > log.renumberMesh 2>&1"""
+    else:
+        mesh_block_parallel = """# Mesh
+runApplication surfaceFeatureExtract
+runApplication blockMesh
+runApplication decomposePar
+runParallel snappyHexMesh -overwrite -noFunctionObjects
+runParallel checkMesh -allGeometry -allTopology -noFunctionObjects
+runApplication reconstructParMesh -constant
+rm -rf processor*
+runApplication renumberMesh -overwrite -noFunctionObjects"""
+        mesh_block_serial = """runApplication surfaceFeatureExtract
+runApplication blockMesh
+runApplication snappyHexMesh -overwrite -noFunctionObjects
+runApplication checkMesh -allGeometry -allTopology -noFunctionObjects
+runApplication renumberMesh -overwrite -noFunctionObjects"""
+        mesh_section_slurm = """# ======================== MESH ========================
+echo ">>> Running surfaceFeatureExtract"
+surfaceFeatureExtract > log.surfaceFeatureExtract 2>&1
+
+echo ">>> Running blockMesh"
+blockMesh > log.blockMesh 2>&1
+
+echo ">>> Decomposing for meshing"
+decomposePar > log.decomposePar 2>&1
+
+echo ">>> Running snappyHexMesh (parallel)"
+mpirun -np $SLURM_NTASKS snappyHexMesh -overwrite -noFunctionObjects -parallel > log.snappyHexMesh 2>&1
+
+echo ">>> Checking mesh (parallel)"
+mpirun -np $SLURM_NTASKS checkMesh -allGeometry -allTopology -noFunctionObjects -parallel > log.checkMesh 2>&1
+
+echo ">>> Reconstructing mesh"
+reconstructParMesh -constant > log.reconstructParMesh 2>&1
+rm -rf processor*
+
+echo ">>> Renumbering mesh"
+renumberMesh -overwrite -noFunctionObjects > log.renumberMesh 2>&1"""
+
     # ---- Allrun.parallel ----
     _write_script(case_dir / "Allrun.parallel", f"""\
 #!/bin/bash
@@ -233,15 +298,7 @@ elif [ -d "/tmp" ] && [ -w "/tmp" ]; then
 fi
 export OMPI_MCA_shmem_mmap_enable_nfs_warning=0
 
-# Mesh
-runApplication surfaceFeatureExtract
-runApplication blockMesh
-runApplication decomposePar
-runParallel snappyHexMesh -overwrite -noFunctionObjects
-runParallel checkMesh -allGeometry -allTopology -noFunctionObjects
-runApplication reconstructParMesh -constant
-rm -rf processor*
-runApplication renumberMesh -overwrite -noFunctionObjects
+{mesh_block_parallel}
 
 # Solve
 runApplication -s solver decomposePar
@@ -282,11 +339,7 @@ if [ -f system/controlDict ]; then
     sed -i 's/stopAt.*writeNow/stopAt          endTime/' system/controlDict
 fi
 
-runApplication surfaceFeatureExtract
-runApplication blockMesh
-runApplication snappyHexMesh -overwrite -noFunctionObjects
-runApplication checkMesh -allGeometry -allTopology -noFunctionObjects
-runApplication renumberMesh -overwrite -noFunctionObjects
+{mesh_block_serial}
 runApplication potentialFoam -noFunctionObjects || true
 
 # Start convergence monitor in background
@@ -310,7 +363,7 @@ cd "${0%/*}" || exit
 
 cleanCase
 rm -rf constant/polyMesh constant/extendedFeatureEdgeMesh
-rm -f constant/triSurface/*.eMesh
+rm -f constant/triSurface/*.eMesh constant/triSurface/*.fms
 rm -f log.*
 rm -rf postProcessing
 # Restore stopAt in controlDict if it was changed by convergence monitor
@@ -412,28 +465,7 @@ if [ -f system/controlDict ]; then
     sed -i 's/stopAt.*writeNow/stopAt          endTime/' system/controlDict
 fi
 
-# ======================== MESH ========================
-echo ">>> Running surfaceFeatureExtract"
-surfaceFeatureExtract > log.surfaceFeatureExtract 2>&1
-
-echo ">>> Running blockMesh"
-blockMesh > log.blockMesh 2>&1
-
-echo ">>> Decomposing for meshing"
-decomposePar > log.decomposePar 2>&1
-
-echo ">>> Running snappyHexMesh (parallel)"
-mpirun -np $SLURM_NTASKS snappyHexMesh -overwrite -noFunctionObjects -parallel > log.snappyHexMesh 2>&1
-
-echo ">>> Checking mesh (parallel)"
-mpirun -np $SLURM_NTASKS checkMesh -allGeometry -allTopology -noFunctionObjects -parallel > log.checkMesh 2>&1
-
-echo ">>> Reconstructing mesh"
-reconstructParMesh -constant > log.reconstructParMesh 2>&1
-rm -rf processor*
-
-echo ">>> Renumbering mesh"
-renumberMesh -overwrite -noFunctionObjects > log.renumberMesh 2>&1
+{mesh_section_slurm}
 
 # ======================== SOLVE ========================
 SOLVER_PHASE=1

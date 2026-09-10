@@ -71,6 +71,8 @@ ALLOWED_LOG_TYPES = {
     "simpleFoam",
     "convergenceMonitor",
     "snappyHexMesh",
+    "cartesianMesh",
+    "surfaceFeatureEdges",
     "surfaceFeatureExtract",
     "blockMesh",
     "checkMesh",
@@ -297,6 +299,7 @@ async def api_config_defaults() -> dict[str, Any]:
     """Return default config template and presets for the UI."""
     return {
         "default_config": DEFAULT_CONFIG,
+        "available_meshers": ["snappy", "cfmesh"],
         "fidelity_presets": {
             name: {
                 "desc": p.get("desc", ""),
@@ -1110,8 +1113,10 @@ async def api_list_cases() -> list[dict[str, Any]]:
             # Check mesher stage if still generated
             if status == "Generated":
                 log_snappy = d / "log.snappyHexMesh"
-                if log_snappy.is_file():
-                    tail = read_file_tail(log_snappy)
+                log_cfmesh = d / "log.cartesianMesh"
+                target_log = log_cfmesh if log_cfmesh.is_file() else log_snappy
+                if target_log.is_file():
+                    tail = read_file_tail(target_log)
                     if "End" in tail or "Finalising parallel run" in tail:
                         status = "Meshed"
                     elif any(err in tail for err in ["FOAM FATAL", "Fatal error", "FOAM aborting", "sigFpe", "SIGFPE"]):

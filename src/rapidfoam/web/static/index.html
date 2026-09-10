@@ -222,6 +222,15 @@
                     </label>
                   </div>
                 </div>
+
+                <div class="form-group col-span-2">
+                  <label for="cfg-mesher-engine">Mesher Engine</label>
+                  <select id="cfg-mesher-engine" class="input">
+                    <option value="snappy" selected>snappyHexMesh (Standard OpenFOAM hex-dominant)</option>
+                    <option value="cfmesh">cfMesh (cartesianMesh — Fast & Robust Boundary Layers)</option>
+                  </select>
+                  <span class="field-hint">cfMesh delivers 2–4× faster meshing with superior boundary layer preservation on sharp aerodynamic edges.</span>
+                </div>
               </div>
             </div>
 
@@ -879,6 +888,8 @@
             <select id="select-log-type" class="input input-xs">
               <option value="simpleFoam">log.simpleFoam (Solver)</option>
               <option value="snappyHexMesh">log.snappyHexMesh (Mesher)</option>
+              <option value="cartesianMesh">log.cartesianMesh (cfMesh)</option>
+              <option value="surfaceFeatureEdges">log.surfaceFeatureEdges (Features)</option>
               <option value="potentialFoam">log.potentialFoam (Init)</option>
               <option value="blockMesh">log.blockMesh (Background)</option>
               <option value="convergenceMonitor">log.convergenceMonitor</option>

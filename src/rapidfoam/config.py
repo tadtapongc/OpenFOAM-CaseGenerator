@@ -224,6 +224,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "potential_flow": {
         "nNonOrthogonalCorrectors": 10,
     },
+
+    # Mesher engine ("snappy" | "cfmesh")
+    "mesher": "snappy",
+    "cfmesh": {
+        "workflow": "cartesianMesh",
+        "feature_angle": 45,
+    },
 }
 
 
@@ -327,6 +334,17 @@ def validate(cfg: dict[str, Any], project_dir: Path) -> tuple[list[str], list[st
             errors.append(f"'{key}' must be a nonempty path string")
     if not isinstance(cfg.get("fidelity", "standard"), str) or cfg.get("fidelity", "standard") not in FIDELITY_PRESETS:
         errors.append("fidelity must be fast, standard, or fine")
+
+    # Mesher engine
+    mesher = cfg.get("mesher", "snappy")
+    if isinstance(mesher, dict):
+        mesher_type = mesher.get("type", "snappy")
+    elif isinstance(mesher, str):
+        mesher_type = mesher
+    else:
+        mesher_type = None
+    if mesher_type not in ("snappy", "cfmesh"):
+        errors.append("mesher must be 'snappy' or 'cfmesh'")
 
     # Flow
     flow = cfg.get("flow", {})
