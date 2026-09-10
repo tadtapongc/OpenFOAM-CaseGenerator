@@ -152,7 +152,9 @@ def write_mesh_dict(cfg: dict[str, Any], case_dir: Path) -> None:
         {{
             type box;
             centre ({cx} {cy} {cz});
-            length ({lx} {ly} {lz});
+            lengthX {lx};
+            lengthY {ly};
+            lengthZ {lz};
             cellSize {reg_cell};
         }}""")
 
@@ -198,12 +200,14 @@ def write_mesh_dict(cfg: dict[str, Any], case_dir: Path) -> None:
         {pname}
         {{
             type {ptype};
+            newName {pname};
         }}""")
     for name in stl_names:
         rename_lines.append(f"""\
         {name}
         {{
             type wall;
+            newName {name};
         }}""")
 
     boundary_layers_block = ""

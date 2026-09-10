@@ -261,10 +261,10 @@ echo ">>> Decomposing for meshing"
 decomposePar > log.decomposePar 2>&1
 
 echo ">>> Running snappyHexMesh (parallel)"
-mpirun -np $SLURM_NTASKS snappyHexMesh -overwrite -noFunctionObjects -parallel > log.snappyHexMesh 2>&1
+mpirun --oversubscribe -np $SLURM_NTASKS snappyHexMesh -overwrite -noFunctionObjects -parallel > log.snappyHexMesh 2>&1
 
 echo ">>> Checking mesh (parallel)"
-mpirun -np $SLURM_NTASKS checkMesh -allGeometry -allTopology -noFunctionObjects -parallel > log.checkMesh 2>&1
+mpirun --oversubscribe -np $SLURM_NTASKS checkMesh -allGeometry -allTopology -noFunctionObjects -parallel > log.checkMesh 2>&1
 
 echo ">>> Reconstructing mesh"
 reconstructParMesh -constant > log.reconstructParMesh 2>&1
@@ -473,7 +473,7 @@ echo ">>> Decomposing for solver"
 decomposePar > log.decomposePar.solver 2>&1
 
 echo ">>> Running potentialFoam"
-mpirun -np $SLURM_NTASKS potentialFoam -noFunctionObjects -parallel > log.potentialFoam 2>&1 || true
+mpirun --oversubscribe -np $SLURM_NTASKS potentialFoam -noFunctionObjects -parallel > log.potentialFoam 2>&1 || true
 
 echo ">>> Starting convergence monitor"
 python3 ./convergence_monitor.py > log.convergenceMonitor 2>&1 &
@@ -481,7 +481,7 @@ MONITOR_PID=$!
 
 echo ">>> Running simpleFoam"
 SOLVER_STATUS=0
-mpirun -np $SLURM_NTASKS simpleFoam -parallel > log.simpleFoam 2>&1 || SOLVER_STATUS=$?
+mpirun --oversubscribe -np $SLURM_NTASKS simpleFoam -parallel > log.simpleFoam 2>&1 || SOLVER_STATUS=$?
 
 # Stop monitor
 stop_monitor
