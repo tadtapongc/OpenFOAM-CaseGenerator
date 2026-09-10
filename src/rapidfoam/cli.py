@@ -316,11 +316,6 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
     # Write all OpenFOAM files
     from rapidfoam.writers.constants import write_constant
     from rapidfoam.writers.fields import write_fields
-    from rapidfoam.writers.mesh import (
-        write_block_mesh_dict,
-        write_snappy_hex_mesh_dict,
-        write_surface_feature_extract_dict,
-    )
     from rapidfoam.writers.scripts import write_scripts
     from rapidfoam.writers.solver import (
         write_control_dict,
@@ -328,7 +323,6 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
         write_fv_schemes,
         write_fv_solution,
     )
-
     if mesher_type == "cfmesh":
         from rapidfoam.writers.cfmesh import generate_domain_stl, write_mesh_dict
         generate_domain_stl(cfg, case_dir, stl_pairs)
@@ -336,9 +330,17 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
         print("    ✓ domain.stl (wind tunnel box + CAD)")
         print("    ✓ system/meshDict (cfMesh)")
     else:
+        from rapidfoam.writers.snappy import (
+            write_block_mesh_dict,
+            write_snappy_hex_mesh_dict,
+            write_surface_feature_extract_dict,
+        )
         write_block_mesh_dict(cfg, case_dir)
         write_surface_feature_extract_dict(cfg, case_dir)
         write_snappy_hex_mesh_dict(cfg, case_dir)
+        print("    ✓ system/blockMeshDict")
+        print("    ✓ system/surfaceFeatureExtractDict")
+        print("    ✓ system/snappyHexMeshDict")
 
     write_control_dict(cfg, case_dir)
     write_fv_schemes(cfg, case_dir)
