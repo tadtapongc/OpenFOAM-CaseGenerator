@@ -180,7 +180,7 @@ cd cases/front_wing_v1
 sbatch run.sh
 ```
 
-With the default `cfmesh` engine, the script runs `cartesianMesh`, checks the mesh, then initializes with `potentialFoam` and solves with `simpleFoam`. Meshing runs directly; solver parallelism uses MPI. The `snappy` alternative executes:
+With the default `cfmesh` engine, `Allrun.parallel` and `run.sh` mesh under MPI as well: `cartesianMesh` splits the octree over the ranks listed in `system/decomposeParDict`, the stitched mesh comes back through `reconstructParMesh -constant`, then `checkMesh` and `renumberMesh` run on the reconstructed mesh. `Allrun` (serial) and any build that rejects the parallel run fall back to a plain serial `cartesianMesh`; `cfmesh.parallel_meshing: false` always meshes serially. After meshing, the case initializes with `potentialFoam` and solves with `simpleFoam` in parallel. The `snappy` alternative executes:
 1. `surfaceFeatureExtract` (extracts feature edges to `.eMesh`)
 2. `blockMesh` (creates background hexahedral mesh)
 3. `decomposePar` (splits domain across MPI ranks)
@@ -236,7 +236,8 @@ Key settings available in `configs/config.json`:
 | `symmetry_plane` | `float` / `null` | Coordinate for symmetry split (e.g. `0.0`), or omit for full 3D | `null` |
 | `ground_clearance` | `float` | Relative road gap in meters below lowest STL point | Lowest vertex |
 | `ground_plane` | `float` | Fixed CAD elevation coordinate of ground (takes precedence over clearance) | `null` |
-| `parallel.n_procs` | `int` | Number of CPU cores for MPI decomposition | `10` |
+| `parallel.n_procs` | `int` | Number of CPU cores for MPI decomposition and for cfMesh/snappy meshing | `10` |
+| `mesh_params.trailing_edge_refine` | `bool` | Refine a thin trailing edge with a small box on the downstream face (`te_level`, `te_height_cells`, `te_depth_cells`) | `false` |
 
 ### Mesh Fidelity Presets
 
@@ -246,7 +247,7 @@ Key settings available in `configs/config.json`:
 | `standard` | 0.10 m | [4, 5] | 6 | 5 | 1500 | ~0.5–2 M | ~6–45 min |
 | `fine` | 0.08 m | [5, 6] | 7 | 6 | 3000 | ~2–16 M | ~2–4 hrs |
 
-*\* Runtime estimates for typical Formula Student half-car models on a 32-core cluster node. Solver time scales with cell count, so the mesher dominates the spread.*<br>*† Cell counts depend strongly on the mesher. On one A/B (identical config, STL and 32-core node) a `standard` run produced **449 k cells / 6 min** with snappy and **1.3 hrs** with cfMesh, with the mesher itself taking only 5 min of that: cfMesh's `minCellSize` floor defaulted to the *edge* cell, which is a **global** refinement floor and resolved the whole body two levels finer than snappy's surface level. `mesh_params.min_cell_size` now defaults to `"body"` (= snappy's `surface_level[0]`), so both engines resolve the same cells; set it to `"edge"`, `"base"` or a value in metres to bias that trade-off. Read `cells:` from `log.checkMesh` after the first run and tune `mesh_params.body_cell_size` next.*
+*\* Runtime estimates for typical Formula Student half-car models on a 32-core cluster node. Solver time scales with cell count, so the mesher dominates the spread.*<br>*† Cell counts depend strongly on the mesher and on cfMesh's `minCellSize` floor, which caps the automatic curvature **and** proximity refinement (`meshOctreeAutomaticRefinement::setMaxRefLevel`) — `localRefinement` cannot go below it. On one A/B (identical config, STL and 32-core node, only that key changed) a `standard` run gave **3.95 M cells / 311 s meshing / 79m49s job** with `min_cell_size: "edge"` against **1.82 M cells / 130 s meshing / 12m58s job** with the `"body"` default, where the finer floor marked 29229 + 116543 boxes by curvature criteria. `mesh_params.min_cell_size` defaults to `"body"` (= snappy's `surface_level[0]`); set it to `"edge"`, `"base"` or a value in metres to bias that trade-off, and use `mesh_params.trailing_edge_refine` when a trailing edge is thinner than the body cell. Read `cells:` from `log.checkMesh` after the first run and tune `mesh_params.body_cell_size` next.*
 
 ### Mesher Engines & Profiles
 
@@ -263,10 +264,14 @@ Merge order is `DEFAULT_CONFIG -> mesher profile -> case config -> mesh_params_<
 | Intent | snappy-native | cfMesh-native |
 | :--- | :--- | :--- |
 | Surface resolution | `surface_level: [body, feature]` levels | `body_cell_size` / `edge_cell_size` in metres |
-| Smallest cell | `edge_level` (feature-edge cells only) | `min_cell_size` — a **global** floor, defaults to `"body"` (the edge cell over-refines the whole surface ~8x) |
+| Smallest cell | `edge_level` (feature-edge cells only) | `min_cell_size` — a **global** automatic-refinement floor, defaults to `"body"` (the edge cell refines every curved surface ~2x deeper and ~2x the cells) |
+| Thin trailing edge | `edge_level` + `resolveFeatureAngle` refine the extracted feature edges | `trailing_edge_refine` — a thin refinement region on the downstream-most face, `te_level: "auto"` = `edge_level + 1` |
+| Parallel meshing | always (`decomposePar` + `snappyHexMesh -parallel` + `reconstructParMesh -constant`) | `cfmesh.parallel_meshing` (`"auto"` = on when `parallel.n_procs > 1`); `cartesianMesh` + `reconstructParMesh -constant`, serial fallback |
 | Ground plane | never refined (layered only if `layers.ground_layers`) | `cfmesh.ground_refine` (default `false`) |
 | Boundary layers | `layers` block, `first_layer_mode: "relative"` | `cfmesh.layer_mode: "patch_only"`, `optimise_layer: "auto"` |
 | Cell budget | `maxGlobalCells` (enforced) | none — cost follows cell size, `ground_refine`, `optimise_layer` |
+
+A trailing edge thinner than the body cell cannot be meshed by cfMesh's automatic refinement, because it stops at `minCellSize` — the bundled 1.0 m test body ends in a 1.4 mm blunt strip against a 6.25 mm body cell and meshed into slivers there. `mesh_params.trailing_edge_refine: true` adds one thin `objectRefinements` box on the downstream-most face of the geometry instead of lowering that global floor (`te_level: "auto"` = `edge_level + 1`, `te_height_cells`, `te_depth_cells` for the band and its depth). snappy reads the same region, so the knob is mesher-neutral.
 
 Run the same config through either engine to A/B them:
 

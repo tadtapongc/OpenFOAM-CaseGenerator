@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Parallel cfMesh meshing** (`cfmesh.parallel_meshing`, default `"auto"`): `cartesianMesh` runs under MPI whenever `parallel.n_procs > 1`, decomposes the octree using `system/decomposeParDict`, and is stitched back with `reconstructParMesh -constant` before `checkMesh`. OpenMP is pinned to one thread per rank, the serial `Allrun` is untouched, and both parallel scripts fall back to a serial mesh if the build rejects the parallel run.
+- **Trailing-edge refinement** (`mesh_params.trailing_edge_refine` with `te_level`, `te_height_cells`, `te_depth_cells`): one thin refinement region on the downstream-most face of the geometry, for trailing edges thinner than the body cell. Both engines read the region.
+
 ### Fixed
 - Separate read-only validation, configuration saving, and case generation in Studio.
 - Preserve advanced visual-form configuration and cfMesh boundary/ground cell sizes.
@@ -18,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Restore shadowed API tests, isolate web test files, and test the actual restart launcher behavior.
 - Correct displayed defaults, reporting labels, package versions, queue refresh, navigation accessibility, and responsive layout.
 - Restrict turbulence models to the supported kOmegaSST writer and clarify surface-geometry limitations.
+- **Thin trailing edges no longer mesh into slivers with cfMesh.** Its automatic curvature and proximity refinement stops at `minCellSize` (`meshOctreeAutomaticRefinement::setMaxRefLevel`), so a body ending in a 1.4 mm blunt strip against a 6.25 mm body cell could not be resolved there. `trailing_edge_refine` resolves it with a local box instead of lowering the global floor, which refines every curved surface it touches.
+- Correct the cfMesh profile notes: `minCellSize` caps the automatic refinement, and `localRefinement` does not refine feature-edge cells to `body/2` on its own (`patchRefinement` only reads `cellSize`). The measured cost of the finer floor is now recorded in the profile and README.
 
 ## [1.1.0] - 2026-09-10
 

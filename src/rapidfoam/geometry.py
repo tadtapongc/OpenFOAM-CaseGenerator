@@ -443,6 +443,96 @@ def resolve_first_layer_fraction(layers: dict[str, Any], body_cell: float) -> fl
 # MESH PARAMETER DERIVATION — Universal, geometry-adaptive
 # ============================================================
 
+def resolve_trailing_edge_level(value: Any, edge_level: int) -> int:
+    """Refinement level for the trailing-edge box.
+
+    ``"auto"`` (the default) is ``edge_level + 1``: one level finer than
+    snappy's feature-edge cell, which puts roughly two cells across a thin
+    blunt trailing edge. cfMesh's automatic curvature and proximity refinement
+    both stop at ``minCellSize`` (see ``resolve_min_cell_size``), so an explicit
+    refinement region is the only *local* way below that floor — lowering the
+    floor itself resolves every surface it touches.
+    """
+    text = "" if value is None else str(value).strip().lower()
+    if text in ("auto", ""):
+        return int(edge_level) + 1
+    try:
+        level = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"mesh_params.te_level must be a nonnegative integer or 'auto' (got {value!r})"
+        ) from exc
+    if level < 0:
+        raise ValueError(f"mesh_params.te_level must be a nonnegative integer (got {level})")
+    return level
+
+
+def trailing_edge_box(
+    cfg: dict[str, Any],
+    combined_bounds: BBox,
+    *,
+    level: int,
+    body_cell: float,
+    height_cells: float = 2.0,
+    depth_cells: float = 3.0,
+) -> dict[str, Any] | None:
+    """Thin refinement box hugging the downstream-most face of the geometry.
+
+    A wing's trailing edge is often thinner than the body cell (the bundled
+    test body ends in a 1.4 mm blunt strip against a 6.25 mm body cell), and no
+    cell size cfMesh is allowed to make fits across that gap, so the extruder
+    leaves slivers at the edge. Refining a *volume* one level at a time is what
+    costs cells, so the box only spans the wedge that is still thinner than a
+    couple of body cells: ``depth_cells`` upstream of the trailing-edge plane,
+    one cell downstream, and a ``height_cells`` band either side of the body's
+    mid-height. Lateral extent covers the geometry width plus one body cell.
+
+    Returns ``None`` when the box would collapse (box clipped away by the
+    domain, or a degenerate extent), so callers can skip it silently.
+    """
+    smin = [float(v) for v in combined_bounds[0]]
+    smax = [float(v) for v in combined_bounds[1]]
+    flow_idx, flow_sign = flow_axis_index_sign(cfg)
+    up_idx = up_axis_index(cfg)
+    lateral_idx = next(i for i in range(3) if i not in (flow_idx, up_idx))
+
+    # Downstream-most face of the body = the trailing-edge plane.
+    te_plane = smax[flow_idx] if flow_sign > 0 else smin[flow_idx]
+
+    lo = list(smin)
+    hi = list(smax)
+    for axis in (up_idx, lateral_idx):
+        lo[axis] = smin[axis] - body_cell
+        hi[axis] = smax[axis] + body_cell
+
+    # Vertical band around the body's mid-height, i.e. where the trailing edge sits.
+    mid = 0.5 * (smin[up_idx] + smax[up_idx])
+    band = float(height_cells) * body_cell
+    lo[up_idx] = max(lo[up_idx], mid - band)
+    hi[up_idx] = min(hi[up_idx], mid + band)
+
+    upstream = te_plane - flow_sign * float(depth_cells) * body_cell
+    downstream = te_plane + flow_sign * body_cell
+    lo[flow_idx], hi[flow_idx] = min(upstream, downstream), max(upstream, downstream)
+
+    # Never let the box leave the wind tunnel (symmetry/ground clipped domains).
+    domain_box = cfg.get("domain_box")
+    if isinstance(domain_box, dict) and "min" in domain_box and "max" in domain_box:
+        for i in range(3):
+            lo[i] = max(lo[i], float(domain_box["min"][i]))
+            hi[i] = min(hi[i], float(domain_box["max"][i]))
+
+    if any(hi[i] - lo[i] <= body_cell * 1e-6 for i in range(3)):
+        return None
+
+    return {
+        "name": "trailingEdgeBox",
+        "min": [round(v, 4) for v in lo],
+        "max": [round(v, 4) for v in hi],
+        "level": int(level),
+    }
+
+
 def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str, Any]:
     """Derive all mesh parameters from geometry bounds.
 
@@ -466,7 +556,7 @@ def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str,
 
     Returns dict with:
         base_cell_size, surface_level, edge_level, distance_levels,
-        refinement_regions (nearWakeBox + farWakeBox), n_layers, etc.
+        refinement_regions (nearWakeBox + farWakeBox [+ trailingEdgeBox]), n_layers, etc.
     """
     smin, smax = combined_bounds
     extents = [smax[i] - smin[i] for i in range(3)]
@@ -620,6 +710,27 @@ def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str,
 
     refinement_regions = user_mesh.get("refinement_regions", default_regions)
 
+    # Optional trailing-edge refinement (mesh_params.trailing_edge_refine).
+    # cfMesh's automatic curvature/proximity refinement stops at minCellSize, so
+    # a thin blunt trailing edge (the bundled body ends in a 1.4 mm strip against
+    # a 6.25 mm body cell) can only be resolved locally, by an explicit region.
+    # Lowering minCellSize instead resolves every curved surface it touches: one
+    # octree level on that A/B cost 29229 + 116543 curvature-refined boxes.
+    if user_mesh.get("trailing_edge_refine", False):
+        body_cell = float(base_cell) / (2 ** int(surface_level[0]))
+        te_box = trailing_edge_box(
+            cfg,
+            combined_bounds,
+            level=resolve_trailing_edge_level(user_mesh.get("te_level"), int(edge_level)),
+            body_cell=body_cell,
+            height_cells=user_mesh.get("te_height_cells", 2.0),
+            depth_cells=user_mesh.get("te_depth_cells", 3.0),
+        )
+        if te_box is not None and not any(
+            str(r.get("name")) == te_box["name"] for r in refinement_regions
+        ):
+            refinement_regions = list(refinement_regions) + [te_box]
+
     result = {
         "base_cell_size": round(base_cell, 4),
         "surface_level": surface_level,
@@ -635,7 +746,8 @@ def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str,
     }
     for key in ("location_in_mesh", "locationInMesh", "maxLoadUnbalance", "boundary_cell_size",
                 "ground_cell_size", "cell_size_mode", "body_cell_size", "edge_cell_size",
-                "min_cell_size", "ground_refine", "refinement_thickness", "cell_budget_enforced"):
+                "min_cell_size", "ground_refine", "refinement_thickness", "cell_budget_enforced",
+                "trailing_edge_refine", "te_level", "te_height_cells", "te_depth_cells"):
         if key in user_mesh:
             result[key] = user_mesh[key]
     return result

@@ -470,6 +470,58 @@ class ProjectTest(unittest.TestCase):
         allclean = (case / "Allclean").read_text()
         self.assertIn("constant/triSurface/*.fms", allclean)
 
+    def test_cfmesh_parallel_meshing_scripts(self):
+        case = self.generate(mesher="cfmesh", parallel={"n_procs": 8})
+
+        allrun_parallel = (case / "Allrun.parallel").read_text()
+        self.assertIn("runParallel cartesianMesh", allrun_parallel)
+        self.assertIn("runApplication reconstructParMesh -constant", allrun_parallel)
+        self.assertIn("export OMP_NUM_THREADS=1", allrun_parallel)
+        # Failure fallback keeps the mesh phase usable on builds without MPI meshing
+        self.assertIn("runApplication cartesianMesh", allrun_parallel)
+
+        run_sh = (case / "run.sh").read_text()
+        self.assertIn("mpirun --oversubscribe -np $SLURM_NTASKS cartesianMesh -parallel", run_sh)
+        self.assertIn("reconstructParMesh -constant", run_sh)
+        self.assertNotIn("decomposePar > log.decomposePar", run_sh.split("MESH", 1)[1].split("SOLVE", 1)[0])
+
+        # Allrun stays serial: a single-process run must not need MPI for meshing
+        allrun = (case / "Allrun").read_text()
+        self.assertIn("runApplication cartesianMesh", allrun)
+        self.assertNotIn("reconstructParMesh", allrun)
+
+    def test_cfmesh_meshing_can_be_forced_serial(self):
+        case = self.generate(mesher="cfmesh", parallel={"n_procs": 8},
+                             cfmesh={"parallel_meshing": False})
+        allrun_parallel = (case / "Allrun.parallel").read_text()
+        self.assertIn("runApplication cartesianMesh", allrun_parallel)
+        self.assertNotIn("reconstructParMesh", allrun_parallel)
+        run_sh = (case / "run.sh").read_text()
+        self.assertNotIn("cartesianMesh -parallel", run_sh)
+
+    def test_cfmesh_single_rank_meshes_serially(self):
+        case = self.generate(mesher="cfmesh", parallel={"n_procs": 1})
+        for name in ("Allrun.parallel", "run.sh"):
+            self.assertNotIn("reconstructParMesh", (case / name).read_text())
+
+    def test_cfmesh_parallel_meshing_rejects_nonsense_values(self):
+        cfg = load_config(self.config(mesher="cfmesh", cfmesh={"parallel_meshing": "sometimes"}),
+                          project_dir=self.root)
+        errors, _warnings = validate(cfg, self.root)
+        self.assertTrue(any("parallel_meshing" in e for e in errors), errors)
+
+    def test_cfmesh_trailing_edge_refinement_reaches_both_meshers(self):
+        extra = {"mesh_params": {"trailing_edge_refine": True}}
+        cfmesh_case = self.generate(mesher="cfmesh", **extra)
+        mesh_dict = (cfmesh_case / "system/meshDict").read_text()
+        self.assertIn("trailingEdgeBox", mesh_dict)
+        self.assertIn("objectRefinements", mesh_dict)
+
+        snappy_case = self.generate(mesher="snappy", **extra)
+        snappy_dict = (snappy_case / "system/snappyHexMeshDict").read_text()
+        self.assertIn("trailingEdgeBox", snappy_dict)
+        self.assertIn("mode inside", snappy_dict)
+
     def test_cfmesh_wake_refinement_boxes(self):
         custom_mesh = {
             "refinement_regions": [

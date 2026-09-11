@@ -183,6 +183,29 @@ if __name__ == "__main__":
 '''
 
 
+def _resolve_parallel_meshing(cfmesh_cfg: dict[str, Any], n_procs: Any) -> bool:
+    """Whether cartesianMesh runs under MPI.
+
+    cfMesh has no pre-decomposition step of its own: it splits the octree
+    across the ranks given on the mpirun command line and reads the rank count
+    from ``system/decomposeParDict``, so a parallel mesh run needs
+    ``reconstructParMesh -constant`` afterwards. ``parallel_meshing: "auto"``
+    (the default) turns it on whenever the case has more than one rank.
+    """
+    value = cfmesh_cfg.get("parallel_meshing", "auto")
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in ("true", "yes", "1"):
+        return True
+    if text in ("false", "no", "0"):
+        return False
+    try:
+        return int(n_procs) > 1
+    except (TypeError, ValueError):
+        return False
+
+
 def write_scripts(cfg: dict[str, Any], case_dir: Path) -> None:
     """Write all execution scripts."""
     n = cfg["parallel"]["n_procs"]
@@ -211,10 +234,39 @@ def write_scripts(cfg: dict[str, Any], case_dir: Path) -> None:
 
     mesher_type = resolve_mesher(cfg)
     cfmesh_cfg = cfg.get("cfmesh", {})
-    feature_angle = cfmesh_cfg.get("feature_angle", 45) if isinstance(cfmesh_cfg, dict) else 45
+    if not isinstance(cfmesh_cfg, dict):
+        cfmesh_cfg = {}
+    feature_angle = cfmesh_cfg.get("feature_angle", 45)
+    cfmesh_parallel = _resolve_parallel_meshing(cfmesh_cfg, n)
 
     if mesher_type == "cfmesh":
-        mesh_block_parallel = f"""# Mesh (cfMesh cartesianMesh)
+        # cfMesh meshes in parallel on its own: it splits the octree over the
+        # ranks handed to mpirun (the count comes from system/decomposeParDict)
+        # and the stitched mesh must be reconstructed with reconstructParMesh.
+        # No decomposePar is needed for meshing - only the solver's.
+        if cfmesh_parallel:
+            mesh_block_parallel = f"""# Mesh (cfMesh cartesianMesh, MPI)
+[ -n "$FOAM_USER_APPBIN" ] && export PATH="$FOAM_USER_APPBIN:$PATH"
+runApplication surfaceFeatureEdges -angle {feature_angle} constant/triSurface/domain.stl constant/triSurface/domain.fms
+
+# One OpenMP thread per rank: the octree passes are threaded, so MPI x threads oversubscribes.
+export OMP_NUM_THREADS=1
+if runParallel cartesianMesh; then
+    runApplication reconstructParMesh -constant
+    rm -rf processor*
+else
+    # Builds that reject the -parallel flag: mesh serially instead (log removed so
+    # runApplication does not skip the retry).
+    echo ">>> Parallel cartesianMesh failed; meshing serially" >&2
+    rm -rf processor*
+    rm -f log.cartesianMesh
+    runApplication cartesianMesh
+fi
+
+runApplication checkMesh -noFunctionObjects
+runApplication renumberMesh -overwrite -noFunctionObjects"""
+        else:
+            mesh_block_parallel = f"""# Mesh (cfMesh cartesianMesh)
 [ -n "$FOAM_USER_APPBIN" ] && export PATH="$FOAM_USER_APPBIN:$PATH"
 runApplication surfaceFeatureEdges -angle {feature_angle} constant/triSurface/domain.stl constant/triSurface/domain.fms
 runApplication cartesianMesh
@@ -225,7 +277,37 @@ runApplication surfaceFeatureEdges -angle {feature_angle} constant/triSurface/do
 runApplication cartesianMesh
 runApplication checkMesh -noFunctionObjects
 runApplication renumberMesh -overwrite -noFunctionObjects"""
-        mesh_section_slurm = f"""# ======================== MESH (cfMesh) ========================
+        if cfmesh_parallel:
+            mesh_section_slurm = f"""# ======================== MESH (cfMesh, MPI) ========================
+[ -n "$FOAM_USER_APPBIN" ] && export PATH="$FOAM_USER_APPBIN:$PATH"
+echo ">>> Running surfaceFeatureEdges"
+surfaceFeatureEdges -angle {feature_angle} constant/triSurface/domain.stl constant/triSurface/domain.fms > log.surfaceFeatureEdges 2>&1
+
+echo ">>> Running cartesianMesh (parallel, $SLURM_NTASKS ranks)"
+# One OpenMP thread per rank: the octree passes are threaded, so MPI x threads oversubscribes.
+export OMP_NUM_THREADS=1
+PARALLEL_MESH=0
+if mpirun --oversubscribe -np $SLURM_NTASKS cartesianMesh -parallel > log.cartesianMesh 2>&1; then
+    PARALLEL_MESH=1
+else
+    echo ">>> Parallel cartesianMesh failed; meshing serially"
+    rm -rf processor*
+    cartesianMesh > log.cartesianMesh 2>&1
+fi
+
+if [ "$PARALLEL_MESH" -eq 1 ]; then
+    echo ">>> Reconstructing mesh"
+    reconstructParMesh -constant > log.reconstructParMesh 2>&1
+    rm -rf processor*
+fi
+
+echo ">>> Checking mesh"
+checkMesh -noFunctionObjects > log.checkMesh 2>&1
+
+echo ">>> Renumbering mesh"
+renumberMesh -overwrite -noFunctionObjects > log.renumberMesh 2>&1"""
+        else:
+            mesh_section_slurm = f"""# ======================== MESH (cfMesh) ========================
 [ -n "$FOAM_USER_APPBIN" ] && export PATH="$FOAM_USER_APPBIN:$PATH"
 echo ">>> Running surfaceFeatureEdges"
 surfaceFeatureEdges -angle {feature_angle} constant/triSurface/domain.stl constant/triSurface/domain.fms > log.surfaceFeatureEdges 2>&1

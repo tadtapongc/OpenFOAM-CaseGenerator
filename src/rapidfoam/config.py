@@ -515,6 +515,19 @@ def validate(cfg: dict[str, Any], project_dir: Path) -> tuple[list[str], list[st
             continue
         positive("mesh_params", key)
 
+    # Trailing-edge refinement (mesh_params.trailing_edge_refine -> a thin
+    # refinement box on the downstream-most face of the geometry).
+    for key in ("te_height_cells", "te_depth_cells"):
+        positive("mesh_params", key)
+    if "trailing_edge_refine" in mesh and not isinstance(mesh["trailing_edge_refine"], bool):
+        errors.append("mesh_params.trailing_edge_refine must be true or false")
+    te_level = mesh.get("te_level")
+    if te_level is not None and not (
+        (isinstance(te_level, int) and not isinstance(te_level, bool) and te_level >= 0)
+        or (isinstance(te_level, str) and te_level.strip().lower() == "auto")
+    ):
+        errors.append("mesh_params.te_level must be a nonnegative integer or 'auto'")
+
     # ---- Mesher-profile keys (src/rapidfoam/mesher_profiles/<mesher>.json) ----
     mode = mesh.get("cell_size_mode")
     if mode is not None and str(mode).lower() not in ("absolute", "relative_levels"):
@@ -540,6 +553,12 @@ def validate(cfg: dict[str, Any], project_dir: Path) -> tuple[list[str], list[st
                 errors.append(f"cfmesh.{key} must be one of {', '.join(repr(a) for a in allowed)}")
         if "ground_refine" in cfmesh_cfg and not isinstance(cfmesh_cfg["ground_refine"], bool):
             errors.append("cfmesh.ground_refine must be true or false")
+        parallel = cfmesh_cfg.get("parallel_meshing", "auto")
+        valid_parallel = isinstance(parallel, bool) or (
+            isinstance(parallel, str) and parallel.strip().lower() in ("auto", "true", "false")
+        )
+        if not valid_parallel:
+            errors.append("cfmesh.parallel_meshing must be true, false or 'auto'")
         positive("cfmesh", "refinement_thickness")
         positive("cfmesh", "feature_angle")
 

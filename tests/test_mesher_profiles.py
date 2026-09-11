@@ -155,6 +155,102 @@ class ProfileValidationTest(ProjectScaffold):
         errors, _warnings = validate(cfg, self.root)
         self.assertTrue(any("optimise_layer" in e for e in errors), errors)
 
+    def test_bad_trailing_edge_settings_are_rejected(self):
+        cases = {
+            "params": {"trailing_edge_refine": "yes"},
+            "te_level": {"te_level": -1},
+            "te_height_cells": {"te_height_cells": 0},
+            "te_depth_cells": {"te_depth_cells": "deep"},
+        }
+        for expected, mesh_params in cases.items():
+            with self.subTest(key=expected):
+                cfg = load_config(self.config(mesh_params=mesh_params), project_dir=self.root)
+                errors, _warnings = validate(cfg, self.root)
+                self.assertTrue(any(expected in e for e in errors), errors)
+
+    def test_auto_trailing_edge_level_is_accepted(self):
+        cfg = load_config(self.config(mesh_params={"te_level": "auto"}), project_dir=self.root)
+        errors, _warnings = validate(cfg, self.root)
+        self.assertEqual(errors, [])
+
+
+class TrailingEdgeRefinementTest(ProjectScaffold):
+    """A thin trailing edge is resolved by a local box, not by a global floor.
+
+    cfMesh's automatic curvature/proximity refinement stops at minCellSize, so
+    the only local lever is an explicit refinement region. The scaffold STL is
+    x 0..1.5, y 0..0.8, z 0..0.4 with the default -z flow, so the trailing-edge
+    plane sits at z = 0.
+    """
+
+    def regions(self, mesh_dict: str) -> str:
+        return mesh_dict.split("objectRefinements", 1)[1].split("boundaryLayers", 1)[0]
+
+    def test_off_by_default(self):
+        mesh_dict = self.mesh_dict(self.generate("cfmesh", "te_off"))
+        self.assertNotIn("trailingEdgeBox", mesh_dict)
+
+    def test_auto_level_is_one_finer_than_the_edge_cell(self):
+        # 0.10 / 2**7 = 0.00078125 m, one level below snappy's edge cell.
+        case = self.generate("cfmesh", "te_auto", mesh_params={"trailing_edge_refine": True})
+        block = self.regions(self.mesh_dict(case))
+        self.assertIn("trailingEdgeBox", block)
+        self.assertIn("cellSize 0.000781;", block)
+
+    def test_explicit_level_reaches_the_writer(self):
+        case = self.generate("cfmesh", "te_level", mesh_params={"trailing_edge_refine": True,
+                                                               "te_level": 6})
+        expected = f"cellSize {round(0.10 / 2 ** 6, 6)};"
+        self.assertIn(expected, self.regions(self.mesh_dict(case)))
+
+    def test_box_hugs_the_downstream_face(self):
+        case = self.generate("cfmesh", "te_box", mesh_params={"trailing_edge_refine": True})
+        cfg = json.loads((case / "case_config.json").read_text())
+        region = next(r for r in cfg["mesh_params"]["refinement_regions"]
+                      if r["name"] == "trailingEdgeBox")
+        # Three body cells upstream, one downstream; body cell = 0.10 / 2**4.
+        # The writer rounds region extents to 0.1 mm.
+        self.assertAlmostEqual(region["min"][2], -0.00625, delta=1e-4)
+        self.assertAlmostEqual(region["max"][2], 0.01875, delta=1e-4)
+        # Half-height band of two body cells around the body's mid-height (y = 0.4)
+        self.assertAlmostEqual(region["min"][1], 0.3875, delta=1e-4)
+        self.assertAlmostEqual(region["max"][1], 0.4125, delta=1e-4)
+        self.assertEqual(region["level"], 7)
+
+    def test_region_also_applies_to_snappy(self):
+        case = self.generate("snappy", "te_snappy", mesh_params={"trailing_edge_refine": True})
+        snappy_dict = self.snappy_dict(case)
+        self.assertIn("trailingEdgeBox", snappy_dict)
+        self.assertIn("mode inside", snappy_dict)
+        self.assertNotIn("trailingEdgeBox", self.snappy_dict(self.generate("snappy", "te_snappy_off")))
+
+    def test_user_region_with_the_same_name_wins(self):
+        custom = [{"name": "trailingEdgeBox", "min": [0.0, 0.3, -0.02],
+                   "max": [1.0, 0.5, 0.02], "level": 5}]
+        case = self.generate("cfmesh", "te_custom", mesh_params={
+            "trailing_edge_refine": True, "refinement_regions": custom})
+        cfg = json.loads((case / "case_config.json").read_text())
+        regions = [r for r in cfg["mesh_params"]["refinement_regions"]
+                   if r["name"] == "trailingEdgeBox"]
+        self.assertEqual(len(regions), 1)
+        self.assertEqual(regions[0]["level"], 5)
+
+
+class ParallelMeshingProfileTest(ProjectScaffold):
+    """cfmesh.parallel_meshing selects the MPI mesh path."""
+
+    def test_profile_defaults_to_auto(self):
+        cfg = load_config(self.config(), project_dir=self.root)
+        self.assertEqual(cfg["cfmesh"]["parallel_meshing"], "auto")
+
+    def test_explicit_values_are_accepted(self):
+        for value in (True, False, "auto"):
+            with self.subTest(value=value):
+                cfg = load_config(self.config(cfmesh={"parallel_meshing": value}),
+                                  project_dir=self.root)
+                errors, _warnings = validate(cfg, self.root)
+                self.assertEqual(errors, [])
+
 
 class CellSizeResolutionTest(unittest.TestCase):
     """Levels and absolute sizes must resolve to the same metres."""
