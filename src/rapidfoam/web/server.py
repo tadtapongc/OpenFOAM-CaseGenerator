@@ -25,6 +25,8 @@ from pydantic import BaseModel
 
 from rapidfoam.config import DEFAULT_CONFIG, deep_merge, find_stl, validate
 from rapidfoam.geometry import (
+    face_role,
+    face_assignments,
     FIDELITY_PRESETS,
     compute_domain_box,
     flow_axis_index_sign,
@@ -43,7 +45,7 @@ from rapidfoam.web.ssh_client import ClusterSSHClient
 
 log = logging.getLogger("rapidfoam.web")
 
-app = FastAPI(title="RapidFOAM Studio", version="1.0.0")
+app = FastAPI(title="RapidFOAM Studio", version="1.1.0")
 
 # Restrict CORS to local origins only to protect credentials and SSH operations
 app.add_middleware(
@@ -93,7 +95,7 @@ def get_saved_cluster_config() -> dict[str, Any]:
         "port": 22,
         "username": "",
         "remote_repo_path": "",
-        "save_password": True,
+        "save_password": False,
     }
 
 
@@ -136,7 +138,7 @@ class SSHConnectRequest(BaseModel):
     password: Optional[str] = None
     key_path: Optional[str] = None
     remote_repo_path: str = ""
-    save_password: bool = True
+    save_password: bool = False
 
 
 class JobSubmitRequest(BaseModel):
@@ -158,6 +160,7 @@ class GenerateCaseRequest(BaseModel):
     generate_remotely: bool = False
     submit_slurm: bool = False
     generate_locally: bool = True
+    save_config: bool = False
 
 
 # -------------------------------------------------------------
@@ -211,6 +214,7 @@ async def api_geometry_domain_box(req: DomainBoxRequest) -> dict[str, Any]:
         center_lateral = (bounds_tuple[0][lateral_idx] + bounds_tuple[1][lateral_idx]) / 2.0
         return {
             "domain_box": domain,
+            "domain_faces": {d: face_role(merged, name) for d, name in face_assignments(merged).items()},
             "bounds": {"min": bounds_tuple[0], "max": bounds_tuple[1]},
             "auto_symmetry_plane": round(center_lateral, 4),
             "lateral_axis": "xyz"[lateral_idx],
@@ -498,6 +502,19 @@ async def api_stl_upload(
         }
 
 
+@app.post("/api/case/validate")
+async def api_case_validate(req: GenerateCaseRequest) -> dict[str, Any]:
+    """Validate configuration without writing configuration or case files."""
+    try:
+        merged = merge_config_with_defaults(req.config)
+        errors, warnings = validate(merged, PROJECT_ROOT)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if errors:
+        raise HTTPException(status_code=400, detail=", ".join(errors))
+    return {"success": True, "warnings": warnings}
+
+
 @app.post("/api/case/generate-and-submit")
 async def api_case_generate_and_submit(req: GenerateCaseRequest) -> dict[str, Any]:
     """Generate OpenFOAM case locally and/or on cluster, and optionally submit SLURM job."""
@@ -517,6 +534,12 @@ async def api_case_generate_and_submit(req: GenerateCaseRequest) -> dict[str, An
     if errors:
         raise HTTPException(status_code=400, detail=f"Config validation errors: {', '.join(errors)}")
 
+    if (req.generate_remotely or req.submit_slurm) and not req.upload_to_cluster:
+        raise HTTPException(status_code=400, detail="Remote generation/submission requires upload_to_cluster")
+    if not (req.generate_locally or req.upload_to_cluster or req.save_config):
+        return {"success": True, "case_name": case_name, "warnings": warnings,
+                "local_actions": {}, "cluster_actions": {}}
+
     # 2. Save config locally
     cfg_dir = PROJECT_ROOT / "configs"
     cfg_dir.mkdir(exist_ok=True)
@@ -533,8 +556,8 @@ async def api_case_generate_and_submit(req: GenerateCaseRequest) -> dict[str, An
             await asyncio.to_thread(_do_generate, local_cfg_path, PROJECT_ROOT, dry_run=False)
             local_actions["generated_locally"] = True
             local_actions["case_path"] = str(PROJECT_ROOT / "cases" / case_name)
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"Local case generation failed: {exc}")
+        except (Exception, SystemExit) as exc:
+            raise HTTPException(status_code=400, detail=f"Local case generation failed: {exc}")
 
     # 4. Cluster synchronization and remote execution
     if req.upload_to_cluster:
@@ -579,6 +602,8 @@ async def api_case_generate_and_submit(req: GenerateCaseRequest) -> dict[str, An
         if req.submit_slurm:
             submit_res = await asyncio.to_thread(ssh_client.submit_job, case_name)
             cluster_actions["slurm_submit"] = submit_res
+            if not submit_res.get("success"):
+                raise HTTPException(status_code=500, detail=submit_res.get("error", "Failed to submit job"))
 
     return {
         "success": True,
@@ -623,7 +648,7 @@ async def api_telemetry_forces(case_name: str) -> dict[str, Any]:
     # 1. Resolve axis and symmetry configuration
     local_case = PROJECT_ROOT / "cases" / case_name
     local_cfg = PROJECT_ROOT / "configs" / f"{case_name}.json"
-    cfg_to_use = str(local_cfg) if local_cfg.is_file() else None
+    cfg_to_use = str(local_cfg) if local_cfg.is_file() and not (local_case / "case_config.json").is_file() else None
 
     drag_idx, drag_sign, df_idx, df_sign, _, _ = load_axis_config(
         config_path=cfg_to_use,
@@ -633,58 +658,22 @@ async def api_telemetry_forces(case_name: str) -> dict[str, Any]:
         config_path=cfg_to_use,
         case_dir=local_case if local_case.is_dir() else None,
     )
-    sym_scale = 2.0 if is_sym else 1.0
 
     times: list[float] = []
     drags: list[float] = []
     downforces: list[float] = []
 
-    # 2. Check remote cluster first if connected
+    # Fetch remote axes, symmetry and samples as one consistent snapshot.
     if ssh_client.is_connected:
-        remote_forces_dir = f"{ssh_client.remote_repo_path}/cases/{case_name}/postProcessing/forces"
-        quoted_dir = shlex.quote(remote_forces_dir)
-        cmd = f"ls -1 {quoted_dir} 2>/dev/null | sort -n"
-        code, out, _ = await asyncio.to_thread(ssh_client.run_command, cmd, timeout=5)
-        if code == 0 and out.strip():
-            subdirs = [d.strip() for d in out.strip().splitlines() if d.strip()]
-            all_content = []
-            for subdir in subdirs:
-                if re.match(r"^[0-9\.]+$", subdir):
-                    fpath = f"{remote_forces_dir}/{subdir}/force.dat"
-                    c = await asyncio.to_thread(ssh_client.read_remote_text, fpath)
-                    if c:
-                        all_content.append(c)
-            if all_content:
-                samples: dict[float, tuple[float, float, float]] = {}
-                for fc in all_content:
-                    segment_started = False
-                    for line in fc.splitlines():
-                        line = line.strip()
-                        if not line or line.startswith("#"):
-                            continue
-                        parts = line.replace("(", " ").replace(")", " ").split()
-                        if len(parts) >= 10:
-                            try:
-                                vals = [float(v) for v in parts[:10]]
-                                if not all(math.isfinite(v) for v in vals):
-                                    continue
-                                t = vals[0]
-                                t_key = round(t, 8)
-                                if not segment_started:
-                                    samples = {k: s for k, s in samples.items() if k < t_key}
-                                    segment_started = True
-                                samples[t_key] = (
-                                    t,
-                                    vals[1 + drag_idx] * drag_sign * sym_scale,
-                                    vals[1 + df_idx] * df_sign * sym_scale,
-                                )
-                            except ValueError:
-                                continue
-                if samples:
-                    sorted_samples = sorted(samples.values())
-                    times = [s[0] for s in sorted_samples]
-                    drags = [s[1] for s in sorted_samples]
-                    downforces = [s[2] for s in sorted_samples]
+        try:
+            remote = await asyncio.to_thread(ssh_client.read_case_forces, case_name)
+            if remote.get("times"):
+                times = remote["times"]
+                drags = remote["drag"]
+                downforces = remote["downforce"]
+                is_sym = remote["is_symmetry"]
+        except Exception as exc:
+            log.warning("Could not read remote forces: %s", exc)
 
     # 3. Fall back to local case directory
     if not times and local_case.is_dir():
@@ -1105,7 +1094,7 @@ async def api_list_cases() -> list[dict[str, Any]]:
                     status = "Failed"
                 elif status != "Converged":
                     # If modified in the last 3 minutes, it's actively solving; otherwise terminated
-                    if (datetime.now().timestamp() - st.st_mtime) < 180:
+                    if (datetime.now().timestamp() - log_simple.stat().st_mtime) < 180:
                         status = "Solving"
                     else:
                         status = "Completed" if (latest_iter and latest_iter > 0) else "Failed"
@@ -1121,7 +1110,7 @@ async def api_list_cases() -> list[dict[str, Any]]:
                         status = "Meshed"
                     elif any(err in tail for err in ["FOAM FATAL", "Fatal error", "FOAM aborting", "sigFpe", "SIGFPE"]):
                         status = "Failed"
-                    elif (datetime.now().timestamp() - st.st_mtime) < 180:
+                    elif (datetime.now().timestamp() - target_log.stat().st_mtime) < 180:
                         status = "Meshing"
                     else:
                         status = "Failed"
@@ -1363,7 +1352,7 @@ def main() -> None:
         except Exception:
             pass
 
-        if is_cfd_studio:
+        if is_cfd_studio and args.restart:
             old_pid = get_pid_on_port(target_port)
             print(f"[*] Found existing RapidFOAM Studio running on port {target_port} (PID {old_pid or 'unknown'}).")
             print("[*] Restarting server to ensure latest code is active...")

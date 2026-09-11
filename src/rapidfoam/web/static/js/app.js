@@ -2,6 +2,10 @@
  * OpenFOAM Case Generator Studio - Main Application Controller
  */
 
+function escapeHTML(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch]));
+}
+
 class CFDApp {
   constructor() {
     this.viewer = null;
@@ -111,6 +115,7 @@ class CFDApp {
     this.bindSTLUpload();
     this.bindSSHModal();
     this.bindTelemetryEvents();
+    document.getElementById('btn-refresh-queue')?.addEventListener('click', () => this.refreshQueue());
     this.bindCasesArchiveEvents();
 
     // 3. Load initial data from backend
@@ -131,7 +136,7 @@ class CFDApp {
       if (this.telemetryPollingActive && activeTab && activeTab.dataset.tab === 'telemetry-tab') {
         this.pollTelemetry();
       }
-    }, 4000);
+    }, 5000);
   }
 
   // -------------------------------------------------------------
@@ -141,8 +146,9 @@ class CFDApp {
     const tabs = document.querySelectorAll('.nav-tab');
     tabs.forEach((tab) => {
       tab.addEventListener('click', () => {
-        tabs.forEach((t) => t.classList.remove('active'));
+        tabs.forEach((t) => { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
         tab.classList.add('active');
+        tab.setAttribute('aria-selected', 'true');
 
         const targetId = tab.dataset.tab;
         document.querySelectorAll('.tab-pane').forEach((p) => p.classList.remove('active'));
@@ -476,6 +482,7 @@ class CFDApp {
 
     // Flow
     cfg.flow = {
+      ...cfg.flow,
       velocity: parseFloat(this.getVal('cfg-flow-velocity-ms')) || 16.67,
       direction: this.getVal('cfg-flow-direction') || '-z',
       ground: this.getCheck('cfg-flow-ground'),
@@ -483,6 +490,7 @@ class CFDApp {
 
     // Outputs
     cfg.outputs = {
+      ...cfg.outputs,
       drag_axis: this.getVal('cfg-outputs-drag') || '-z',
       downforce_axis: this.getVal('cfg-outputs-downforce') || '-y',
     };
@@ -551,6 +559,8 @@ class CFDApp {
 
     // Parallel
     cfg.parallel = {
+      ...cfg.parallel,
+      method: this.getVal('cfg-parallel-method') || 'scotch',
       n_procs: parseInt(this.getVal('cfg-parallel-procs'), 10) || 32,
     };
 
@@ -559,9 +569,10 @@ class CFDApp {
     const modules = modStr ? modStr.split(',').map((s) => s.trim()).filter(Boolean) : null;
 
     cfg.slurm = {
+      ...cfg.slurm,
       qos: this.getVal('cfg-slurm-qos'),
       partition: this.getVal('cfg-slurm-partition'),
-      nodes: 1,
+      nodes: cfg.slurm?.nodes ?? 1,
       time: this.getVal('cfg-slurm-time'),
       mem_per_cpu: this.getVal('cfg-slurm-mem'),
       openfoam_module: modules,
@@ -659,6 +670,21 @@ class CFDApp {
     const nutRatio = getOptionalFloat('cfg-override-turb-nut-ratio');
     if (nutRatio !== null) turbOverrides.nut_ratio = nutRatio;
     if (Object.keys(turbOverrides).length > 0) overrides.turbulence = turbOverrides;
+
+    const exposed = {
+      solver: ['end_time', 'write_interval', 'purge_write'],
+      force_refs: ['Aref', 'lRef', 'CofR'],
+      mesh_params: ['base_cell_size', 'surface_level', 'edge_level', 'near_wake_level', 'far_wake_level'],
+      layers: ['n_layers', 'expansion_ratio', 'first_layer_thickness', 'min_thickness'],
+      fluid: ['rho', 'nu'], turbulence: ['model', 'intensity', 'nut_ratio'],
+    };
+    for (const [section, values] of Object.entries(cfg.overrides || {})) {
+      if (!exposed[section]) { overrides[section] = values; continue; }
+      const retained = { ...values };
+      for (const key of exposed[section]) delete retained[key];
+      const merged = { ...retained, ...overrides[section] };
+      if (Object.keys(merged).length) overrides[section] = merged;
+    }
 
     if (Object.keys(overrides).length > 0) {
       cfg.overrides = overrides;
@@ -889,9 +915,9 @@ class CFDApp {
 
   updateOverridePlaceholders(fidelity = 'standard') {
     const presets = {
-      fast: { base_cell: '0.15', surf_min: '3', surf_max: '4', edge: '5', nearwake: '3', farwake: '1', endtime: '800', writeint: '400', n_layers: '3', expansion: '1.30', first_layer: '0.40' },
+      fast: { base_cell: '0.15', surf_min: '3', surf_max: '4', edge: '5', nearwake: '2', farwake: '1', endtime: '800', writeint: '400', n_layers: '3', expansion: '1.30', first_layer: '0.40' },
       standard: { base_cell: '0.10', surf_min: '4', surf_max: '5', edge: '6', nearwake: '3', farwake: '1', endtime: '1500', writeint: '500', n_layers: '5', expansion: '1.20', first_layer: '0.30' },
-      fine: { base_cell: '0.06', surf_min: '5', surf_max: '6', edge: '7', nearwake: '3', farwake: '1', endtime: '2500', writeint: '500', n_layers: '6', expansion: '1.15', first_layer: '0.20' },
+      fine: { base_cell: '0.08', surf_min: '5', surf_max: '6', edge: '7', nearwake: '4', farwake: '2', endtime: '3000', writeint: '500', n_layers: '6', expansion: '1.15', first_layer: '0.20' },
     };
     const p = presets[fidelity] || presets.standard;
 
@@ -914,6 +940,7 @@ class CFDApp {
   }
 
   clearAllOverrides() {
+    delete this.activeConfig.overrides;
     const overrideIds = [
       'cfg-override-solver-endtime',
       'cfg-override-solver-writeinterval',
@@ -1027,7 +1054,7 @@ class CFDApp {
           ? Number(this.activeConfig.symmetry_plane)
           : null;
         const flowDir = this.activeConfig.flow?.direction || '-z';
-        this.viewer.updateDomainBox(data.domain_box.min, data.domain_box.max, sym, flowDir);
+        this.viewer.updateDomainBox(data.domain_box.min, data.domain_box.max, sym, flowDir, data.domain_faces);
         if (autoFit) {
           this.viewer.fitView('domain');
           const btnFitDomain = document.getElementById('btn-fit-domain');
@@ -1045,7 +1072,7 @@ class CFDApp {
     if (!this.viewer) return;
 
     const stlsToLoad = (this.activeConfig.stl_files || []).filter(
-      (f) => f && f !== 'geometry.stl'
+      (f) => f
     );
 
     if (stlsToLoad.length === 0) {
@@ -1148,8 +1175,6 @@ class CFDApp {
         const data = await res.json();
         if (data.success) {
           if (!this.activeConfig.stl_files) this.activeConfig.stl_files = [];
-          // Filter out generic placeholder if present
-          this.activeConfig.stl_files = this.activeConfig.stl_files.filter((f) => f !== 'geometry.stl');
           if (!this.activeConfig.stl_files.includes(targetFilename)) {
             this.activeConfig.stl_files.push(targetFilename);
           }
@@ -1191,8 +1216,8 @@ class CFDApp {
       chip.className = 'stl-chip active';
       chip.style.borderColor = `${color}55`;
       chip.innerHTML = `
-        <span class="stl-chip-dot" style="background: ${color}; width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px;"></span>
-        <span>${filename}</span>
+        <span class="stl-chip-dot" style="background: ${escapeHTML(color)}; width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px;"></span>
+        <span>${escapeHTML(filename)}</span>
         <span class="stl-chip-remove btn-remove" title="Remove">&times;</span>
       `;
 
@@ -1299,7 +1324,7 @@ class CFDApp {
   async validateCurrentConfig() {
     this.buildConfigFromVisualForm();
     try {
-      const res = await fetch('/api/case/generate-and-submit', {
+      const res = await fetch('/api/case/validate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1324,7 +1349,6 @@ class CFDApp {
     this.buildConfigFromVisualForm();
     const caseName = this.activeConfig.case_name || 'my_case';
 
-    // Check if case already exists locally or on cluster
     const check = await this.checkCaseNameExists(caseName);
     if (check && check.exists) {
       const decision = await this.showConfirmDialog({
@@ -1391,8 +1415,8 @@ class CFDApp {
 
     const caseName = this.activeConfig.case_name || 'my_case';
 
-    // Check if case already exists locally or on cluster
-    const check = await this.checkCaseNameExists(caseName);
+    // Saving configuration does not touch an existing simulation case.
+    const check = submitToCluster ? await this.checkCaseNameExists(caseName) : null;
     if (check && check.exists) {
       let warningMsg = `A case named "${caseName}" already exists. Overwriting will replace existing case dictionaries, mesh setup, and simulation logs.`;
       let severity = 'warning';
@@ -1443,7 +1467,8 @@ class CFDApp {
           upload_to_cluster: submitToCluster,
           generate_remotely: submitToCluster,
           submit_slurm: submitToCluster,
-          generate_locally: !submitToCluster,
+          generate_locally: false,
+          save_config: !submitToCluster,
         }),
       });
       const data = await res.json();
@@ -1791,17 +1816,17 @@ class CFDApp {
       const isRunning = job.state === 'RUNNING' || job.state === 'R';
       const stateBadge = isRunning
         ? '<span class="tag-running">RUNNING</span>'
-        : `<span class="tag-pending">${job.state}</span>`;
+        : `<span class="tag-pending">${escapeHTML(job.state)}</span>`;
 
       tr.innerHTML = `
-        <td><strong>${job.job_id}</strong></td>
-        <td>${job.name}</td>
-        <td>${job.partition}</td>
+        <td><strong>${escapeHTML(job.job_id)}</strong></td>
+        <td>${escapeHTML(job.name)}</td>
+        <td>${escapeHTML(job.partition)}</td>
         <td>${stateBadge}</td>
-        <td>${job.time_used}</td>
-        <td>${job.time_limit}</td>
-        <td>${job.nodes}</td>
-        <td><button class="btn btn-outline btn-xs btn-cancel-job" data-id="${job.job_id}">Cancel</button></td>
+        <td>${escapeHTML(job.time_used)}</td>
+        <td>${escapeHTML(job.time_limit)}</td>
+        <td>${escapeHTML(job.nodes)}</td>
+        <td><button class="btn btn-outline btn-xs btn-cancel-job" data-id="${escapeHTML(job.job_id)}">Cancel</button></td>
       `;
 
       tr.querySelector('.btn-cancel-job').addEventListener('click', () => {
@@ -1930,7 +1955,7 @@ class CFDApp {
         if (pill) {
           if (data.converged) {
             pill.className = 'convergence-status-pill converged';
-            pill.querySelector('.pill-text').textContent = 'CONVERGED (±1.5%)';
+            pill.querySelector('.pill-text').textContent = 'CONVERGED (±0.5%)';
           } else {
             pill.className = 'convergence-status-pill running';
             pill.querySelector('.pill-text').textContent = `Solving (Iter ${data.latest_iteration})`;
@@ -1966,7 +1991,7 @@ class CFDApp {
           emptyDesc.textContent = `Case is in '${stage}' state. Run the OpenFOAM solver to stream live forces and residuals.`;
         }
         if (emptyAction) {
-          emptyAction.innerHTML = `<code>${data.run_command || `./Allrun.parallel  # In cases/${caseName}`}</code>`;
+          emptyAction.innerHTML = `<code>${escapeHTML(data.run_command || `./Allrun.parallel  # In cases/${caseName}`)}</code>`;
         }
       }
     } catch (err) {
@@ -2106,7 +2131,7 @@ class CFDApp {
 
       this.renderCasesArchiveTable();
     } catch (err) {
-      tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">Failed to load cases: ${err.message}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">Failed to load cases: ${escapeHTML(err.message)}</td></tr>`;
     }
   }
 
@@ -2182,7 +2207,7 @@ class CFDApp {
         badgeClass = 'status-failed';
         statusIcon = '✕';
       }
-      const statusBadge = `<span class="status-badge ${badgeClass}">${statusIcon} ${c.status || 'Ready'}</span>`;
+      const statusBadge = `<span class="status-badge ${badgeClass}">${statusIcon} ${escapeHTML(c.status || 'Ready')}</span>`;
 
       // Flow conditions
       let velDisplay = '--';
@@ -2194,8 +2219,8 @@ class CFDApp {
       }
       const flowHtml = `
         <div class="flow-cell">
-          <span class="flow-vel">${velDisplay}</span>
-          <span class="flow-dir text-muted small">Dir: ${c.direction || '-z'}</span>
+          <span class="flow-vel">${escapeHTML(velDisplay)}</span>
+          <span class="flow-dir text-muted small">Dir: ${escapeHTML(c.direction || '-z')}</span>
         </div>
       `;
 
@@ -2204,16 +2229,16 @@ class CFDApp {
       if (c.downforce !== null && c.downforce !== undefined && c.drag !== null && c.drag !== undefined) {
         aeroHtml = `
           <div class="aero-results-pills">
-            <span class="aero-pill downforce" title="Downforce (-Fy)">Fy: <strong>${c.downforce} N</strong></span>
-            <span class="aero-pill drag" title="Drag (-Fz)">Fz: <strong>${c.drag} N</strong></span>
-            <span class="aero-pill ld" title="Aero Efficiency (-Fy / -Fz)">L/D: <strong>${c.ld_ratio !== null ? c.ld_ratio : '--'}</strong></span>
+            <span class="aero-pill downforce" title="Downforce">Downforce: <strong>${escapeHTML(c.downforce)} N</strong></span>
+            <span class="aero-pill drag" title="Drag">Drag: <strong>${escapeHTML(c.drag)} N</strong></span>
+            <span class="aero-pill ld" title="Aero Efficiency (Downforce / Drag)">L/D: <strong>${escapeHTML(c.ld_ratio !== null ? c.ld_ratio : '--')}</strong></span>
           </div>
         `;
       }
 
       // Progress
       const progressHtml = c.latest_iter > 0
-        ? `<span class="iter-count monospace"><strong>${c.latest_iter}</strong> iter</span>`
+        ? `<span class="iter-count monospace"><strong>${escapeHTML(c.latest_iter)}</strong> iter</span>`
         : `<span class="text-muted small">0 iter</span>`;
 
       // Location & Date
@@ -2224,23 +2249,23 @@ class CFDApp {
       const locDateHtml = `
         <div class="loc-date-cell">
           <div>${locBadge}</div>
-          <div class="date-cell text-muted small">${c.modified}</div>
+          <div class="date-cell text-muted small">${escapeHTML(c.modified)}</div>
         </div>
       `;
 
       // Case name & setup chips
       const setupChips = `
         <div class="case-spec-chips">
-          <span class="spec-chip fidelity-${(c.fidelity || 'standard').toLowerCase()}">${c.fidelity || 'standard'}</span>
-          ${c.n_procs ? `<span class="spec-chip">${c.n_procs}p</span>` : ''}
-          ${c.stl_name ? `<span class="spec-chip stl-chip-tag">${c.stl_name}</span>` : ''}
+          <span class="spec-chip fidelity-${escapeHTML((c.fidelity || 'standard').toLowerCase())}">${escapeHTML(c.fidelity || 'standard')}</span>
+          ${c.n_procs ? `<span class="spec-chip">${escapeHTML(c.n_procs)}p</span>` : ''}
+          ${c.stl_name ? `<span class="spec-chip stl-chip-tag">${escapeHTML(c.stl_name)}</span>` : ''}
         </div>
       `;
 
       tr.innerHTML = `
         <td>
           <div class="case-name-cell">
-            <strong class="case-title">${c.name}</strong>
+            <strong class="case-title">${escapeHTML(c.name)}</strong>
             ${setupChips}
           </div>
         </td>
@@ -2251,7 +2276,7 @@ class CFDApp {
         <td>${locDateHtml}</td>
         <td>
           <div class="action-btn-group">
-            <button class="btn btn-outline btn-xs btn-inspect-case" data-name="${c.name}" title="Inspect Live Telemetry">📊 Live Telemetry</button>
+            <button class="btn btn-outline btn-xs btn-inspect-case" data-name="${escapeHTML(c.name)}" title="Inspect Live Telemetry">📊 Live Telemetry</button>
           </div>
         </td>
       `;
@@ -2277,7 +2302,15 @@ class CFDApp {
 
   setVal(id, val) {
     const el = document.getElementById(id);
-    if (el) el.value = val;
+    if (el) {
+      if (el.tagName === 'SELECT' && !Array.from(el.options).some(option => option.value === String(val))) {
+        const option = document.createElement('option');
+        option.value = String(val);
+        option.textContent = String(val);
+        el.appendChild(option);
+      }
+      el.value = val;
+    }
   }
 
   setValText(id, text) {
@@ -2289,7 +2322,7 @@ class CFDApp {
     const el = document.getElementById(id);
     if (!el) return;
     const displayVal = (val !== null && val !== undefined) ? val : '--';
-    el.innerHTML = `${displayVal} <span class="kpi-unit">${unit}</span>`;
+    el.innerHTML = `${escapeHTML(displayVal)} <span class="kpi-unit">${escapeHTML(unit)}</span>`;
   }
 
   getCheck(id) {
@@ -2309,7 +2342,7 @@ class CFDApp {
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
     const icon = type === 'success' ? '✓' : type === 'error' ? '✗' : 'ℹ';
-    toast.innerHTML = `<span>${icon}</span> <span>${message}</span>`;
+    toast.innerHTML = `<span>${icon}</span> <span>${escapeHTML(message)}</span>`;
 
     container.appendChild(toast);
     setTimeout(() => {

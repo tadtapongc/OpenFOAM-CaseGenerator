@@ -1,6 +1,8 @@
 """Automated tests for Web API endpoints and Cluster SSH client using standard unittest."""
 
 import asyncio
+import os
+import tempfile
 import shutil
 from pathlib import Path
 import unittest
@@ -36,6 +38,13 @@ from rapidfoam.web.ssh_client import ClusterSSHClient
 class TestWebAPI(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.original_cwd = Path.cwd()
+        cls.temp = tempfile.TemporaryDirectory()
+        cls.root_patch = patch("rapidfoam.web.server.PROJECT_ROOT", Path(cls.temp.name))
+        cls.root_patch.start()
+        os.chdir(cls.temp.name)
+        Path("configs").mkdir()
+        shutil.copyfile(cls.original_cwd / "configs/config.json", "configs/config.json")
         cls.sample_stl = Path("stl/sample_wing.stl")
         if not cls.sample_stl.exists():
             cls.sample_stl.parent.mkdir(parents=True, exist_ok=True)
@@ -58,6 +67,9 @@ class TestWebAPI(unittest.TestCase):
     def tearDownClass(cls):
         if getattr(cls, "created_stl", False) and cls.sample_stl.exists():
             cls.sample_stl.unlink(missing_ok=True)
+        os.chdir(cls.original_cwd)
+        cls.root_patch.stop()
+        cls.temp.cleanup()
 
     def test_saved_cluster_config(self):
         """Test retrieving cached cluster config with password redacted."""
@@ -110,37 +122,37 @@ class TestWebAPI(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertTrue(Path(res.path).exists())
 
-    def test_geometry_domain_box(self):
+    def test_geometry_domain_box_initial(self):
         """Test computing wind tunnel domain box from geometry bounds."""
-        res = asyncio.run(api_geometry_domain_box())
+        res = asyncio.run(api_geometry_domain_box(DomainBoxRequest(config={"stl_files": ["sample_wing.stl"]})))
         self.assertIn("domain_box", res)
         self.assertIn("min", res["domain_box"])
         self.assertIn("max", res["domain_box"])
         self.assertIn("bounds", res)
 
-    def test_auto_symmetry_plane_calculation(self):
+    def test_auto_symmetry_plane_calculation_initial(self):
         """Test calculation of auto symmetry plane from geometry bounds."""
-        res = asyncio.run(api_auto_symmetry_plane())
-        self.assertIn("symmetry_plane", res)
+        res = asyncio.run(api_geometry_domain_box(DomainBoxRequest(config={"stl_files": ["sample_wing.stl"]})))
+        self.assertIn("auto_symmetry_plane", res)
         self.assertIn("bounds", res)
-        self.assertIsInstance(res["symmetry_plane"], (int, float))
+        self.assertIsInstance(res["auto_symmetry_plane"], (int, float))
 
-    def test_ground_clearance_styles(self):
+    def test_ground_clearance_styles_initial(self):
         """Test 2 + 1 ground clearance styles: None (touching CAD bottom), Relative, and Absolute."""
         # Style 0: Default touching CAD bottom
         cfg0 = {"flow": {"ground": True}, "case_name": "t0", "stl_files": ["sample_wing.stl"]}
-        res0 = asyncio.run(api_geometry_domain_box(cfg0))
+        res0 = asyncio.run(api_geometry_domain_box(DomainBoxRequest(config=cfg0)))
         cad_bottom_y = res0["bounds"]["min"][1]
         self.assertAlmostEqual(res0["domain_box"]["min"][1], cad_bottom_y, places=4)
 
         # Style 1: Relative ground clearance (35mm above ground -> ground is cad_bottom - 0.035)
         cfg1 = {"flow": {"ground": True}, "ground_clearance": 0.035, "case_name": "t1", "stl_files": ["sample_wing.stl"]}
-        res1 = asyncio.run(api_geometry_domain_box(cfg1))
+        res1 = asyncio.run(api_geometry_domain_box(DomainBoxRequest(config=cfg1)))
         self.assertAlmostEqual(res1["domain_box"]["min"][1], cad_bottom_y - 0.035, places=4)
 
         # Style 2: Absolute ground plane (y = -0.5)
         cfg2 = {"flow": {"ground": True}, "ground_plane": -0.5, "case_name": "t2", "stl_files": ["sample_wing.stl"]}
-        res2 = asyncio.run(api_geometry_domain_box(cfg2))
+        res2 = asyncio.run(api_geometry_domain_box(DomainBoxRequest(config=cfg2)))
         self.assertAlmostEqual(res2["domain_box"]["min"][1], -0.5, places=4)
 
     def test_validation_endpoint(self):
@@ -693,18 +705,6 @@ class TestWebAPI(unittest.TestCase):
             self.assertIn("expansionRatio          1.25;", snappy_dict)
         finally:
             shutil.rmtree(case_path, ignore_errors=True)
-    def test_cli_launcher_parser(self):
-        """Test server CLI argument parsing supports --restart, --port, --no-browser."""
-        import argparse
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--host", default="127.0.0.1")
-        parser.add_argument("--port", type=int, default=8000)
-        parser.add_argument("--no-browser", action="store_true")
-        parser.add_argument("--restart", action="store_true")
-        args = parser.parse_args(["--port", "8888", "--no-browser", "--restart"])
-        self.assertEqual(args.port, 8888)
-        self.assertTrue(args.no_browser)
-        self.assertTrue(args.restart)
     def test_stl_and_case_check_exists(self):
         """Test STL and Case existence checking APIs."""
         # Check existing STL
@@ -894,6 +894,4 @@ class TestWebAPI(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
 

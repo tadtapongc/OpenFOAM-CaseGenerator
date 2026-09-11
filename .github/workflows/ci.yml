@@ -38,3 +38,11 @@ jobs:
       - name: Verify package build
         run: |
           python -m build
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run frontend regression tests
+        run: node --test tests/test_frontend.cjs

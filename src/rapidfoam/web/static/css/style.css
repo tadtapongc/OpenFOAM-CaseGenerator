@@ -6,6 +6,7 @@
   /* Surfaces & Canvas */
   --bg-canvas: #090b10;
   --bg-surface: #10131a;
+  --bg-card: var(--bg-surface-raised);
   --bg-surface-raised: #151922;
   --bg-surface-hover: #1b202c;
   --bg-surface-active: #202634;
@@ -1065,6 +1066,7 @@ body.dark-theme {
 /* Action Footer */
 .config-actions-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
@@ -2136,3 +2138,30 @@ body.dark-theme {
 }
 
 
+@media (max-width: 1000px) {
+  .navbar { height: auto; min-height: 46px; flex-wrap: wrap; gap: 8px; padding: 8px 12px; }
+  .nav-center { order: 3; width: 100%; min-width: 0; }
+  .nav-tabs { overflow-x: auto; }
+  .nav-tab { flex: 1; white-space: nowrap; }
+  .two-column-layout {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+    overflow: visible;
+  }
+  .viewer-panel { min-height: 420px; }
+  .kpi-grid, .charts-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .config-actions-bar { flex-wrap: wrap; }
+}
+
+@media (max-width: 600px) {
+  .brand-sub, .brand-divider { display: none; }
+  .nav-actions { flex-wrap: wrap; gap: 4px; }
+  .cluster-badge { display: none; }
+  .form-grid, .kpi-grid, .charts-grid { grid-template-columns: minmax(0, 1fr); }
+  .col-span-2 { grid-column: auto; }
+  .nav-tabs { overflow-x: auto; flex-wrap: nowrap; }
+  .config-header-left { flex-wrap: wrap; }
+  .viewer-panel { min-height: 300px; }
+  .modal { width: calc(100vw - 24px); max-width: calc(100vw - 24px); }
+  .json-drawer { width: 100%; max-width: 100%; }
+}

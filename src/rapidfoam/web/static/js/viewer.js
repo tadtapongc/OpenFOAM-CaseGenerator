@@ -501,7 +501,7 @@ class STLViewer {
     }
   }
 
-  updateDomainBox(domainMin, domainMax, symPlane = null, flowDirection = '-z') {
+  updateDomainBox(domainMin, domainMax, symPlane = null, flowDirection = '-z', domainFaces = {}) {
     if (this.domainBoxGroup) {
       this.scene.remove(this.domainBoxGroup);
       this.disposeGroup(this.domainBoxGroup);
@@ -637,43 +637,35 @@ class STLViewer {
     else if (flowAxis === 'y') outletBadge.position.y += (flowSign < 0 ? -0.2 : 0.2);
     this.domainBoxGroup.add(outletBadge);
 
-    // 6. Ground Face (Dark road surface at domainMin.y)
-    const groundPlaneGeo = new THREE.PlaneGeometry(size.x, size.z);
-    const groundMat = new THREE.MeshBasicMaterial({
-      color: 0x0f172a,
-      transparent: true,
-      opacity: 0.65,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    });
-    const groundMesh = new THREE.Mesh(groundPlaneGeo, groundMat);
-    groundMesh.rotation.x = -Math.PI / 2;
-    groundMesh.position.set(center.x, minVec.y, center.z);
-    this.domainBoxGroup.add(groundMesh);
-
-    // Update ground grid position to sit flush with wind tunnel floor
-    if (this.groundGrid) {
-      this.groundGrid.position.set(center.x, minVec.y, center.z);
-    }
-
-    // 7. Symmetry Plane Indicator
-    if (symPlane !== null && symPlane !== undefined && isFinite(symPlane)) {
-      const symGeo = new THREE.PlaneGeometry(size.z, size.y);
-      const symMat = new THREE.MeshBasicMaterial({
-        color: 0x06b6d4,
-        transparent: true,
-        opacity: 0.22,
-        side: THREE.DoubleSide,
-        depthWrite: false,
+    // Render resolved boundary roles on their actual axis and signed face.
+    this.hasGroundFace = Object.values(domainFaces).includes('ground');
+    if (this.groundGrid) this.groundGrid.visible = this.showGround && this.hasGroundFace;
+    for (const [face, role] of Object.entries(domainFaces)) {
+      if (role !== 'ground' && role !== 'symmetry') continue;
+      const axis = face.slice(-1);
+      const pos = center.clone();
+      pos[axis] = face.startsWith('+') ? maxVec[axis] : minVec[axis];
+      const dims = axis === 'x' ? [size.z, size.y] : axis === 'y' ? [size.x, size.z] : [size.x, size.y];
+      const geo = new THREE.PlaneGeometry(...dims);
+      const mat = new THREE.MeshBasicMaterial({
+        color: role === 'ground' ? 0x0f172a : 0x06b6d4,
+        transparent: true, opacity: role === 'ground' ? 0.65 : 0.22,
+        side: THREE.DoubleSide, depthWrite: false,
       });
-      const symMesh = new THREE.Mesh(symGeo, symMat);
-      symMesh.rotation.y = Math.PI / 2;
-      symMesh.position.set(symPlane, center.y, center.z);
-      this.domainBoxGroup.add(symMesh);
-
-      const symBadge = this.createCanvasTextSprite(`SYMMETRY (${symPlane}m)`, '#38bdf8', 'rgba(15, 23, 42, 0.85)');
-      symBadge.position.set(symPlane, maxVec.y - 0.4, center.z);
-      this.domainBoxGroup.add(symBadge);
+      const mesh = new THREE.Mesh(geo, mat);
+      if (axis === 'x') mesh.rotation.y = Math.PI / 2;
+      if (axis === 'y') mesh.rotation.x = -Math.PI / 2;
+      mesh.position.copy(pos);
+      this.domainBoxGroup.add(mesh);
+      if (role === 'ground' && this.groundGrid) {
+        this.groundGrid.position.copy(pos);
+        this.groundGrid.rotation.set(axis === 'z' ? Math.PI / 2 : 0, 0, axis === 'x' ? Math.PI / 2 : 0);
+      }
+      if (role === 'symmetry') {
+        const badge = this.createCanvasTextSprite(`SYMMETRY (${axis}=${pos[axis]}m)`, '#38bdf8', 'rgba(15, 23, 42, 0.85)');
+        badge.position.copy(pos);
+        this.domainBoxGroup.add(badge);
+      }
     }
 
     // 8. Update Flow Arrow position to point into wind tunnel from inlet
@@ -689,7 +681,7 @@ class STLViewer {
     const dimsBadge = document.getElementById('viewer-domain-badge');
     const dimsText = document.getElementById('domain-dims-text');
     if (dimsBadge && dimsText) {
-      dimsText.textContent = `${size.x.toFixed(2)}m (W) × ${size.y.toFixed(2)}m (H) × ${size.z.toFixed(2)}m (L)`;
+      dimsText.textContent = `${size.x.toFixed(2)}m (X) × ${size.y.toFixed(2)}m (Y) × ${size.z.toFixed(2)}m (Z)`;
       dimsBadge.style.display = 'flex';
     }
   }
@@ -709,7 +701,7 @@ class STLViewer {
 
   toggleGround(show) {
     this.showGround = show;
-    if (this.groundGrid) this.groundGrid.visible = show;
+    if (this.groundGrid) this.groundGrid.visible = show && this.hasGroundFace !== false;
   }
 
   toggleFlow(show) {

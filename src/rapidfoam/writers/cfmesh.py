@@ -72,7 +72,9 @@ def generate_domain_stl(
 
     The outer wind tunnel box faces are written with inward-facing normals,
     while inner CAD geometry surfaces retain outward-facing normals.
-    This creates a valid closed manifold domain for cfMesh.
+    This concatenates surfaces; it does not clip CAD, repair intersections,
+    or certify a closed manifold. Boundary intersections require CAD preparation
+    and verification with the target cfMesh installation.
     """
     tri_dir = case_dir / "constant" / "triSurface"
     tri_dir.mkdir(parents=True, exist_ok=True)

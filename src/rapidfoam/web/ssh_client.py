@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import ast
+import inspect
+import time
 import base64
 import io
 import json
@@ -20,6 +23,22 @@ try:
 except ImportError:
     PARAMIKO_AVAILABLE = False
     paramiko = None  # type: ignore
+
+
+def force_helper_source() -> str:
+    """Ship the maintained parser to clusters, independent of their installed version."""
+    from rapidfoam import geometry
+    from rapidfoam.postproc import forces
+    from rapidfoam.writers.scripts import _AnnotationStripper, _clean_force_helpers
+    source = "\n\n".join(inspect.getsource(f) for f in (
+        geometry.parse_axis, geometry.axis_index_sign,
+        forces.load_axis_config, forces.is_symmetry_case,
+    ))
+    tree = _AnnotationStripper().visit(ast.parse(source))
+    ast.fix_missing_locations(tree)
+    return ("import json, math, re, statistics\nfrom pathlib import Path\n"
+            + "AXIS_MAP = " + repr(geometry.AXIS_MAP) + "\n"
+            + ast.unparse(tree) + "\n" + _clean_force_helpers() + "\n")
 
 
 class ClusterSSHClient:
@@ -61,7 +80,8 @@ class ClusterSSHClient:
         self.disconnect()
 
         client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.load_system_host_keys()
+        client.set_missing_host_key_policy(paramiko.RejectPolicy())
 
         pkey = None
         if key_data:
@@ -142,10 +162,49 @@ class ClusterSSHClient:
             raise ConnectionError("Not connected to cluster SSH server.")
 
         _stdin, stdout, stderr = self._client.exec_command(command, timeout=timeout)
-        exit_code = stdout.channel.recv_exit_status()
-        out_str = stdout.read().decode("utf-8", errors="replace")
-        err_str = stderr.read().decode("utf-8", errors="replace")
-        return exit_code, out_str, err_str
+        channel = stdout.channel
+        out, err = bytearray(), bytearray()
+        deadline = time.monotonic() + timeout if timeout is not None else None
+        try:
+            while True:
+                # Drain both streams while the remote process is running.
+                if channel.recv_ready():
+                    out.extend(channel.recv(65536))
+                if channel.recv_stderr_ready():
+                    err.extend(channel.recv_stderr(65536))
+                if channel.exit_status_ready() and not channel.recv_ready() and not channel.recv_stderr_ready():
+                    break
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise TimeoutError("SSH command timed out")
+                time.sleep(0.01)
+            return channel.recv_exit_status(), out.decode("utf-8", errors="replace"), err.decode("utf-8", errors="replace")
+        finally:
+            channel.close()
+
+    def read_case_forces(self, case_name: str) -> dict[str, Any]:
+        """Read remote case metadata and forces together using the shared parser."""
+        script = force_helper_source() + """
+import sys
+repo = Path(sys.argv[1])
+case = repo / "cases" / sys.argv[2]
+config = case / "case_config.json"
+if not config.is_file():
+    config = repo / "configs" / (sys.argv[2] + ".json")
+di, ds, fi, fs, da, fa = load_axis_config(str(config), case)
+sym = is_symmetry_case(str(config), case)
+times, drag, downforce = read_forces(find_force_files(case), di, ds, fi, fs)
+scale = 2 if sym else 1
+print(json.dumps({"times": times, "drag": [v * scale for v in drag],
+                  "downforce": [v * scale for v in downforce],
+                  "is_symmetry": sym, "drag_axis": da, "downforce_axis": fa}))
+"""
+        b64 = base64.b64encode(script.encode("utf-8")).decode("ascii")
+        code = "import base64; exec(base64.b64decode(" + repr(b64) + "))"
+        command = "python3 -c " + shlex.quote(code) + " " + shlex.quote(self.remote_repo_path) + " " + shlex.quote(case_name)
+        status, out, err = self.run_command(command, timeout=30)
+        if status:
+            raise RuntimeError(err or "Remote force reader failed")
+        return json.loads(out)
 
     def test_connection(self) -> dict[str, Any]:
         """Test SSH connection and check environment on cluster."""
@@ -375,13 +434,6 @@ from pathlib import Path
 repo = Path(sys.argv[1] if len(sys.argv) > 1 else ".")
 cases_dir = repo / "cases"
 
-AXIS_MAP = {"x": 0, "y": 1, "z": 2}
-def parse_axis(axis_str):
-    s = str(axis_str).strip().lower()
-    sign = -1.0 if s.startswith("-") else 1.0
-    idx = AXIS_MAP.get(s.lstrip("+-"), 0)
-    return idx, sign
-
 def read_tail(fpath, max_bytes=8192):
     try:
         sz = fpath.stat().st_size
@@ -428,79 +480,26 @@ if cases_dir.is_dir():
                     stls = cd.get("stl_files", [])
                     if stls:
                         stl_name = Path(stls[0]).name
-                    outputs = cd.get("outputs", {})
-                    if "drag_axis" in outputs:
-                        drag_idx, drag_sign = parse_axis(outputs["drag_axis"])
-                    if "downforce_axis" in outputs:
-                        df_idx, df_sign = parse_axis(outputs["downforce_axis"])
-                    faces = cd.get("domain_faces", {})
-                    if any("symmetry" in str(v).lower() for v in faces.values()):
-                        is_sym = True
             except Exception:
                 pass
 
+        drag_idx, drag_sign, df_idx, df_sign, _, _ = load_axis_config(str(cfg_file), d)
+        is_sym = is_symmetry_case(str(cfg_file), d)
         sym_scale = 2.0 if is_sym else 1.0
-
-        # Read forces
-        force_files = sorted(d.glob("postProcessing/forces/*/force.dat"))
-
-        has_forces = len(force_files) > 0
+        force_files = find_force_files(d)
+        has_forces = bool(force_files)
         latest_iter = None
         converged = False
-        downforce_val = None
-        drag_val = None
-        ld_val = None
-
-        if force_files:
-            samples = {}
-            for ff in force_files:
-                try:
-                    with open(str(ff), encoding="utf-8", errors="replace") as f:
-                        for line in f:
-                            line = line.strip()
-                            if not line or line.startswith("#"):
-                                continue
-                            parts = line.replace("(", " ").replace(")", " ").split()
-                            if len(parts) >= 10:
-                                try:
-                                    t = float(parts[0])
-                                    drg = float(parts[1 + drag_idx]) * drag_sign * sym_scale
-                                    df = float(parts[1 + df_idx]) * df_sign * sym_scale
-                                    samples[t] = (t, drg, df)
-                                except ValueError:
-                                    continue
-                except Exception:
-                    pass
-
-            if samples:
-                sorted_samples = sorted(samples.values(), key=lambda s: s[0])
-                times = [s[0] for s in sorted_samples]
-                drags = [s[1] for s in sorted_samples]
-                downforces = [s[2] for s in sorted_samples]
-                latest_iter = int(times[-1])
-
-                window = 200
-                if len(drags) < window:
-                    window = len(drags)
-
-                if window >= 20:
-                    d_win = drags[-window:]
-                    f_win = downforces[-window:]
-                    d_avg = statistics.mean(d_win)
-                    f_avg = statistics.mean(f_win)
-                    d_std = statistics.stdev(d_win)
-                    f_std = statistics.stdev(f_win)
-                    d_pct = (d_std / abs(d_avg) * 100) if d_avg != 0 else 100.0
-                    f_pct = (f_std / abs(f_avg) * 100) if f_avg != 0 else 100.0
-                    converged = (d_pct < 0.5 and f_pct < 0.5)
-                else:
-                    d_avg = statistics.mean(drags) if drags else 0.0
-                    f_avg = statistics.mean(downforces) if downforces else 0.0
-                    converged = False
-
-                downforce_val = round(f_avg, 2)
-                drag_val = round(d_avg, 2)
-                ld_val = round(f_avg / d_avg, 2) if abs(d_avg) > 1e-3 else None
+        downforce_val = drag_val = ld_val = None
+        times, drags, downforces = read_forces(force_files, drag_idx, drag_sign, df_idx, df_sign)
+        if times:
+            drags = [v * sym_scale for v in drags]
+            downforces = [v * sym_scale for v in downforces]
+            latest_iter = int(times[-1])
+            converged, _, _, d_avg, f_avg = check_convergence(drags, downforces)
+            downforce_val = round(f_avg, 2)
+            drag_val = round(d_avg, 2)
+            ld_val = round(f_avg / d_avg, 2) if abs(d_avg) > 1e-3 else None
 
         # Check logs and status
         status = "Generated"
@@ -561,7 +560,7 @@ if cases_dir.is_dir():
 print("__CASE_JSON_START__" + json.dumps(results) + "__CASE_JSON_END__")
 """
         try:
-            b64 = base64.b64encode(remote_script.encode("utf-8")).decode("ascii")
+            b64 = base64.b64encode((force_helper_source() + remote_script).encode("utf-8")).decode("ascii")
             quoted_repo = shlex.quote(self.remote_repo_path or ".")
             py_code = f"import base64; exec(base64.b64decode('{b64}').decode('utf-8'))"
             cmd = f"python3 -c {shlex.quote(py_code)} {quoted_repo}"

@@ -5,11 +5,25 @@ All notable changes to RapidFOAM will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Separate read-only validation, configuration saving, and case generation in Studio.
+- Preserve advanced visual-form configuration and cfMesh boundary/ground cell sizes.
+- Load the bundled STL and align boundary previews with configured axes and faces.
+- Share force parsing between local processing, remote telemetry, and archive summaries.
+- Report generation/submission errors and use solver-log timestamps for local activity.
+- Escape dynamic HTML, verify SSH host keys, and drain both SSH output streams before waiting for completion.
+- Make password storage opt-in and accurately label its on-disk plaintext format.
+- Restore shadowed API tests, isolate web test files, and test the actual restart launcher behavior.
+- Correct displayed defaults, reporting labels, package versions, queue refresh, navigation accessibility, and responsive layout.
+- Restrict turbulence models to the supported kOmegaSST writer and clarify surface-geometry limitations.
+
 ## [1.1.0] - 2026-09-10
 
 ### Added
 - **cfMesh (`cartesianMesh`) Engine**: Integrated cfMesh as an alternative mesher engine for external vehicle and aerospace aerodynamics.
-- **Closed-Manifold Flow Domain Builder**: Automatic generation of watertight domain STL with inward-facing surface normals tagged per boundary role.
+- **Combined Flow Domain Surface Builder**: Generates wind-tunnel faces with inward-facing normals and appends CAD surfaces. It does not repair intersections or certify a closed manifold.
 - **Automated `system/meshDict` Synthesis**: Multi-fidelity cell budgeting, surface/edge refinement, and wake refinement boxes for cfMesh.
 - **cfMesh-First Ecosystem**: Set `cfMesh` as the primary default mesher across Web Studio UI, CLI, and configuration templates with `snappyHexMesh` preserved as an optional alternative.
 - **Boundary Layer Normal Optimization**: Enabled `optimiseLayer 1` and normal smoothing heuristics for uncompromised boundary layer extrusion on multi-element wings and trailing edges.

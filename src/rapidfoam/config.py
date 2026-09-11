@@ -346,6 +346,9 @@ def validate(cfg: dict[str, Any], project_dir: Path) -> tuple[list[str], list[st
     if mesher_type not in ("snappy", "cfmesh"):
         errors.append("mesher must be 'snappy' or 'cfmesh'")
 
+    if cfg.get("turbulence", {}).get("model", "kOmegaSST") != "kOmegaSST":
+        errors.append("turbulence.model must be kOmegaSST; other models are not supported by the case writers")
+
     # Flow
     flow = cfg.get("flow", {})
     positive("flow", "velocity")
@@ -394,7 +397,7 @@ def validate(cfg: dict[str, Any], project_dir: Path) -> tuple[list[str], list[st
 
     for section, keys in {
         "fluid": ("nu", "rho"), "turbulence": ("intensity", "nut_ratio"),
-        "mesh_params": ("base_cell_size",), "solver": ("end_time", "write_interval"),
+        "mesh_params": ("base_cell_size", "boundary_cell_size", "ground_cell_size"), "solver": ("end_time", "write_interval"),
         "layers": ("expansion_ratio", "first_layer_thickness", "min_thickness"),
         "force_refs": ("lRef", "Aref"),
     }.items():

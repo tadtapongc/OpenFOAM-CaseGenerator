@@ -36,7 +36,7 @@ class TelemetryCharts {
         labels: [],
         datasets: [
           {
-            label: 'Downforce (-Fy)',
+            label: 'Downforce',
             data: [],
             borderColor: 'rgba(0, 210, 255, 0.35)',
             backgroundColor: 'transparent',
@@ -58,7 +58,7 @@ class TelemetryCharts {
             yAxisID: 'y',
           },
           {
-            label: 'Drag (-Fz)',
+            label: 'Drag',
             data: [],
             borderColor: 'rgba(244, 63, 94, 0.35)',
             backgroundColor: 'transparent',

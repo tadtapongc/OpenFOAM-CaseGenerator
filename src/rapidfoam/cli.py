@@ -200,7 +200,7 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
         if clearance_min < -1e-4:
             if min_face_type == "symmetry":
                 print(f"  ℹ  STL crosses symmetry plane: {axis_labels[i]}_min "
-                      f"({clearance_min:.3f} m) — geometry will be cut at symmetry boundary")
+                      f"({clearance_min:.3f} m) — CAD crosses the symmetry boundary; prepare a compatible half-model and verify the mesh")
             else:
                 print(f"  ⚠  STL penetrates outside domain: "
                       f"{axis_labels[i]}_min ({clearance_min:.3f} m)")
@@ -276,6 +276,12 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
     mesher = cfg.get("mesher", "cfmesh")
     mesher_type = mesher.get("type", "cfmesh") if isinstance(mesher, dict) else str(mesher)
     mesher_name = "cfMesh (cartesianMesh)" if mesher_type == "cfmesh" else "snappyHexMesh"
+    if mesher_type == "cfmesh" and any(
+        all_min[i] <= box["min"][i] or all_max[i] >= box["max"][i]
+        for i in range(3)
+    ):
+        print("  ⚠  CAD touches or crosses the cfMesh domain boundary. The surface writer does not "
+              "clip or repair intersections; prepare compatible CAD and verify the resulting mesh.")
 
     case_dir = project_dir / cfg["case_dir"] / cfg["case_name"]
     # Dry run — stop here

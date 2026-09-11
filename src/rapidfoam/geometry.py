@@ -498,7 +498,7 @@ def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str,
         "resolveFeatureAngle": resolve_feature_angle,
         "allowFreeStandingZoneFaces": user_mesh.get("allowFreeStandingZoneFaces", True),
     }
-    for key in ("location_in_mesh", "locationInMesh", "maxLoadUnbalance"):
+    for key in ("location_in_mesh", "locationInMesh", "maxLoadUnbalance", "boundary_cell_size", "ground_cell_size"):
         if key in user_mesh:
             result[key] = user_mesh[key]
     return result

@@ -10,7 +10,7 @@ https://github.com/user-attachments/assets/caced105-394c-4c8f-b6f1-86d14df9ae85
 > OPENFOAM® is a registered trade mark of OpenCFD Limited, producer and distributor of the OpenFOAM software via [www.openfoam.com](https://www.openfoam.com).  
 > This offering is not approved or endorsed by OpenCFD Limited, producer and distributor of the OpenFOAM software via [www.openfoam.com](https://www.openfoam.com), and owner of the OPENFOAM® and OpenCFD® trade marks.
 
-RapidFOAM streamlines the OpenFOAM workflow for external vehicle aerodynamics: CAD STL ingestion, domain bounding box calculation, `snappyHexMesh` refinement dictionary generation (surfaces, feature edges, distance shells, two-stage wake boxes, and boundary layers), `simpleFoam` steady-state case setup (SIMPLEC, k-omega SST), execution scripts, and real-time force convergence monitoring (Drag, Downforce, L/D).
+RapidFOAM streamlines the OpenFOAM workflow for external vehicle aerodynamics: CAD STL ingestion, domain sizing, cfMesh dictionary generation (default) or optional `snappyHexMesh`, `simpleFoam` steady-state case setup (SIMPLEC, k-omega SST), execution scripts, and force convergence monitoring (Drag, Downforce, L/D). The case writers support `kOmegaSST`; other turbulence models are rejected.
 
 ---
 
@@ -177,7 +177,7 @@ cd cases/front_wing_v1
 sbatch run.sh
 ```
 
-The script executes the standard OpenFOAM external aerodynamics pipeline:
+With the default `cfmesh` engine, the script runs `cartesianMesh`, checks the mesh, then initializes with `potentialFoam` and solves with `simpleFoam`. Meshing runs directly; solver parallelism uses MPI. The `snappy` alternative executes:
 1. `surfaceFeatureExtract` (extracts feature edges to `.eMesh`)
 2. `blockMesh` (creates background hexahedral mesh)
 3. `decomposePar` (splits domain across MPI ranks)
@@ -312,7 +312,7 @@ RapidFOAM/
 │       ├── server.py   # FastAPI backend & static file server
 │       ├── ssh_client.py # Paramiko SSH/SFTP client for remote SLURM clusters
 │       └── static/     # Web Studio UI (Three.js 3D viewport, telemetry graphs)
-├── tests/              # Automated test suite (74 unit & regression tests)
+├── tests/              # Python and Node regression tests
 ├── run_app.bat         # 1-click launcher for Windows
 ├── run_app.sh          # 1-click launcher for Linux / macOS
 ├── setup_case.py       # Case generator CLI script
@@ -327,7 +327,16 @@ Run the automated test suite with Python's standard `unittest`:
 
 ```bash
 python -m unittest discover -s tests -v
+node --test tests/test_frontend.cjs
 ```
+
+Install `.[web,plot]` for the full Python suite. Shell integration tests require Linux/POSIX and are skipped on Windows. Web tests run in temporary workspaces.
+
+Studio's **Validate** action performs read-only validation. **Save Config** writes the input JSON only; **Generate Locally** writes case dictionaries. Editing visual controls preserves advanced settings that have no corresponding control. `--restart` is required for the launcher to terminate an existing Studio instance.
+
+SSH connections verify host keys against the user's SSH known-hosts file. Before first use, connect with your normal SSH client and verify the server fingerprint through your cluster administrator. Studio rejects unknown or changed keys. Password persistence is off by default; explicitly enabling it stores the password as plaintext on local disk. SSH keys are preferable when available.
+
+The cfMesh surface writer concatenates the wind-tunnel box and CAD surfaces. It does **not** perform CAD clipping, intersection repair, boolean subtraction, or manifold certification. CAD crossing symmetry or touching ground requires preparation and a mesh check on the target cfMesh version. The bundled sample crosses its configured symmetry plane; successful dictionary generation alone does not certify a valid mesh. Force stability likewise does not establish mesh independence or aerodynamic accuracy.
 
 ---
 

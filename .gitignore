@@ -81,3 +81,6 @@ env/
 # ============================================================
 Thumbs.db
 .DS_Store
+# Local regression dependencies and output
+.test-deps/
+test-results.log

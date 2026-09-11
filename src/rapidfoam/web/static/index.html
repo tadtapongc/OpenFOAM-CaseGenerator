@@ -118,7 +118,7 @@
                 </div>
               </div>
             </div>
-            <div class="viewer-axes-legend" id="viewer-axes-legend" title="Cartesian Axes: +X (Lateral), +Y (Elevation), +Z (Freestream)">
+            <div class="viewer-axes-legend" id="viewer-axes-legend" title="Cartesian Axes: +X, +Y, +Z; flow and boundary roles follow configuration">
               <span class="axis-item axis-x"><span class="axis-dot"></span>+X</span>
               <span class="axis-item axis-y"><span class="axis-dot"></span>+Y</span>
               <span class="axis-item axis-z"><span class="axis-dot"></span>+Z</span>
@@ -670,9 +670,6 @@
                     <select id="cfg-override-turb-model" class="input">
                       <option value="">Auto / Preset (kOmegaSST)</option>
                       <option value="kOmegaSST">kOmegaSST (Recommended / Universal)</option>
-                      <option value="SpalartAllmaras">SpalartAllmaras (1-Equation)</option>
-                      <option value="kEpsilon">kEpsilon (Standard 2-Equation)</option>
-                      <option value="realizableKE">realizableKE</option>
                     </select>
                     <span class="field-hint">RAS model in turbulenceProperties</span>
                   </div>
@@ -813,17 +810,17 @@
       <!-- Telemetry KPIs -->
       <div class="kpi-grid">
         <div class="kpi-card">
-          <div class="kpi-title">Downforce (-Fy)</div>
+          <div class="kpi-title">Downforce</div>
           <div class="kpi-val" id="kpi-downforce">-- <span class="kpi-unit">N</span></div>
           <div class="kpi-sub" id="kpi-downforce-variation">±--% variation</div>
         </div>
         <div class="kpi-card">
-          <div class="kpi-title">Drag (-Fz)</div>
+          <div class="kpi-title">Drag</div>
           <div class="kpi-val" id="kpi-drag">-- <span class="kpi-unit">N</span></div>
           <div class="kpi-sub" id="kpi-drag-variation">±--% variation</div>
         </div>
         <div class="kpi-card highlight">
-          <div class="kpi-title">Aero Efficiency (-Fy / -Fz)</div>
+          <div class="kpi-title">Aero Efficiency (Downforce / Drag)</div>
           <div class="kpi-val" id="kpi-ld">--</div>
           <div class="kpi-sub">Lift-to-Drag Ratio (L/D)</div>
         </div>
@@ -1009,8 +1006,8 @@
 
           <div class="form-group">
             <label for="ssh-password">Password</label>
-            <input type="password" id="ssh-password" class="input" placeholder="Enter password (leave blank to use saved session)">
-            <span class="field-hint" id="ssh-saved-pw-hint" style="display:none; color: #38bdf8; font-weight: 500;">✓ Saved password available in local session</span>
+            <input type="password" id="ssh-password" class="input" placeholder="Enter password (leave blank to use saved credentials)">
+            <span class="field-hint" id="ssh-saved-pw-hint" style="display:none; color: #38bdf8; font-weight: 500;">✓ Saved password available on local disk (plaintext)</span>
           </div>
 
           <div class="form-group">
@@ -1025,8 +1022,8 @@
 
           <div class="form-group">
             <label class="checkbox-control">
-              <input type="checkbox" id="ssh-save-pw" checked>
-              <span>Store credentials in local session</span>
+              <input type="checkbox" id="ssh-save-pw">
+              <span>Save password on local disk (plaintext)</span>
             </label>
           </div>
 
