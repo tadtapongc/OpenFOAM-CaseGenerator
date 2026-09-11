@@ -16,7 +16,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from rapidfoam.cli import _do_generate
 from rapidfoam.config import load_config, validate
-from rapidfoam.geometry import resolve_cell_sizes, resolve_first_layer_height
+from rapidfoam.geometry import (
+    MIN_CELL_SIZE_ALIASES,
+    resolve_cell_sizes,
+    resolve_first_layer_height,
+    resolve_min_cell_size,
+)
 from rapidfoam.mesher_profiles import load_mesher_profile, resolve_mesher
 from rapidfoam.stl_utils import write_stl
 
@@ -161,7 +166,9 @@ class CellSizeResolutionTest(unittest.TestCase):
         self.assertEqual(absolute["mode"], "absolute")
         self.assertAlmostEqual(levels["body"], absolute["body"])
         self.assertAlmostEqual(levels["edge"], 0.0015625)
-        self.assertAlmostEqual(levels["min"], levels["edge"])
+        # cfMesh's floor is a *global* one, so it follows the body cell rather
+        # than the edge cell snappy only uses on feature-edge cells.
+        self.assertAlmostEqual(levels["min"], levels["body"])
 
     def test_first_layer_relative_and_absolute_agree(self):
         relative = resolve_first_layer_height({"first_layer_thickness": 0.3}, 0.00625)
@@ -187,7 +194,7 @@ class WriterEquivalenceTest(ProjectScaffold):
                              mesh_params={"base_cell_size": 0.10, "surface_level": [4, 5]})
         cfmesh_dict = self.mesh_dict(case)
         self.assertIn("cellSize 0.00625;", cfmesh_dict)
-        self.assertIn("minCellSize         0.0015625;", cfmesh_dict)  # base / 2**edge_level(6)
+        self.assertIn("minCellSize         0.00625;", cfmesh_dict)  # floor = body cell
 
     def test_cfmesh_layers_only_the_stl_surfaces_by_default(self):
         cfmesh_dict = self.mesh_dict(self.generate("cfmesh", "cf_default_layers"))
@@ -236,6 +243,57 @@ class WriterEquivalenceTest(ProjectScaffold):
         self.assertEqual(snapshot["mesher"], "cfmesh")
         self.assertEqual(snapshot["cfmesh"]["layer_mode"], "patch_only")
         self.assertIs(snapshot["mesh_params"]["cell_budget_enforced"], False)
+
+
+class CfMeshRefinementFloorTest(ProjectScaffold):
+    """cfMesh's minCellSize is a *global* floor, so it follows the body cell.
+
+    Flooring it at snappy's ``edge_level`` cell refined every surface cell two
+    levels deeper than snappy and produced 4.4M cells where snappy needed 449k
+    (the mesher itself was only 5 min of that run — the cell count drove the
+    solve).
+    """
+
+    def test_profile_floors_cfmesh_at_the_body_cell(self):
+        cfg = load_config(self.config(), project_dir=self.root)
+        self.assertEqual(cfg["mesh_params"]["min_cell_size"], "body")
+        sizes = resolve_cell_sizes(cfg["mesh_params"])
+        self.assertAlmostEqual(sizes["body"], 0.00625)     # 0.10 / 2**4
+        self.assertAlmostEqual(sizes["min"], sizes["body"])
+        self.assertAlmostEqual(sizes["edge"], 0.0015625)   # 0.10 / 2**6, snappy-only
+
+    def test_cfmesh_mesh_dict_floors_at_the_body_cell(self):
+        cfmesh_dict = self.mesh_dict(self.generate("cfmesh", "cf_floor"))
+        self.assertIn("minCellSize         0.00625;", cfmesh_dict)
+        self.assertIn("cellSize 0.00625;", cfmesh_dict)  # same cell as the surface
+
+    def test_aliases_resolve_to_the_matching_cell_size(self):
+        sizes = resolve_cell_sizes({"base_cell_size": 0.10, "surface_level": [4, 5], "edge_level": 6})
+        cases = {"base": sizes["base"], "body": sizes["body"], "surface": sizes["body"],
+                 "edge": sizes["edge"], "feature": sizes["edge"]}
+        self.assertEqual(set(cases), set(MIN_CELL_SIZE_ALIASES))
+        for alias, expected in cases.items():
+            self.assertAlmostEqual(
+                resolve_min_cell_size(alias, base=sizes["base"], body=sizes["body"], edge=sizes["edge"]),
+                expected, msg=alias)
+
+    def test_unset_floor_defaults_to_the_body_cell(self):
+        sizes = resolve_cell_sizes({"base_cell_size": 0.10, "surface_level": [4, 5]})
+        self.assertAlmostEqual(sizes["min"], sizes["body"])
+
+    def test_numeric_floor_and_edge_alias_still_reach_the_writer(self):
+        numeric = self.generate("cfmesh", "cf_floor_numeric", mesh_params={"min_cell_size": 0.003})
+        self.assertIn("minCellSize         0.003;", self.mesh_dict(numeric))
+        alias = self.generate("cfmesh", "cf_floor_edge", mesh_params={"min_cell_size": "edge"})
+        self.assertIn("minCellSize         0.0015625;", self.mesh_dict(alias))
+
+    def test_bad_floor_is_reported(self):
+        for bad in ("tiny", 0.0, -1.0):
+            with self.assertRaises(ValueError):
+                resolve_min_cell_size(bad, base=0.1, body=0.00625, edge=0.0015625)
+        cfg = load_config(self.config(mesh_params={"min_cell_size": "tiny"}), project_dir=self.root)
+        errors, _warnings = validate(cfg, self.root)
+        self.assertTrue(any("min_cell_size" in e for e in errors), errors)
 
 
 if __name__ == "__main__":

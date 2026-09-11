@@ -317,6 +317,52 @@ FIDELITY_PRESETS: dict[str, dict[str, Any]] = {
 # CELL SIZE RESOLUTION — mesher-neutral intent -> engine values
 # ============================================================
 
+# Aliases accepted by ``mesh_params.min_cell_size`` (see resolve_min_cell_size).
+MIN_CELL_SIZE_ALIASES: dict[str, str] = {
+    "base": "base",
+    "body": "body",
+    "surface": "body",
+    "edge": "edge",
+    "feature": "edge",
+}
+
+
+def resolve_min_cell_size(value: Any, *, base: float, body: float, edge: float) -> float:
+    """Smallest cell cfMesh may create, in metres.
+
+    ``minCellSize`` is cfMesh's *global* automatic-refinement floor: its
+    curvature and proximity refinement stops there on every surface. snappy's
+    ``edge_level`` is a different thing -- it only refines the cells touching
+    the extracted feature edges -- so flooring cfMesh at snappy's edge cell
+    resolved the whole car multi-level finer than intended (4.4 M cells where
+    snappy needed 449 k). The floor therefore defaults to the *body* cell
+    (= snappy's ``surface_level[0]``); cfMesh still refines feature-edge cells
+    to ``body / 2`` on its own, which is snappy's ``surface_level[1]``.
+
+    ``value`` may be a number in metres or one of the aliases ``base``,
+    ``body`` (``surface``) and ``edge`` (``feature``).
+    """
+    if value is None:
+        return float(body)
+    if isinstance(value, str):
+        key = MIN_CELL_SIZE_ALIASES.get(value.strip().lower())
+        if key is None:
+            raise ValueError(
+                "mesh_params.min_cell_size must be a number in metres or one of "
+                f"{', '.join(sorted(MIN_CELL_SIZE_ALIASES))} (got {value!r})"
+            )
+        return float({"base": base, "body": body, "edge": edge}[key])
+    try:
+        resolved = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"mesh_params.min_cell_size must be a number in metres or an alias (got {value!r})"
+        ) from exc
+    if resolved <= 0:
+        raise ValueError("mesh_params.min_cell_size must be > 0 metres")
+    return resolved
+
+
 def resolve_cell_sizes(mesh: dict[str, Any]) -> dict[str, Any]:
     """Resolve body / feature-edge / minimum cell sizes in metres.
 
@@ -334,7 +380,9 @@ def resolve_cell_sizes(mesh: dict[str, Any]) -> dict[str, Any]:
 
     Returns:
         dict with ``mode``, ``base``, ``body``, ``edge``, ``min`` (metres),
-        ``levels`` (body/feature) and ``edge_level``.
+        ``levels`` (body/feature) and ``edge_level``. ``min`` is cfMesh's
+        global refinement floor: ``mesh_params.min_cell_size`` as metres, as an
+        alias (``base``/``body``/``edge``), or the body cell when unset.
     """
     base = float(mesh.get("base_cell_size", 0.10))
     levels = mesh.get("surface_level", [4, 5])
@@ -353,10 +401,9 @@ def resolve_cell_sizes(mesh: dict[str, Any]) -> dict[str, Any]:
     edge = mesh.get("edge_cell_size")
     edge = base / (2 ** edge_level) if edge is None else float(edge)
 
-    # cfMesh floor: the legacy value was min(edge, fine) -> sub-millimetre
-    # slivers along every feature. Default is now the feature-edge cell.
-    min_cell = mesh.get("min_cell_size")
-    min_cell = edge if min_cell is None else float(min_cell)
+    # cfMesh's *global* refinement floor -- not snappy's feature-edge level, so
+    # it defaults to the body cell (see resolve_min_cell_size).
+    min_cell = resolve_min_cell_size(mesh.get("min_cell_size"), base=base, body=float(body), edge=edge)
 
     return {
         "mode": mode,

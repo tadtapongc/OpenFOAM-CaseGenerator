@@ -362,7 +362,13 @@ def validate(cfg: dict[str, Any], project_dir: Path) -> tuple[list[str], list[st
     errors: list[str] = []
     warnings: list[str] = []
 
-    from rapidfoam.geometry import FIDELITY_PRESETS, face_assignments, face_role, parse_axis
+    from rapidfoam.geometry import (
+        FIDELITY_PRESETS,
+        MIN_CELL_SIZE_ALIASES,
+        face_assignments,
+        face_role,
+        parse_axis,
+    )
 
     # Check containers before dereferencing nested values.
     sections = [key for key, value in DEFAULT_CONFIG.items() if isinstance(value, dict)]
@@ -498,6 +504,15 @@ def validate(cfg: dict[str, Any], project_dir: Path) -> tuple[list[str], list[st
                              or level[0] > level[1]):
         errors.append("mesh_params.surface_level must be two ordered nonnegative integers")
     for key in ("body_cell_size", "edge_cell_size", "min_cell_size", "refinement_thickness"):
+        if key == "min_cell_size" and isinstance(mesh.get(key), str):
+            # cfMesh's global refinement floor also takes aliases, e.g. "body"
+            # (= snappy's surface_level[0]) or "edge" (= snappy's edge_level).
+            if mesh[key].strip().lower() not in MIN_CELL_SIZE_ALIASES:
+                errors.append(
+                    "mesh_params.min_cell_size must be a number in metres or one of "
+                    f"{', '.join(sorted(MIN_CELL_SIZE_ALIASES))}"
+                )
+            continue
         positive("mesh_params", key)
 
     # ---- Mesher-profile keys (src/rapidfoam/mesher_profiles/<mesher>.json) ----

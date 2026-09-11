@@ -7,7 +7,8 @@
     "mesh_params": {
         "_cell_size_mode": "'absolute' = cfMesh-native: localRefinement takes cellSize in metres. Derivation: body = mesh_params.body_cell_size, else base_cell_size / 2**surface_level[0] (the coarse level, matching snappy); edge = mesh_params.edge_cell_size, else base_cell_size / 2**edge_level. cfMesh refines feature-edge cells to body/2 on its own, so keep edge_cell_size = body/2.",
         "cell_size_mode": "absolute",
-        "_min_cell_size": "Optional floor for the smallest cfMesh cell. Defaults to the feature-edge cell size (base_cell_size / 2**edge_level), which is also snappy's feature-edge level.",
+        "_min_cell_size": "cfMesh's *global* automatic-refinement floor: curvature and proximity refinement stops here on every surface, so this -- not edge_level -- sets the resolved cell size on the car. 'body' (default) = the surface_level[0] cell; cfMesh then refines feature-edge cells to half of it on its own, which is snappy's surface_level[1]. 'edge' (= base_cell_size / 2**edge_level) over-refines the entire surface: that is what produced 4.4M cells where snappy needed 449k, i.e. ~8x the cell count and runtime. Use 'edge' or a number in metres only when a sharp-edge detail must be resolved; 'base' matches the background size.",
+        "min_cell_size": "body",
         "_cell_budget": "cfMesh has no maxGlobalCells/maxLocalCells equivalent, so the budget is not enforced. Cost is controlled by body/edge cell size, min_cell_size, ground_refine, the wake box levels and cfmesh.optimise_layer instead.",
         "cell_budget_enforced": false
     },

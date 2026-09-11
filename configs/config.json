@@ -84,7 +84,7 @@
     "mesh_params_cfmesh": {
         "_body_cell_size": 0.00625,
         "_edge_cell_size": 0.003125,
-        "_min_cell_size": 0.003125,
+        "_min_cell_size": "body",
         "_ground_refine": false
     },
     "mesh_params_snappy": {

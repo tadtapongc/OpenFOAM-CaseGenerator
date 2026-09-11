@@ -21,6 +21,13 @@ level finer on its own. Feeding one dictionary to both writers is what made the
 same config produce 449 k cells with snappy and 4.4 M cells with cfMesh; the
 profile is where each engine's real semantics are declared, while the case
 config keeps stating intent once.
+
+The same trap hides inside a single key name: cfMesh's ``minCellSize`` is a
+*global* refinement floor (curvature and proximity refinement stops there on
+every surface), while snappy's ``edge_level`` only refines the cells touching
+the extracted feature edges. The cfMesh profile therefore floors it at the body
+cell (``min_cell_size: "body"``); the edge cell over-refined every surface and
+was worth ~8x the cells.
 """
 
 from __future__ import annotations

@@ -243,10 +243,10 @@ Key settings available in `configs/config.json`:
 | Preset | Base Cell | Surface Levels | Edge Level | Boundary Layers | Max Iterations | Target Cells† | Estimated Runtime* |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | `fast` | 0.15 m | [3, 4] | 5 | 3 | 800 | ~0.2–4 M | ~5–10 min |
-| `standard` | 0.10 m | [4, 5] | 6 | 5 | 1500 | ~0.5–9 M | ~6 min – 3.5 hrs |
+| `standard` | 0.10 m | [4, 5] | 6 | 5 | 1500 | ~0.5–2 M | ~6–45 min |
 | `fine` | 0.08 m | [5, 6] | 7 | 6 | 3000 | ~2–16 M | ~2–4 hrs |
 
-*\* Runtime estimates for typical Formula Student half-car models on a 32-core cluster node. Solver time scales with cell count, so the mesher dominates the spread.*<br>*† Cell counts depend strongly on the mesher: on one A/B (identical config, STL and 32-core node) a `standard` run produced **449 k cells / 6 min** with snappy and **4.4 M cells / 3.5 hrs** with cfMesh. Read `cells:` from `log.checkMesh` after the first run, then tune `mesh_params.body_cell_size` (or `body_cell_size`) for the next iteration.*
+*\* Runtime estimates for typical Formula Student half-car models on a 32-core cluster node. Solver time scales with cell count, so the mesher dominates the spread.*<br>*† Cell counts depend strongly on the mesher. On one A/B (identical config, STL and 32-core node) a `standard` run produced **449 k cells / 6 min** with snappy and **1.3 hrs** with cfMesh, with the mesher itself taking only 5 min of that: cfMesh's `minCellSize` floor defaulted to the *edge* cell, which is a **global** refinement floor and resolved the whole body two levels finer than snappy's surface level. `mesh_params.min_cell_size` now defaults to `"body"` (= snappy's `surface_level[0]`), so both engines resolve the same cells; set it to `"edge"`, `"base"` or a value in metres to bias that trade-off. Read `cells:` from `log.checkMesh` after the first run and tune `mesh_params.body_cell_size` next.*
 
 ### Mesher Engines & Profiles
 
@@ -263,7 +263,7 @@ Merge order is `DEFAULT_CONFIG -> mesher profile -> case config -> mesh_params_<
 | Intent | snappy-native | cfMesh-native |
 | :--- | :--- | :--- |
 | Surface resolution | `surface_level: [body, feature]` levels | `body_cell_size` / `edge_cell_size` in metres |
-| Smallest cell | `edge_level` for feature edges | `min_cell_size` (defaults to the edge cell) |
+| Smallest cell | `edge_level` (feature-edge cells only) | `min_cell_size` — a **global** floor, defaults to `"body"` (the edge cell over-refines the whole surface ~8x) |
 | Ground plane | never refined (layered only if `layers.ground_layers`) | `cfmesh.ground_refine` (default `false`) |
 | Boundary layers | `layers` block, `first_layer_mode: "relative"` | `cfmesh.layer_mode: "patch_only"`, `optimise_layer: "auto"` |
 | Cell budget | `maxGlobalCells` (enforced) | none — cost follows cell size, `ground_refine`, `optimise_layer` |
