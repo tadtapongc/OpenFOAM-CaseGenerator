@@ -1257,7 +1257,7 @@ async def api_case_delete(case_name: str) -> dict[str, Any]:
 
     target_dir = PROJECT_ROOT / "cases" / case_name
     deleted = False
-    if target_dir.is_dir() and target_dir.resolve().is_relative_to(PROJECT_ROOT / "cases"):
+    if target_dir.is_dir() and target_dir.resolve().is_relative_to((PROJECT_ROOT / "cases").resolve()):
         shutil.rmtree(target_dir)
         deleted = True
 
