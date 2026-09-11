@@ -6,6 +6,7 @@ No geometry-specific tuning required.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from rapidfoam.stl_utils import BBox
@@ -313,6 +314,85 @@ FIDELITY_PRESETS: dict[str, dict[str, Any]] = {
 
 
 # ============================================================
+# CELL SIZE RESOLUTION — mesher-neutral intent -> engine values
+# ============================================================
+
+def resolve_cell_sizes(mesh: dict[str, Any]) -> dict[str, Any]:
+    """Resolve body / feature-edge / minimum cell sizes in metres.
+
+    The same intent can be written two ways and both resolve to the same metres:
+
+      * snappy-native relative levels — level ``n`` means
+        ``base_cell_size / 2**n``, with ``surface_level = [body, feature]`` and
+        ``edge_level`` for the extracted feature edges;
+      * cfMesh-native absolute sizes — ``body_cell_size`` / ``edge_cell_size``.
+
+    The writers use this so one case config drives either engine (see
+    src/rapidfoam/mesher_profiles/). cfMesh refines feature-edge cells to half
+    the surface cellSize on its own, hence ``edge == body / 2`` for presets that
+    set ``edge_level == surface_level[1] + 1``.
+
+    Returns:
+        dict with ``mode``, ``base``, ``body``, ``edge``, ``min`` (metres),
+        ``levels`` (body/feature) and ``edge_level``.
+    """
+    base = float(mesh.get("base_cell_size", 0.10))
+    levels = mesh.get("surface_level", [4, 5])
+    body_level = int(levels[0])
+    feature_level = int(levels[1])
+    edge_level = int(mesh.get("edge_level", feature_level + 1))
+
+    mode = str(mesh.get("cell_size_mode", "")).lower()
+    body = mesh.get("body_cell_size")
+    if body is None:
+        body = base / (2 ** body_level)
+        mode = mode or "relative_levels"
+    else:
+        mode = mode or "absolute"
+
+    edge = mesh.get("edge_cell_size")
+    edge = base / (2 ** edge_level) if edge is None else float(edge)
+
+    # cfMesh floor: the legacy value was min(edge, fine) -> sub-millimetre
+    # slivers along every feature. Default is now the feature-edge cell.
+    min_cell = mesh.get("min_cell_size")
+    min_cell = edge if min_cell is None else float(min_cell)
+
+    return {
+        "mode": mode,
+        "base": base,
+        "body": float(body),
+        "edge": float(edge),
+        "min": float(min_cell),
+        "levels": (body_level, feature_level),
+        "edge_level": edge_level,
+    }
+
+
+def resolve_first_layer_height(layers: dict[str, Any], body_cell: float) -> float:
+    """First boundary-layer cell height in metres.
+
+    ``first_layer_mode: "relative"`` (default) is ``first_layer_thickness`` x
+    body cell size, which keeps both meshers in the same wall-function range.
+    ``"absolute"`` reads ``first_layer_height`` in metres directly.
+    """
+    mode = str(layers.get("first_layer_mode", "relative")).lower()
+    if mode == "absolute" and layers.get("first_layer_height"):
+        return float(layers["first_layer_height"])
+    return float(body_cell) * float(layers.get("first_layer_thickness", 0.3))
+
+
+def resolve_first_layer_fraction(layers: dict[str, Any], body_cell: float) -> float:
+    """snappy's relative ``firstLayerThickness`` matching the resolved height.
+
+    snappy clamps the real layer stack, so treat the result as nominal.
+    """
+    if body_cell <= 0:
+        return float(layers.get("first_layer_thickness", 0.3))
+    return min(0.6, max(0.05, resolve_first_layer_height(layers, body_cell) / float(body_cell)))
+
+
+# ============================================================
 # MESH PARAMETER DERIVATION — Universal, geometry-adaptive
 # ============================================================
 
@@ -360,6 +440,14 @@ def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str,
     # Surface and edge levels: respect user override or use fidelity preset
     surface_level = user_mesh.get("surface_level", preset["surface_level"])
     edge_level = user_mesh.get("edge_level", preset["edge_level"])
+
+    # Absolute cell-size intent re-derives the levels, so a config that states
+    # "body cells are 6.25 mm" drives snappy and cfMesh identically.
+    body_cell_override = user_mesh.get("body_cell_size")
+    if body_cell_override:
+        level = max(0, round(math.log2(base_cell / float(body_cell_override))))
+        surface_level = user_mesh.get("surface_level", [level, level + 1])
+        edge_level = user_mesh.get("edge_level", level + 2)
 
     # Distance-based refinement shells
     distance_levels = user_mesh.get("distance_levels", preset["distance_levels"])
@@ -498,7 +586,9 @@ def compute_mesh_params(cfg: dict[str, Any], combined_bounds: BBox) -> dict[str,
         "resolveFeatureAngle": resolve_feature_angle,
         "allowFreeStandingZoneFaces": user_mesh.get("allowFreeStandingZoneFaces", True),
     }
-    for key in ("location_in_mesh", "locationInMesh", "maxLoadUnbalance", "boundary_cell_size", "ground_cell_size"):
+    for key in ("location_in_mesh", "locationInMesh", "maxLoadUnbalance", "boundary_cell_size",
+                "ground_cell_size", "cell_size_mode", "body_cell_size", "edge_cell_size",
+                "min_cell_size", "ground_refine", "refinement_thickness", "cell_budget_enforced"):
         if key in user_mesh:
             result[key] = user_mesh[key]
     return result

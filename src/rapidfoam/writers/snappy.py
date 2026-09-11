@@ -22,6 +22,8 @@ from rapidfoam.geometry import (
     face_assignments,
     face_role,
     flow_axis_index_sign,
+    resolve_cell_sizes,
+    resolve_first_layer_fraction,
     up_axis_index,
 )
 from rapidfoam.writers.base import FOOTER, bool_str, foam_header
@@ -130,7 +132,13 @@ mergePatchPairs ();
 # ============================================================
 
 def write_snappy_hex_mesh_dict(cfg: dict[str, Any], case_dir: Path) -> None:
-    """Generate snappyHexMeshDict — universal settings."""
+    """Generate snappyHexMeshDict — universal settings.
+
+    Levels stay snappy-native (``surface_level = [body, feature]``,
+    ``edge_level`` for the extracted feature edges); `resolve_cell_sizes` maps
+    the same intent that the cfMesh writer uses, including
+    ``layers.first_layer_mode: "absolute"`` -> a relative thickness.
+    """
     mesh = cfg["mesh_params"]
     stl_names = cfg["stl_names"]
     patches = cfg["patches"]
@@ -143,6 +151,7 @@ def write_snappy_hex_mesh_dict(cfg: dict[str, Any], case_dir: Path) -> None:
     edge_level = mesh["edge_level"]
     regions = mesh["refinement_regions"]  # box-based (wake only)
     distance_levels = mesh.get("distance_levels", [])  # distance-based shells
+    sizes = resolve_cell_sizes(mesh)
 
     # Geometry block
     geo_lines = []
@@ -185,6 +194,10 @@ def write_snappy_hex_mesh_dict(cfg: dict[str, Any], case_dir: Path) -> None:
     # Layer surfaces
     layer_lines = []
     n_layers = layers["n_layers"]
+    # Absolute first-layer intent (layers.first_layer_mode: "absolute") becomes
+    # snappy's relative firstLayerThickness against the body cell. snappy clamps
+    # the real stack, so treat the emitted fraction as nominal.
+    first_layer_fraction = round(resolve_first_layer_fraction(layers, sizes["body"]), 4)
     for name in stl_names:
         layer_lines.append(f'        "{name}" {{ nSurfaceLayers {n_layers}; }}')
     face_assignments = _get_face_assignments(cfg)
@@ -296,7 +309,7 @@ addLayersControls
 {chr(10).join(layer_lines)}
     }}
     expansionRatio          {layers.get("expansion_ratio", 1.2)};
-    firstLayerThickness     {layers.get("first_layer_thickness", 0.3)};
+    firstLayerThickness     {first_layer_fraction};
     minThickness            {layers.get("min_thickness", 0.05)};
     nGrow                   {layers.get("nGrow", 0)};
     featureAngle            {layers.get("featureAngle", 170)};

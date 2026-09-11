@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from rapidfoam.geometry import parse_axis
+from rapidfoam.mesher_profiles import resolve_mesher
 
 MONITOR_CLEANUP = """\
 stop_monitor() {
@@ -208,9 +209,9 @@ def write_scripts(cfg: dict[str, Any], case_dir: Path) -> None:
         _convergence_monitor_script(cfg),
     )
 
-    mesher = cfg.get("mesher", "cfmesh")
-    mesher_type = mesher.get("type", "cfmesh") if isinstance(mesher, dict) else str(mesher)
-    feature_angle = cfg.get("cfmesh", {}).get("feature_angle", 45)
+    mesher_type = resolve_mesher(cfg)
+    cfmesh_cfg = cfg.get("cfmesh", {})
+    feature_angle = cfmesh_cfg.get("feature_angle", 45) if isinstance(cfmesh_cfg, dict) else 45
 
     if mesher_type == "cfmesh":
         mesh_block_parallel = f"""# Mesh (cfMesh cartesianMesh)

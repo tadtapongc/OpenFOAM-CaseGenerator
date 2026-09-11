@@ -10,10 +10,10 @@
     "_stl_files": "ASCII STL geometry files located in the stl/ directory",
     "stl_files": ["geometry.stl"],
 
-    "_fidelity": "Presets: 'fast' (~2-4M cells, 10 min), 'standard' (~6-9M cells, 45 min, RECOMMENDED for general aerodynamics), 'fine' (~12-16M cells, 2-4 hrs)",
+    "_fidelity": "Preset resolution: 'fast' (iteration), 'standard' (recommended), 'fine' (report). The cell count also depends on the mesher and geometry: a 'standard' Formula Student car produced ~0.45M cells with snappy and ~4.4M with cfMesh, so tune mesh_params.body_cell_size (or body_cell_size) and check 'cells:' in log.checkMesh.",
     "fidelity": "standard",
 
-    "_mesher_comment": "Mesher engine: 'cfmesh' (RECOMMENDED for FSAE & aircraft: 3-8x faster, robust boundary layers) or 'snappy' (classic multi-stage)",
+    "_mesher_comment": "Mesher engine: 'cfmesh' (robust boundary layers) or 'snappy' (classic multi-stage). Engine-specific knobs live in src/rapidfoam/mesher_profiles/<mesher>.json (overridable per project in configs/meshers/<mesher>.json). The same case file can drive either engine: rapidfoam -c configs/config.json --mesher snappy",
     "mesher": "cfmesh",
 
     "_section_flow": "--- 2. Flow & Operating Conditions ---",
@@ -78,8 +78,19 @@
         "openfoam_source": "$HOME/OpenFOAM/OpenFOAM-v2606/etc/bashrc"
     },
 
-    "_section_overrides": "--- 7. Expert Overrides (Optional) ---",
-    "_overrides_note": "All fields below have built-in defaults in fidelity presets. Uncomment only if manual tuning is needed.",
+    "_section_overrides": "--- 7. Expert Overrides & Mesher-Native Blocks (Optional) ---",
+    "_overrides_note": "All fields below have built-in defaults in the fidelity presets plus the mesher profile. Uncomment only if manual tuning is needed.",
+    "_mesher_blocks_note": "Anything the two engines read differently is expressed in mesh_params_<mesher> (this case only) or configs/meshers/<mesher>.json (whole project). cfMesh-native: body_cell_size/edge_cell_size/min_cell_size (metres), ground_refine, cfmesh.layer_mode, cfmesh.optimise_layer. snappy-native: surface_level/edge_level, nCellsBetweenLevels, maxGlobalCells, distance_levels.",
+    "mesh_params_cfmesh": {
+        "_body_cell_size": 0.00625,
+        "_edge_cell_size": 0.003125,
+        "_min_cell_size": 0.003125,
+        "_ground_refine": false
+    },
+    "mesh_params_snappy": {
+        "_surface_level": [4, 5],
+        "_maxGlobalCells": 2000000
+    },
     "_optional_overrides_example": {
         "solver": {
             "_end_time": 800,
@@ -102,7 +113,16 @@
             "_n_layers": 5,
             "_expansion_ratio": 1.2,
             "_first_layer_thickness": 0.3,
-            "_min_thickness": 0.05
+            "_first_layer_mode": "relative",
+            "_first_layer_height": 0.0016,
+            "_min_thickness": 0.05,
+            "_ground_layers": false
+        },
+        "cfmesh": {
+            "_optimise_layer": "auto",
+            "_layer_mode": "patch_only",
+            "_ground_refine": false,
+            "_refinement_thickness": 0.05
         },
         "fluid": {
             "_rho": 1.225,

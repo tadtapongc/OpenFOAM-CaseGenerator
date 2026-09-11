@@ -10,7 +10,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from rapidfoam.geometry import face_assignments, face_role
+from rapidfoam.geometry import (
+    face_assignments,
+    resolve_cell_sizes,
+    resolve_first_layer_height,
+)
 from rapidfoam.writers.base import FOOTER, foam_header
 
 
@@ -106,46 +110,70 @@ def generate_domain_stl(
     return domain_stl_path
 
 
+def _resolve_optimise_layer(cfmesh_cfg: dict[str, Any], fidelity: str) -> bool:
+    """Whether cfMesh runs its layer optimisation pass.
+
+    The optimisation pass (plus normal smoothing) is the most expensive cfMesh
+    stage, so `optimise_layer: "auto"` keeps it for report-quality meshes
+    (standard/fine) and skips it for fast/draft iteration.
+    """
+    value = cfmesh_cfg.get("optimise_layer", "auto")
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in ("true", "yes", "1"):
+        return True
+    if text in ("false", "no", "0"):
+        return False
+    return str(fidelity).lower() not in ("fast", "draft", "iterate")
+
+
 def write_mesh_dict(cfg: dict[str, Any], case_dir: Path) -> None:
-    """Generate system/meshDict for cfMesh (cartesianMesh)."""
+    """Generate system/meshDict for cfMesh (cartesianMesh).
+
+    Cell sizes come from `resolve_cell_sizes`, so the body refinement now means
+    the same thing as in the snappy writer: body cells use ``surface_level[0]``
+    (the finer level is only used for the feature-edge floor), ``minCellSize``
+    is the feature-edge cell instead of a sub-millimetre sliver, and the ground
+    plane is only refined when `cfmesh.ground_refine` asks for it.
+    """
     mesh = cfg["mesh_params"]
     stl_names = cfg["stl_names"]
     patches = cfg["patches"]
     layers = cfg.get("layers", {})
-    fidelity = cfg.get("fidelity", "standard")
+    fidelity = str(cfg.get("fidelity", "standard")).lower()
+    cfmesh_cfg = cfg.get("cfmesh", {}) if isinstance(cfg.get("cfmesh", {}), dict) else {}
+    flow = cfg.get("flow", {})
 
-    base_cell = float(mesh.get("base_cell_size", 0.10))
-    surface_level = mesh.get("surface_level", [4, 5])
-    edge_level = mesh.get("edge_level", 6)
+    sizes = resolve_cell_sizes(mesh)
+    base_cell = sizes["base"]
+    body_cell = sizes["body"]
+    min_cell = sizes["min"]
+    refinement_thickness = mesh.get("refinement_thickness", cfmesh_cfg.get("refinement_thickness"))
 
-    # Calculate absolute cell sizes from levels
-    surf_cell_coarse = round(base_cell / (2 ** surface_level[0]), 6)
-    surf_cell_fine = round(base_cell / (2 ** surface_level[1]), 6)
-    edge_cell = round(base_cell / (2 ** edge_level), 6)
-
-    min_cell = min(edge_cell, surf_cell_fine)
     # Default outer boundary cell size: keep wind tunnel walls coarse at base_cell
     boundary_cell = float(mesh.get("boundary_cell_size", base_cell))
 
-    # Local refinement for vehicle surfaces
-    local_ref_lines = []
-    for name in stl_names:
-        local_ref_lines.append(f"""\
-        {name}
-        {{
-            cellSize {surf_cell_fine};
-        }}""")
+    def _local_ref(name: str, cell: float) -> str:
+        lines = [f"        {name}", "        {"]
+        lines.append(f"            cellSize {round(cell, 6)};")
+        if refinement_thickness:
+            lines.append(f"            refinementThickness {float(refinement_thickness):.6g};")
+        lines.append("        }")
+        return "\n".join(lines)
 
-    # Ground refinement: if ground vehicle (FSAE / auto), refine road underneath
-    flow = cfg.get("flow", {})
-    if flow.get("ground", False):
+    # Local refinement for vehicle surfaces. cfMesh refines cells cut by feature
+    # edges one level finer on its own (body/2), which is where edge_level lands.
+    local_ref_lines = [_local_ref(name, body_cell) for name in stl_names]
+
+    # Ground refinement is opt-in so cfMesh matches snappy, which never refines
+    # the road plane (refining the whole road also forced a wide transition
+    # volume under the car).
+    ground_refine = bool(mesh.get("ground_refine", cfmesh_cfg.get("ground_refine", False)))
+    if flow.get("ground", False) and ground_refine:
         ground_patch = patches.get("ground", "ground")
         ground_cell = float(mesh.get("ground_cell_size", round(base_cell / 2.0, 6)))
-        local_ref_lines.append(f"""\
-        {ground_patch}
-        {{
-            cellSize {ground_cell};
-        }}""")
+        local_ref_lines.append(_local_ref(ground_patch, ground_cell))
 
     # Refinement regions (wake boxes)
     regions = mesh.get("refinement_regions", [])
@@ -173,32 +201,35 @@ def write_mesh_dict(cfg: dict[str, Any], case_dir: Path) -> None:
             cellSize {reg_cell};
         }}""")
 
-    # Boundary layers
-    n_layers = layers.get("n_layers", 5)
+    # Boundary layers ------------------------------------------------------
+    n_layers = int(layers.get("n_layers", 5))
     expansion_ratio = layers.get("expansion_ratio", 1.2)
-    first_layer_ratio = layers.get("first_layer_thickness", 0.3)
-    # Estimate first layer thickness in meters from surface fine cell
-    first_layer_thickness = round(surf_cell_fine * first_layer_ratio, 6)
+    # Absolute first-layer height: relative mode = first_layer_thickness x body
+    # cell (snappy's convention), absolute mode = layers.first_layer_height.
+    # cfMesh treats it as an upper bound, so a coarser body cell — not a bigger
+    # number here — is what actually raises y+ into the wall-function range.
+    first_layer_thickness = round(resolve_first_layer_height(layers, body_cell), 6)
 
-    patch_layer_lines = []
-    for name in stl_names:
-        patch_layer_lines.append(f"""\
+    # 'patch_only' (default) writes nLayers 0 at the top level, so only the
+    # patches listed in patchBoundaryLayers are layered: the road plane stays
+    # unlayered unless layers.ground_layers is true. 'global' restores the
+    # legacy behaviour that layered every patch, the ground included.
+    layer_mode = str(cfmesh_cfg.get("layer_mode", "patch_only")).strip().lower()
+    header_n_layers = n_layers if layer_mode == "global" else 0
+    ground_patch_name = patches.get("ground", "ground")
+
+    def _patch_layers(name: str) -> str:
+        return f"""\
             {name}
             {{
                 nLayers {n_layers};
                 thicknessRatio {expansion_ratio};
                 maxFirstLayerThickness {first_layer_thickness};
-            }}""")
+            }}"""
 
+    patch_layer_lines = [_patch_layers(name) for name in stl_names]
     if layers.get("ground_layers", False):
-        ground_patch = patches.get("ground", "ground")
-        patch_layer_lines.append(f"""\
-            {ground_patch}
-            {{
-                nLayers {n_layers};
-                thicknessRatio {expansion_ratio};
-                maxFirstLayerThickness {first_layer_thickness};
-            }}""")
+        patch_layer_lines.append(_patch_layers(ground_patch_name))
 
     # Rename boundary block
     PATCH_TYPES = {
@@ -227,27 +258,40 @@ def write_mesh_dict(cfg: dict[str, Any], case_dir: Path) -> None:
 
     boundary_layers_block = ""
     if n_layers > 0:
-        boundary_layers_block = f"""\
-boundaryLayers
-{{
-    nLayers             {n_layers};
-    thicknessRatio      {expansion_ratio};
-    maxFirstLayerThickness {first_layer_thickness};
-
-    patchBoundaryLayers
-    {{
-{chr(10).join(patch_layer_lines)}
-    }}
-
+        optimisation = cfmesh_cfg.get("optimisation", {})
+        optimisation = optimisation if isinstance(optimisation, dict) else {}
+        if _resolve_optimise_layer(cfmesh_cfg, fidelity):
+            optimise_block = f"""
     optimiseLayer 1;
 
     optimisationParameters
     {{
-        nSmoothNormals      3;
-        maxNumIterations    2;
-        featureSizeFactor   0.4;
-        reCalculateNormals  1;
-        relThicknessTol     0.1;
+        nSmoothNormals      {optimisation.get("nSmoothNormals", 3)};
+        maxNumIterations    {optimisation.get("maxNumIterations", 2)};
+        featureSizeFactor   {optimisation.get("featureSizeFactor", 0.4)};
+        reCalculateNormals  {optimisation.get("reCalculateNormals", 1)};
+        relThicknessTol     {optimisation.get("relThicknessTol", 0.1)};
+    }}"""
+        else:
+            optimise_block = "\n    optimiseLayer 0;"
+
+        layer_comment = (
+            "// nLayers 0 here => only the patches listed below are layered"
+            if header_n_layers == 0
+            else "// nLayers applies to every patch; entries below override it"
+        )
+
+        boundary_layers_block = f"""\
+boundaryLayers
+{{
+    {layer_comment}
+    nLayers             {header_n_layers};
+    thicknessRatio      {expansion_ratio};
+    maxFirstLayerThickness {first_layer_thickness};{optimise_block}
+
+    patchBoundaryLayers
+    {{
+{chr(10).join(patch_layer_lines)}
     }}
 }}
 """

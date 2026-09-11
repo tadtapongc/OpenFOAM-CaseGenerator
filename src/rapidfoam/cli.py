@@ -36,6 +36,8 @@ Examples:
                         help="Create starter project structure")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="Verbose output")
+    parser.add_argument("--mesher", choices=("cfmesh", "snappy"), default=None,
+                        help="Override the config's mesher engine and load its native profile")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -53,7 +55,7 @@ Examples:
         parser.print_help()
         sys.exit(1)
 
-    _do_generate(Path(args.config), project_dir, dry_run=args.dry_run)
+    _do_generate(Path(args.config), project_dir, dry_run=args.dry_run, mesher=args.mesher)
 
 
 def _do_init(project_dir: Path) -> None:
@@ -92,8 +94,17 @@ def _do_init(project_dir: Path) -> None:
     print("    3. python setup_case.py configs/config.json")
 
 
-def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> None:
-    """Generate a complete OpenFOAM case."""
+def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False,
+                 mesher: str | None = None) -> None:
+    """Generate a complete OpenFOAM case.
+
+    Args:
+        cfg_path: Case config JSON.
+        project_dir: Project root (cases/, stl/, configs/meshers/).
+        dry_run: Preview only.
+        mesher: Optional CLI override ("cfmesh" | "snappy"). It selects the
+            mesher-native profile, so one config can drive either engine.
+    """
     if hasattr(sys.stdout, "reconfigure"):
         try:
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -105,10 +116,13 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
         compute_mesh_params,
         face_assignments,
         face_role,
+        resolve_cell_sizes,
+        resolve_first_layer_height,
         turbulence_values,
         vec_str,
         velocity_vector,
     )
+    from rapidfoam.mesher_profiles import project_profile_path, resolve_mesher
     from rapidfoam.stl_utils import copy_stl, stl_info
 
     if not cfg_path.exists():
@@ -116,7 +130,7 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
 
     # Load and validate config
     try:
-        cfg = load_config(cfg_path)
+        cfg = load_config(cfg_path, mesher=mesher, project_dir=project_dir)
     except (OSError, ValueError) as exc:
         sys.exit(f"ERROR: {exc}")
     
@@ -271,11 +285,23 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
         print(f"    Distance shells: {shells}")
     for r in mesh.get("refinement_regions", []):
         print(f"    Region {r['name']}: Level {r['level']}")
+    mesher_type = resolve_mesher(cfg)
+    sizes = resolve_cell_sizes(mesh)
+    layers_cfg = cfg.get("layers", {})
+    first_layer = resolve_first_layer_height(layers_cfg, sizes["body"])
+    print(f"    Body / edge cell:  {sizes['body']*1000:.2f} / {sizes['edge']*1000:.2f} mm "
+          f"(floor {sizes['min']*1000:.2f} mm)")
+    print(f"    First layer:       {first_layer*1000:.2f} mm x {layers_cfg.get('n_layers', 0)} layers")
+    if not mesh.get("cell_budget_enforced", mesher_type == "snappy"):
+        print("    Note: cfMesh has no maxGlobalCells cap — the cell count follows the body/edge "
+              "cell size, cfmesh.ground_refine and cfmesh.optimise_layer.")
 
     div_u_scheme = cfg.get("schemes", {}).get("div_U", "bounded Gauss limitedLinear 1")
-    mesher = cfg.get("mesher", "cfmesh")
-    mesher_type = mesher.get("type", "cfmesh") if isinstance(mesher, dict) else str(mesher)
     mesher_name = "cfMesh (cartesianMesh)" if mesher_type == "cfmesh" else "snappyHexMesh"
+    profile_note = ""
+    if project_profile_path(mesher_type, project_dir).is_file():
+        profile_note = f" [configs/meshers/{mesher_type}.json]"
+
     if mesher_type == "cfmesh" and any(
         all_min[i] <= box["min"][i] or all_max[i] >= box["max"][i]
         for i in range(3)
@@ -287,7 +313,7 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
     # Dry run — stop here
     if dry_run:
         print(f"\n  DRY RUN — would generate: {case_dir}")
-        print(f"    Mesher:     {mesher_name}")
+        print(f"    Mesher:     {mesher_name}{profile_note}")
         print(f"    Velocity:   {cfg['flow']['velocity']:.2f} m/s  U={vec_str(vel)}")
         print(f"    k={k:.5g}  ω={omega:.5g}  νt={nut:.5g}")
         print(f"    Surfaces:   {', '.join(stl_names)}")
@@ -297,7 +323,7 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False) -> No
     # Generate case
     print(f"\n{'='*60}")
     print(f"  Generating: {case_dir}")
-    print(f"  Mesher:   {mesher_name}")
+    print(f"  Mesher:   {mesher_name}{profile_note}")
     print(f"  Velocity: {cfg['flow']['velocity']:.2f} m/s | Cell: {mesh['base_cell_size']} m")
     print(f"  Surfaces: {', '.join(stl_names)}")
     print(f"  Pipeline: {mesher_name} → potentialFoam → simpleFoam ({end_time} iters, {div_u_scheme})")

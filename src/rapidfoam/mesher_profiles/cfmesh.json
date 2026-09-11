@@ -1,0 +1,42 @@
+{
+    "_note": "cfMesh (cartesianMesh) native meshing profile. Merged only when mesher = cfmesh.",
+    "_merge_order": "DEFAULT_CONFIG -> this profile -> case config -> case mesh_params_cfmesh -> case overrides",
+    "_override_how": "Repeat any key in your case config (e.g. \"cfmesh\": {\"ground_refine\": true}), or drop configs/meshers/cfmesh.json for a project-local override.",
+    "mesher": "cfmesh",
+
+    "mesh_params": {
+        "_cell_size_mode": "'absolute' = cfMesh-native: localRefinement takes cellSize in metres. Derivation: body = mesh_params.body_cell_size, else base_cell_size / 2**surface_level[0] (the coarse level, matching snappy); edge = mesh_params.edge_cell_size, else base_cell_size / 2**edge_level. cfMesh refines feature-edge cells to body/2 on its own, so keep edge_cell_size = body/2.",
+        "cell_size_mode": "absolute",
+        "_min_cell_size": "Optional floor for the smallest cfMesh cell. Defaults to the feature-edge cell size (base_cell_size / 2**edge_level), which is also snappy's feature-edge level.",
+        "_cell_budget": "cfMesh has no maxGlobalCells/maxLocalCells equivalent, so the budget is not enforced. Cost is controlled by body/edge cell size, min_cell_size, ground_refine, the wake box levels and cfmesh.optimise_layer instead.",
+        "cell_budget_enforced": false
+    },
+
+    "cfmesh": {
+        "workflow": "cartesianMesh",
+        "feature_angle": 45,
+
+        "_optimise_layer": "true | false | 'auto' (auto = on for fidelity standard/fine, off for fast). Layer optimisation plus normal smoothing is the most expensive cfMesh pass; draft/iteration meshes do not need it.",
+        "optimise_layer": "auto",
+        "optimisation": {
+            "nSmoothNormals": 3,
+            "maxNumIterations": 2,
+            "featureSizeFactor": 0.4,
+            "reCalculateNormals": 1,
+            "relThicknessTol": 0.1
+        },
+
+        "_layer_mode": "'patch_only' = top-level nLayers 0 plus per-patch entries, so only the STL surfaces (and the ground when layers.ground_layers is true) receive layers. 'global' = legacy behaviour, which layered every patch including the road.",
+        "layer_mode": "patch_only",
+
+        "_ground_refine": "true refines the road patch to mesh_params.ground_cell_size (default base_cell_size/2). false matches the snappy writer, which never refines the ground plane.",
+        "ground_refine": false,
+
+        "_refinement_thickness": "Optional: emit 'refinementThickness' inside every localRefinement entry to grow a distance shell around the surfaces. cfMesh's own transition is what dominates cell count, so this is the main dial for matching snappy's distance_levels."
+    },
+
+    "layers": {
+        "_first_layer_mode": "'relative' = first_layer_thickness x body cell size (body = surface_level[0] level; the pre-1.2 writer used the finer surface cell, which halved the first layer). 'absolute' = layers.first_layer_height in metres; cfMesh treats it as an upper bound and still compresses the stack to fit the local cell.",
+        "first_layer_mode": "relative"
+    }
+}

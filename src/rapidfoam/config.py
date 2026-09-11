@@ -13,6 +13,12 @@ import math
 from pathlib import Path
 from typing import Any
 
+from rapidfoam.mesher_profiles import (
+    SUPPORTED_MESHERS,
+    load_mesher_profile,
+    resolve_mesher,
+)
+
 log = logging.getLogger(__name__)
 
 # ============================================================
@@ -251,8 +257,12 @@ def deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
-def load_config(config_path: str | Path) -> dict[str, Any]:
-    """Load user config JSON and merge with universal defaults.
+def load_config(
+    config_path: str | Path,
+    mesher: str | None = None,
+    project_dir: str | Path | None = None,
+) -> dict[str, Any]:
+    """Load user config JSON and merge with defaults and the mesher profile.
 
     User only needs to specify:
       - case_name
@@ -260,7 +270,19 @@ def load_config(config_path: str | Path) -> dict[str, Any]:
       - flow (velocity, direction, ground)
       - outputs (drag_axis, downforce_axis)
 
-    Everything else uses universal defaults.
+    Everything else uses universal defaults plus the mesher-native profile
+    (`src/rapidfoam/mesher_profiles/<mesher>.json`, overlaid by an optional
+    `configs/meshers/<mesher>.json`), so one case config can drive either
+    engine while each writer still gets its own native settings.
+
+    Merge order (later wins): DEFAULT_CONFIG -> mesher profile -> case config ->
+    case `mesh_params_<mesher>` block -> case `overrides` block.
+
+    Args:
+        config_path: Case config JSON.
+        mesher: Optional CLI override ("cfmesh" | "snappy"); it selects the
+            profile and beats the config's own "mesher" key.
+        project_dir: Project root used to find `configs/meshers/<mesher>.json`.
     """
     config_path = Path(config_path)
     with open(config_path, encoding="utf-8") as f:
@@ -277,6 +299,23 @@ def load_config(config_path: str | Path) -> dict[str, Any]:
         raise ValueError("'overrides' must be an object")
 
     cfg = deep_merge(DEFAULT_CONFIG, user_cfg)
+
+    # Mesher profile sits directly under the case config: it supplies the
+    # engine-native defaults for every key the case file did not state.
+    mesher_key = str(mesher).strip().lower() if mesher else resolve_mesher(cfg)
+    if mesher:
+        cfg["mesher"] = mesher_key
+    cfg = deep_merge(load_mesher_profile(mesher_key, project_dir), cfg)
+
+    # Inline per-mesher tuning blocks, e.g. "mesh_params_cfmesh": { ... }
+    inline: dict[str, Any] = {}
+    for key in [k for k in cfg if k.startswith("mesh_params_")]:
+        block = cfg.pop(key)
+        if key == f"mesh_params_{mesher_key}" and isinstance(block, dict):
+            inline = deep_merge(inline, block)
+    if inline:
+        cfg = deep_merge(cfg, {"mesh_params": inline})
+
     if overrides:
         cfg = deep_merge(cfg, overrides)
 
@@ -337,13 +376,10 @@ def validate(cfg: dict[str, Any], project_dir: Path) -> tuple[list[str], list[st
 
     # Mesher engine
     mesher = cfg.get("mesher", "cfmesh")
-    if isinstance(mesher, dict):
-        mesher_type = mesher.get("type", "cfmesh")
-    elif isinstance(mesher, str):
-        mesher_type = mesher
-    else:
+    mesher_type = resolve_mesher(cfg)
+    if not isinstance(mesher, (str, dict)):
         mesher_type = None
-    if mesher_type not in ("snappy", "cfmesh"):
+    if mesher_type not in SUPPORTED_MESHERS:
         errors.append("mesher must be 'snappy' or 'cfmesh'")
 
     if cfg.get("turbulence", {}).get("model", "kOmegaSST") != "kOmegaSST":
@@ -430,6 +466,58 @@ def validate(cfg: dict[str, Any], project_dir: Path) -> tuple[list[str], list[st
                              or not all(isinstance(n, int) and not isinstance(n, bool) and n >= 0 for n in level)
                              or level[0] > level[1]):
         errors.append("mesh_params.surface_level must be two ordered nonnegative integers")
+    for key in ("body_cell_size", "edge_cell_size", "min_cell_size", "refinement_thickness"):
+        positive("mesh_params", key)
+
+    # ---- Mesher-profile keys (src/rapidfoam/mesher_profiles/<mesher>.json) ----
+    mode = mesh.get("cell_size_mode")
+    if mode is not None and str(mode).lower() not in ("absolute", "relative_levels"):
+        errors.append("mesh_params.cell_size_mode must be 'absolute' or 'relative_levels'")
+    if "ground_refine" in mesh and not isinstance(mesh["ground_refine"], bool):
+        errors.append("mesh_params.ground_refine must be true or false")
+
+    cfmesh_cfg = cfg.get("cfmesh", {})
+    if not isinstance(cfmesh_cfg, dict):
+        errors.append("'cfmesh' must be an object")
+    else:
+        optimise = cfmesh_cfg.get("optimise_layer", "auto")
+        valid_optimise = isinstance(optimise, bool) or (
+            isinstance(optimise, str) and optimise.strip().lower() in ("auto", "true", "false")
+        )
+        if not valid_optimise:
+            errors.append("cfmesh.optimise_layer must be true, false or 'auto'")
+        enum_keys = {
+            "layer_mode": ("patch_only", "global"),
+        }
+        for key, allowed in enum_keys.items():
+            if key in cfmesh_cfg and str(cfmesh_cfg[key]).lower() not in allowed:
+                errors.append(f"cfmesh.{key} must be one of {', '.join(repr(a) for a in allowed)}")
+        if "ground_refine" in cfmesh_cfg and not isinstance(cfmesh_cfg["ground_refine"], bool):
+            errors.append("cfmesh.ground_refine must be true or false")
+        positive("cfmesh", "refinement_thickness")
+        positive("cfmesh", "feature_angle")
+
+    layers_cfg = cfg.get("layers", {})
+    first_layer_mode = str(layers_cfg.get("first_layer_mode", "relative")).lower()
+    if first_layer_mode not in ("relative", "absolute"):
+        errors.append("layers.first_layer_mode must be 'relative' or 'absolute'")
+    elif first_layer_mode == "absolute" and not layers_cfg.get("first_layer_height"):
+        errors.append("layers.first_layer_height (metres) is required when layers.first_layer_mode is 'absolute'")
+    positive("layers", "first_layer_height")
+
+    # Keys that only one engine reads — flag them instead of silently ignoring
+    if mesher_type == "cfmesh":
+        ignored = sorted(
+            key for key in ("maxGlobalCells", "maxLocalCells", "nCellsBetweenLevels",
+                            "minRefinementCells", "distance_levels", "resolveFeatureAngle")
+            if key in mesh
+        )
+        if ignored:
+            warnings.append(
+                f"cfMesh ignores {', '.join(ignored)} (snappy-only keys). Control cfMesh cost with "
+                "mesh_params.body_cell_size / edge_cell_size / min_cell_size, cfmesh.ground_refine, "
+                "cfmesh.optimise_layer and the wake box levels instead."
+            )
 
     # Ground settings precedence warning
     if cfg.get("ground_plane") is not None and cfg.get("ground_clearance") is not None:

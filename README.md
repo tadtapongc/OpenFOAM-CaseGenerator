@@ -18,7 +18,8 @@ RapidFOAM streamlines the OpenFOAM workflow for external vehicle aerodynamics: C
 
 - **Case Directory Generation**: Generates complete OpenFOAM case structures (`0/`, `constant/`, `system/`) and execution scripts from a single JSON configuration.
 - **Domain & Mesh Parameter Derivation**: Derives wind tunnel dimensions from STL bounding boxes, creates two-stage wake refinement regions (`nearWakeBox`, `farWakeBox`), distance shells, and boundary layer controls.
-- **Mesh Fidelity Presets**: Predefined configuration presets (`fast`, `standard`, `fine`) targeting different cell count budgets and turnaround times.
+- **Mesh Fidelity Presets**: Predefined configuration presets (`fast`, `standard`, `fine`) targeting different resolution levels and turnaround times.
+- **Mesher-Native Profiles**: One case config drives either engine; cfMesh and snappy keep their own native settings in `src/rapidfoam/mesher_profiles/`, selectable with `--mesher`.
 - **Symmetry Plane Support**: Half-car simulations (e.g. `x = 0`) cut mesh cell count roughly in half, with automatic 2x force scaling in summaries and comparison tables.
 - **Web Studio Interface**: Browser-based UI with Three.js 3D domain visualization, interactive parameter editor, real-time convergence charts, and remote SLURM cluster job submission over SSH.
 - **Convergence Auto-Stop**: Background monitor tracks rolling force variation and signals `stopAt writeNow;` once drag and downforce stabilize within a user-defined threshold (default +/- 0.5%).
@@ -237,13 +238,43 @@ Key settings available in `configs/config.json`:
 
 ### Mesh Fidelity Presets
 
-| Preset | Base Cell | Surface Levels | Edge Level | Boundary Layers | Max Iterations | Target Cells | Estimated Runtime* |
+| Preset | Base Cell | Surface Levels | Edge Level | Boundary Layers | Max Iterations | Target Cells† | Estimated Runtime* |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `fast` | 0.15 m | [3, 4] | 5 | 3 | 800 | ~2–4 M | ~5–10 min |
-| `standard` | 0.10 m | [4, 5] | 6 | 5 | 1500 | ~6–9 M | ~30–60 min |
-| `fine` | 0.08 m | [5, 6] | 7 | 6 | 3000 | ~12–16 M | ~2–4 hrs |
+| `fast` | 0.15 m | [3, 4] | 5 | 3 | 800 | ~0.2–4 M | ~5–10 min |
+| `standard` | 0.10 m | [4, 5] | 6 | 5 | 1500 | ~0.5–9 M | ~6 min – 3.5 hrs |
+| `fine` | 0.08 m | [5, 6] | 7 | 6 | 3000 | ~2–16 M | ~2–4 hrs |
 
-*\* Runtime estimates based on typical Formula Student half-car models on a 32-core cluster node. Actual solve time depends on geometry complexity, core count, and convergence rate.*
+*\* Runtime estimates for typical Formula Student half-car models on a 32-core cluster node. Solver time scales with cell count, so the mesher dominates the spread.*<br>*† Cell counts depend strongly on the mesher: on one A/B (identical config, STL and 32-core node) a `standard` run produced **449 k cells / 6 min** with snappy and **4.4 M cells / 3.5 hrs** with cfMesh. Read `cells:` from `log.checkMesh` after the first run, then tune `mesh_params.body_cell_size` (or `body_cell_size`) for the next iteration.*
+
+### Mesher Engines & Profiles
+
+Both engines are driven from the **same case config**; the engine-specific settings live in one tracked profile per mesher:
+
+```text
+src/rapidfoam/mesher_profiles/cfmesh.json    # cfMesh-native defaults (shipped)
+src/rapidfoam/mesher_profiles/snappy.json    # snappy-native defaults (shipped)
+configs/meshers/<mesher>.json                # optional project-local override
+```
+
+Merge order is `DEFAULT_CONFIG -> mesher profile -> case config -> mesh_params_<mesher> -> overrides`, so a case file always wins over a profile. Anything the engines read differently has a home there:
+
+| Intent | snappy-native | cfMesh-native |
+| :--- | :--- | :--- |
+| Surface resolution | `surface_level: [body, feature]` levels | `body_cell_size` / `edge_cell_size` in metres |
+| Smallest cell | `edge_level` for feature edges | `min_cell_size` (defaults to the edge cell) |
+| Ground plane | never refined (layered only if `layers.ground_layers`) | `cfmesh.ground_refine` (default `false`) |
+| Boundary layers | `layers` block, `first_layer_mode: "relative"` | `cfmesh.layer_mode: "patch_only"`, `optimise_layer: "auto"` |
+| Cell budget | `maxGlobalCells` (enforced) | none — cost follows cell size, `ground_refine`, `optimise_layer` |
+
+Run the same config through either engine to A/B them:
+
+```bash
+rapidfoam -c configs/config.json                  # mesher from the config
+rapidfoam -c configs/config.json --mesher snappy  # one config, both engines
+```
+
+For fast design iteration use `fidelity: "fast"`: `cfmesh.optimise_layer: "auto"` skips cfMesh's layer-optimisation pass, the ground is not refined, and only the STL surfaces receive boundary layers. Validate a shortlisted design at `standard`/`fine` (or cross-check with `--mesher snappy`).
+
 
 ---
 
@@ -308,6 +339,7 @@ RapidFOAM/
 │   │   ├── compare.py  # Multi-case comparison table
 │   │   ├── residuals.py# Residual parser
 │   │   └── convergence_monitor.py # Standalone convergence auto-stop monitor
+│   ├── mesher_profiles/ # Engine-native meshing profiles (cfmesh.json, snappy.json)
 │   └── web/            # RapidFOAM Web Studio
 │       ├── server.py   # FastAPI backend & static file server
 │       ├── ssh_client.py # Paramiko SSH/SFTP client for remote SLURM clusters

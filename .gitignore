@@ -20,6 +20,10 @@ stl/*
 configs/*
 !configs/config.json
 
+# Mesher-native profile overrides are shared on purpose (A/B reproducibility)
+!configs/meshers/
+!configs/meshers/*.json
+
 # ============================================================
 # OpenFOAM generated files (safety net)
 # ============================================================

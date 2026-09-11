@@ -65,6 +65,9 @@ cfd-monitor = "rapidfoam.postproc.convergence_monitor:main"
 cfd-web = "rapidfoam.web.server:main"
 
 [tool.hatch.build.targets.wheel]
+# `src/rapidfoam` is packaged as a whole, so the mesher profiles in
+# src/rapidfoam/mesher_profiles/*.json ship with the wheel automatically
+# (they are read at runtime by rapidfoam.mesher_profiles.load_mesher_profile).
 packages = ["src/rapidfoam"]
 
 [tool.ruff]

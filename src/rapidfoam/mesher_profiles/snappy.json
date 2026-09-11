@@ -1,0 +1,18 @@
+{
+    "_note": "snappyHexMesh native meshing profile. Merged only when mesher = snappy.",
+    "_merge_order": "DEFAULT_CONFIG -> this profile -> case config -> case mesh_params_snappy -> case overrides",
+    "_override_how": "Repeat any key in your case config (e.g. \"snap\": {\"nSolveIter\": 300}), or drop configs/meshers/snappy.json for a project-local override.",
+    "mesher": "snappy",
+
+    "mesh_params": {
+        "_cell_size_mode": "'relative_levels' = snappy-native: level n means base_cell_size / 2**n, with surface_level = [body level, feature level] and edge_level for the extracted feature edges. Setting mesh_params.body_cell_size in the case config switches to an absolute intent and the levels are derived from it.",
+        "cell_size_mode": "relative_levels",
+        "_cell_budget": "snappy caps the mesh with maxGlobalCells/maxLocalCells (ocd 3-8x the expected cell count is a sane cap; the fidelity presets already set it).",
+        "cell_budget_enforced": true
+    },
+
+    "layers": {
+        "_first_layer_mode": "'relative' = firstLayerThickness as a fraction of the local cell size (native snappy). 'absolute' = layers.first_layer_height in metres, converted to a fraction of the body cell; snappy clamps the real stack, so treat the result as nominal.",
+        "first_layer_mode": "relative"
+    }
+}

@@ -64,7 +64,11 @@ class ReportFixesTest(unittest.TestCase):
 
     def test_cfmesh_sizes_reach_writer_and_validate(self):
         from rapidfoam.cli import _do_generate
-        self.cfg['overrides'] = {'mesh_params': {'boundary_cell_size': 0.0123, 'ground_cell_size': 0.0456}}
+        # ground_refine is opt-in since 1.2 (cfMesh used to refine every ground
+        # plane unconditionally, which snappy never did).
+        self.cfg['overrides'] = {'mesh_params': {'boundary_cell_size': 0.0123,
+                                                 'ground_cell_size': 0.0456,
+                                                 'ground_refine': True}}
         cfg_path = self.root / 'input.json'
         cfg_path.write_text(json.dumps(self.cfg))
         cfg = load_config(cfg_path)
