@@ -99,6 +99,8 @@ Open `http://127.0.0.1:8000` in your browser.
    - Use the **Cluster SSH** dialog to connect to a remote SLURM cluster, transfer the case files, and submit the batch job.
 4. **Monitor Telemetry**: Watch force histories (Drag, Downforce) and residuals update as the case solves.
 
+**Engine switches change the profile, not your case config.** The *Mesher Engine* selector writes `mesher` into the saved case config, and the Expert tab exposes the profile knobs directly: *First Layer Specification* (`layers.first_layer_mode`) and *7. Mesher Engine Policy* (`cfmesh.ground_refine`, `cfmesh.layer_mode`, `cfmesh.optimise_layer`). Anything left on **Auto** follows `src/rapidfoam/mesher_profiles/<mesher>.json`, and the Auto labels show that resolved value (fetched from `/api/config/schema-defaults`). Validation, the domain preview and the generated case all run through the same config resolver, so the UI can never disagree with the case it writes.
+
 ---
 
 ### Command-Line Interface (CLI)
@@ -274,6 +276,8 @@ rapidfoam -c configs/config.json --mesher snappy  # one config, both engines
 ```
 
 For fast design iteration use `fidelity: "fast"`: `cfmesh.optimise_layer: "auto"` skips cfMesh's layer-optimisation pass, the ground is not refined, and only the STL surfaces receive boundary layers. Validate a shortlisted design at `standard`/`fine` (or cross-check with `--mesher snappy`).
+
+The same knobs live in the Web Studio: *Mesher Engine* plus *7. Mesher Engine Policy* and *First Layer Specification* in the Expert tab. `GET /api/config/schema-defaults` returns the profile-resolved defaults per engine (`mesher_defaults`), so the UI can show what **Auto** means instead of guessing.
 
 
 ---

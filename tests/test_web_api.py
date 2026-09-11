@@ -1,6 +1,7 @@
 """Automated tests for Web API endpoints and Cluster SSH client using standard unittest."""
 
 import asyncio
+import json
 import os
 import tempfile
 import shutil
@@ -8,6 +9,9 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch, PropertyMock
 from fastapi import HTTPException
+
+from rapidfoam.config import load_config
+from rapidfoam.mesher_profiles import SUPPORTED_MESHERS
 
 from rapidfoam.web.server import (
     DomainBoxRequest,
@@ -88,7 +92,23 @@ class TestWebAPI(unittest.TestCase):
         self.assertIn("fast", res["fidelity_presets"])
         self.assertIn("standard", res["fidelity_presets"])
         self.assertIn("available_meshers", res)
-        self.assertEqual(res["available_meshers"], ["cfmesh", "snappy"])
+        self.assertEqual(res["available_meshers"], list(SUPPORTED_MESHERS))
+
+    def test_config_schema_defaults_expose_mesher_profiles(self):
+        """The UI must be able to show what "Auto" means for each engine."""
+        res = asyncio.run(api_config_defaults())
+        self.assertEqual(sorted(res["mesher_defaults"]), ["cfmesh", "snappy"])
+        cfmesh = res["mesher_defaults"]["cfmesh"]
+        self.assertEqual(cfmesh["cfmesh"]["layer_mode"], "patch_only")
+        self.assertEqual(cfmesh["cfmesh"]["optimise_layer"], "auto")
+        self.assertIs(cfmesh["cfmesh"]["ground_refine"], False)
+        self.assertEqual(cfmesh["mesh_params"]["cell_size_mode"], "absolute")
+        self.assertEqual(cfmesh["layers"]["first_layer_mode"], "relative")
+        snappy = res["mesher_defaults"]["snappy"]
+        self.assertEqual(snappy["mesh_params"]["cell_size_mode"], "relative_levels")
+        self.assertIs(snappy["mesh_params"]["cell_budget_enforced"], True)
+        # Private comment keys must not leak into the API payload.
+        self.assertEqual([k for k in cfmesh if k.startswith("_")], [])
 
     def test_config_templates(self):
         """Test templates list endpoint."""
@@ -670,6 +690,44 @@ class TestWebAPI(unittest.TestCase):
         self.assertEqual(merged["layers"]["n_layers"], 7)
         self.assertEqual(merged["layers"]["expansion_ratio"], 1.22)
         self.assertEqual(merged["layers"]["first_layer_thickness"], 0.25)
+
+    def test_merge_config_with_defaults_applies_the_mesher_profile(self):
+        """The UI merge must resolve the mesher profile, exactly like the CLI.
+
+        Regression guard: the web merge used to apply DEFAULT_CONFIG only, so
+        validation and previews saw a different config than case generation.
+        """
+        cfmesh = merge_config_with_defaults({"case_name": "web_cf", "stl_files": []})
+        self.assertEqual(cfmesh["mesh_params"]["cell_size_mode"], "absolute")
+        self.assertEqual(cfmesh["cfmesh"]["layer_mode"], "patch_only")
+        self.assertIs(cfmesh["cfmesh"]["ground_refine"], False)
+        self.assertEqual(cfmesh["layers"]["first_layer_mode"], "relative")
+
+        snappy = merge_config_with_defaults(
+            {"case_name": "web_sn", "stl_files": [], "mesher": "snappy"}
+        )
+        self.assertEqual(snappy["mesh_params"]["cell_size_mode"], "relative_levels")
+        self.assertIs(snappy["mesh_params"]["cell_budget_enforced"], True)
+
+    def test_web_merge_matches_cli_resolution(self):
+        """Same config, same result: web merge == load_config() from a file."""
+        raw = {
+            "case_name": "parity_case",
+            "stl_files": ["sample_wing.stl"],
+            "mesher": "snappy",
+            "overrides": {"layers": {"n_layers": 6}, "cfmesh": {"ground_refine": True}},
+        }
+        path = Path.cwd() / "configs" / "_parity_check.json"
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(json.dumps(raw), encoding="utf-8")
+        try:
+            from_file = load_config(path, project_dir=Path.cwd())
+        finally:
+            path.unlink(missing_ok=True)
+
+        self.assertEqual(merge_config_with_defaults(raw), from_file)
+        self.assertEqual(from_file["layers"]["n_layers"], 6)
+        self.assertIs(from_file["cfmesh"]["ground_refine"], True)
 
     def test_case_generate_with_overrides(self):
         """Test that api_case_generate_and_submit applies overrides to generated case."""

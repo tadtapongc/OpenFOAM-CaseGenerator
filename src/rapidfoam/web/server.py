@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from rapidfoam.config import DEFAULT_CONFIG, deep_merge, find_stl, validate
+from rapidfoam.config import DEFAULT_CONFIG, find_stl, resolve_config_dict, validate
 from rapidfoam.geometry import (
     face_role,
     face_assignments,
@@ -32,6 +32,7 @@ from rapidfoam.geometry import (
     flow_axis_index_sign,
     up_axis_index,
 )
+from rapidfoam.mesher_profiles import SUPPORTED_MESHERS
 from rapidfoam.postproc.forces import (
     check_convergence,
     find_force_files,
@@ -115,16 +116,23 @@ def save_cluster_config(cfg: dict[str, Any]) -> None:
         log.warning("Could not persist cluster credentials: %s", exc)
 
 
+def _public_config(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Strip private comment keys (``_note``, ``_merge_order``, ...) recursively."""
+    return {
+        key: _public_config(val) if isinstance(val, dict) else val
+        for key, val in cfg.items()
+        if not key.startswith("_")
+    }
+
+
 def merge_config_with_defaults(raw_cfg: dict[str, Any]) -> dict[str, Any]:
-    """Merge user configuration and selective overrides on top of DEFAULT_CONFIG."""
-    clean_cfg = {k: v for k, v in raw_cfg.items() if not k.startswith("_")}
-    overrides = clean_cfg.pop("overrides", {})
-    if not isinstance(overrides, dict):
-        raise ValueError("'overrides' must be an object")
-    merged = deep_merge(DEFAULT_CONFIG, clean_cfg)
-    if overrides:
-        merged = deep_merge(merged, overrides)
-    return merged
+    """Merge a UI config with defaults, the active mesher profile and overrides.
+
+    Delegates to :func:`rapidfoam.config.resolve_config_dict` — the same function
+    the CLI reaches through ``load_config`` — so validation and previews here see
+    exactly the configuration that case generation will use.
+    """
+    return resolve_config_dict(raw_cfg, project_dir=PROJECT_ROOT)
 
 
 # -------------------------------------------------------------
@@ -300,10 +308,16 @@ async def api_cluster_disconnect() -> dict[str, Any]:
 
 @app.get("/api/config/schema-defaults")
 async def api_config_defaults() -> dict[str, Any]:
-    """Return default config template and presets for the UI."""
+    """Return default config template, mesher profiles and presets for the UI."""
     return {
         "default_config": DEFAULT_CONFIG,
-        "available_meshers": ["cfmesh", "snappy"],
+        "available_meshers": list(SUPPORTED_MESHERS),
+        # Profile-resolved defaults per engine: what "Auto" means for the mesher
+        # selected in the UI (cell_size_mode, layer_mode, ground_refine, ...).
+        "mesher_defaults": {
+            name: _public_config(resolve_config_dict({}, mesher=name, project_dir=PROJECT_ROOT))
+            for name in SUPPORTED_MESHERS
+        },
         "fidelity_presets": {
             name: {
                 "desc": p.get("desc", ""),

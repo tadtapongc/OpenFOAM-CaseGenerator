@@ -226,10 +226,10 @@
                 <div class="form-group col-span-2">
                   <label for="cfg-mesher-engine">Mesher Engine</label>
                   <select id="cfg-mesher-engine" class="input">
-                    <option value="cfmesh" selected>cfMesh (cartesianMesh — Fast &amp; Robust Boundary Layers, Recommended)</option>
-                    <option value="snappy">snappyHexMesh (Classic OpenFOAM multi-stage)</option>
+                    <option value="cfmesh" selected>cfMesh (cartesianMesh — layer-native, no cell budget)</option>
+                    <option value="snappy">snappyHexMesh (Classic OpenFOAM multi-stage, strict cell budget)</option>
                   </select>
-                  <span class="field-hint">cfMesh is the primary recommended mesher for FSAE and aircraft (3–8× faster, robust boundary layers without edge collapse).</span>
+                  <span class="field-hint">Both engines are supported and A/B tested. cfMesh is the default: it layers STL surfaces without edge collapse, but has no maxGlobalCells cap and no distance-based refinement — control its cost with body/edge cell size, ground refinement and the wake box levels. snappyHexMesh gives tighter cell budgets and distance levels; pick per case, not by reputation.</span>
                 </div>
               </div>
             </div>
@@ -584,7 +584,7 @@
                       <input type="number" id="cfg-override-surf-min" class="input" min="1" max="10" placeholder="Min (4)">
                       <input type="number" id="cfg-override-surf-max" class="input" min="1" max="10" placeholder="Max (5)">
                     </div>
-                    <span class="field-hint">Min and max octree surface refinement</span>
+                    <span class="field-hint">snappy: min/max octree surface levels. cfMesh derives its body cell from Min (2<sup>-Min</sup> &times; base cell) and refines feature edges one level finer on its own, so Max is snappy-only.</span>
                   </div>
 
                   <div class="form-group">
@@ -626,13 +626,29 @@
                   <div class="form-group">
                     <label for="cfg-override-layer-firstlayer">First Layer Thickness</label>
                     <input type="number" id="cfg-override-layer-firstlayer" class="input" step="any" min="0.0001" placeholder="Auto / Preset (0.30)">
-                    <span class="field-hint">Thickness of first cell next to wall (relative ratio or absolute dimension)</span>
+                    <span class="field-hint">First cell thickness: a fraction of the body cell in Relative mode, metres in Absolute mode</span>
                   </div>
 
                   <div class="form-group">
                     <label for="cfg-override-layer-minthickness">Minimum Overall Thickness</label>
                     <input type="number" id="cfg-override-layer-minthickness" class="input" step="any" min="0.0001" placeholder="Auto (0.05)">
                     <span class="field-hint">Minimum layer thickness before layer collapses / pinches off</span>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="cfg-override-firstlayer-mode">First Layer Specification</label>
+                    <select id="cfg-override-firstlayer-mode" class="input">
+                      <option value="" selected>Auto (profile: relative)</option>
+                      <option value="relative">Relative — fraction of the body cell</option>
+                      <option value="absolute">Absolute — metres (set height below)</option>
+                    </select>
+                    <span class="field-hint">layers.first_layer_mode — how the First Layer Thickness above is interpreted (snappy clamps the real stack either way)</span>
+                  </div>
+
+                  <div class="form-group" id="group-firstlayer-height" style="display: none;">
+                    <label for="cfg-override-firstlayer-height">First Layer Height (m)</label>
+                    <input type="number" id="cfg-override-firstlayer-height" class="input" step="any" min="0.0001" placeholder="e.g. 0.0005">
+                    <span class="field-hint">layers.first_layer_height — required when the mode above is Absolute</span>
                   </div>
 
                   <!-- 5. Fluid Property Overrides -->
@@ -684,6 +700,42 @@
                     <label for="cfg-override-turb-nut-ratio">Turbulent Viscosity Ratio (&nu;<sub>t</sub> / &nu;)</label>
                     <input type="number" id="cfg-override-turb-nut-ratio" class="input" step="any" placeholder="Auto (10)">
                     <span class="field-hint">Freestream nut ratio (default 10)</span>
+                  </div>
+
+                  <!-- 7. Mesher Engine Policy (profile keys) -->
+                  <div class="form-group col-span-2 overrides-section-header">
+                    <h4 class="section-subtitle">7. Mesher Engine Policy</h4>
+                    <span class="field-hint">Engine-native policy taken from src/rapidfoam/mesher_profiles/&lt;mesher&gt;.json (overridable per project via configs/meshers/). Leave on Auto to follow the profile.</span>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="cfg-override-cfmesh-groundrefine">Ground Plane Refinement (cfMesh)</label>
+                    <select id="cfg-override-cfmesh-groundrefine" class="input">
+                      <option value="" selected>Auto (profile: off)</option>
+                      <option value="on">On — refine the road patch</option>
+                      <option value="off">Off — match snappyHexMesh</option>
+                    </select>
+                    <span class="field-hint">cfmesh.ground_refine — refines the road to the ground cell size</span>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="cfg-override-cfmesh-layermode">Boundary Layer Scope (cfMesh)</label>
+                    <select id="cfg-override-cfmesh-layermode" class="input">
+                      <option value="" selected>Auto (profile: patch_only)</option>
+                      <option value="patch_only">Patch only — STL surfaces (and road when enabled)</option>
+                      <option value="global">Global — legacy, layers every patch including the road</option>
+                    </select>
+                    <span class="field-hint">cfmesh.layer_mode — which patches receive prism layers</span>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="cfg-override-cfmesh-optimise">Optimise Layers / Smooth Normals (cfMesh)</label>
+                    <select id="cfg-override-cfmesh-optimise" class="input">
+                      <option value="" selected>Auto (profile: auto — on for standard/fine, off for fast)</option>
+                      <option value="on">On — best quality, most expensive cfMesh pass</option>
+                      <option value="off">Off — cheaper draft / iteration meshes</option>
+                    </select>
+                    <span class="field-hint">cfmesh.optimise_layer — layer optimisation plus normal smoothing is the costliest cfMesh pass</span>
                   </div>
 
                 </div>

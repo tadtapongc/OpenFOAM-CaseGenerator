@@ -101,3 +101,38 @@ test('fidelity placeholders match backend presets', () => {
   app.updateOverridePlaceholders('fast');
   assert.match(document.getElementById('cfg-override-nearwake').placeholder, /2/);
 });
+
+test('mesher policy and first-layer mode reach the config overrides', () => {
+  const {app, document} = harness();
+  document.getElementById('cfg-override-layer-firstlayer').value = '0.14';
+  document.getElementById('cfg-override-firstlayer-mode').value = 'absolute';
+  document.getElementById('cfg-override-firstlayer-height').value = '0.0005';
+  document.getElementById('cfg-override-cfmesh-groundrefine').value = 'on';
+  document.getElementById('cfg-override-cfmesh-layermode').value = 'global';
+  document.getElementById('cfg-override-cfmesh-optimise').value = 'off';
+  app.buildConfigFromVisualForm();
+  const overrides = app.activeConfig.overrides;
+  assert.equal(overrides.layers.first_layer_thickness, 0.14);
+  assert.equal(overrides.layers.first_layer_mode, 'absolute');
+  assert.equal(overrides.layers.first_layer_height, 0.0005);
+  assert.equal(overrides.cfmesh.ground_refine, true);
+  assert.equal(overrides.cfmesh.layer_mode, 'global');
+  assert.equal(overrides.cfmesh.optimise_layer, false);
+  // Untouched override keys survive the round trip.
+  assert.equal(overrides.mesh_params.boundary_cell_size, 0.03);
+});
+
+test('blank mesher policy fields leave the profile in charge', () => {
+  const {app} = harness();
+  app.buildConfigFromVisualForm();
+  const overrides = app.activeConfig.overrides || {};
+  assert.equal((overrides.cfmesh || {}).ground_refine, undefined);
+  assert.equal((overrides.cfmesh || {}).layer_mode, undefined);
+  assert.equal((overrides.layers || {}).first_layer_mode, undefined);
+  assert.equal((overrides.layers || {}).first_layer_height, undefined);
+  // "Auto" hints stay on the static HTML labels until the schema fetch answers.
+  const {document} = harness();
+  assert.equal(app.mesherDefaults, undefined);
+  app.refreshMesherPolicyHints();
+  assert.match(document.getElementById('cfg-override-firstlayer-mode').value ?? '', /^$/);
+});

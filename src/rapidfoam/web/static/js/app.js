@@ -291,6 +291,19 @@ class CFDApp {
 
     // Auto symmetry plane shortcut in Domain & Ground form
     document.getElementById('btn-auto-sym-inline')?.addEventListener('click', () => this.autoSymmetryPlaneCenter());
+
+    // Mesher engine policy: keep the "Auto (…)" labels and the absolute
+    // first-layer input in sync with the selected engine / layer mode.
+    document.getElementById('cfg-mesher-engine')?.addEventListener('change', () => {
+      this.updateMesherPolicyVisibility();
+      this.refreshMesherPolicyHints();
+    });
+    document.getElementById('cfg-override-firstlayer-mode')?.addEventListener('change', () => {
+      this.updateMesherPolicyVisibility();
+    });
+
+    // What "Auto" means per engine (profile-resolved); non-fatal when offline.
+    this.loadSchemaDefaults();
   }
 
   updateVisualFormFromConfig(cfg) {
@@ -437,6 +450,14 @@ class CFDApp {
     this.setVal('cfg-override-layer-expansion', layers?.expansion_ratio ?? '');
     this.setVal('cfg-override-layer-firstlayer', layers?.first_layer_thickness ?? '');
     this.setVal('cfg-override-layer-minthickness', layers?.min_thickness ?? '');
+    this.setVal('cfg-override-firstlayer-mode', layers?.first_layer_mode ?? '');
+    this.setVal('cfg-override-firstlayer-height', layers?.first_layer_height ?? '');
+
+    // 4b. Mesher engine policy (cfMesh profile keys)
+    const cfmesh = overrides.cfmesh || null;
+    this.setVal('cfg-override-cfmesh-groundrefine', this.boolToTriState(cfmesh?.ground_refine));
+    this.setVal('cfg-override-cfmesh-layermode', cfmesh?.layer_mode ?? '');
+    this.setVal('cfg-override-cfmesh-optimise', this.boolToTriState(cfmesh?.optimise_layer));
 
     // 5. Fluid Properties (Priority 5: Ambient medium)
     this.setVal('cfg-override-fluid-rho', fluid?.rho ?? '');
@@ -448,6 +469,8 @@ class CFDApp {
     this.setVal('cfg-override-turb-nut-ratio', turb?.nut_ratio ?? '');
 
     this.updateOverridePlaceholders(fidelity);
+    this.updateMesherPolicyVisibility();
+    this.refreshMesherPolicyHints();
 
     // Render active STL chips (reconcile placeholders with available server geometries)
     const newStls = cfg.stl_files || [];
@@ -651,7 +674,24 @@ class CFDApp {
     if (firstLayer !== null) layersOverrides.first_layer_thickness = firstLayer;
     const minThickness = getOptionalFloat('cfg-override-layer-minthickness');
     if (minThickness !== null) layersOverrides.min_thickness = minThickness;
+    const firstLayerMode = getOptionalStr('cfg-override-firstlayer-mode');
+    if (firstLayerMode) layersOverrides.first_layer_mode = firstLayerMode;
+    const firstLayerHeight = getOptionalFloat('cfg-override-firstlayer-height');
+    if (firstLayerHeight !== null) layersOverrides.first_layer_height = firstLayerHeight;
     if (Object.keys(layersOverrides).length > 0) overrides.layers = layersOverrides;
+
+    // 4b. Mesher engine policy => cfmesh.ground_refine / layer_mode / optimise_layer
+    // "auto" is left out on purpose: an absent key means "follow the profile".
+    const cfmeshOverrides = {};
+    const groundRefine = getOptionalStr('cfg-override-cfmesh-groundrefine');
+    if (groundRefine === 'on') cfmeshOverrides.ground_refine = true;
+    else if (groundRefine === 'off') cfmeshOverrides.ground_refine = false;
+    const layerMode = getOptionalStr('cfg-override-cfmesh-layermode');
+    if (layerMode) cfmeshOverrides.layer_mode = layerMode;
+    const optimiseLayer = getOptionalStr('cfg-override-cfmesh-optimise');
+    if (optimiseLayer === 'on') cfmeshOverrides.optimise_layer = true;
+    else if (optimiseLayer === 'off') cfmeshOverrides.optimise_layer = false;
+    if (Object.keys(cfmeshOverrides).length > 0) overrides.cfmesh = cfmeshOverrides;
 
     // 5. Fluid (Priority 5)
     const fluidOverrides = {};
@@ -675,7 +715,9 @@ class CFDApp {
       solver: ['end_time', 'write_interval', 'purge_write'],
       force_refs: ['Aref', 'lRef', 'CofR'],
       mesh_params: ['base_cell_size', 'surface_level', 'edge_level', 'near_wake_level', 'far_wake_level'],
-      layers: ['n_layers', 'expansion_ratio', 'first_layer_thickness', 'min_thickness'],
+      layers: ['n_layers', 'expansion_ratio', 'first_layer_thickness', 'min_thickness',
+        'first_layer_mode', 'first_layer_height'],
+      cfmesh: ['ground_refine', 'layer_mode', 'optimise_layer'],
       fluid: ['rho', 'nu'], turbulence: ['model', 'intensity', 'nut_ratio'],
     };
     for (const [section, values] of Object.entries(cfg.overrides || {})) {
@@ -939,6 +981,73 @@ class CFDApp {
     setPlaceholder('cfg-override-layer-firstlayer', `Auto / Preset (${p.first_layer})`);
   }
 
+  boolToTriState(value) {
+    if (value === true || String(value).toLowerCase() === 'true') return 'on';
+    if (value === false || String(value).toLowerCase() === 'false') return 'off';
+    return '';
+  }
+
+  updateMesherPolicyVisibility() {
+    const absolute = this.getVal('cfg-override-firstlayer-mode') === 'absolute';
+    const heightGroup = document.getElementById('group-firstlayer-height');
+    if (heightGroup) heightGroup.style.display = absolute ? 'block' : 'none';
+
+    // cfMesh profile knobs only mean something to cfMesh; grey them out otherwise.
+    ['cfg-override-cfmesh-groundrefine', 'cfg-override-cfmesh-layermode', 'cfg-override-cfmesh-optimise']
+      .forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = (this.getVal('cfg-mesher-engine') || 'cfmesh') !== 'cfmesh';
+      });
+  }
+
+  setAutoOptionText(selectId, text) {
+    const sel = document.getElementById(selectId);
+    if (!sel || !Array.isArray(sel.options) || sel.options.length === 0) return;
+    sel.options[0].textContent = text;
+  }
+
+  refreshMesherPolicyHints() {
+    const engine = this.getVal('cfg-mesher-engine') || 'cfmesh';
+    const defaults = (this.mesherDefaults || {})[engine];
+    if (!defaults) return; // keep the static HTML labels until /api/config/schema-defaults answers
+    const cfmesh = defaults.cfmesh || {};
+    const layers = defaults.layers || {};
+    const onOff = (v) => (v === undefined || v === null ? 'n/a' : (v ? 'on' : 'off'));
+    this.setAutoOptionText('cfg-override-cfmesh-groundrefine', `Auto (${engine}: ${onOff(cfmesh.ground_refine)})`);
+    this.setAutoOptionText('cfg-override-cfmesh-layermode', `Auto (${engine}: ${cfmesh.layer_mode || 'n/a'})`);
+    this.setAutoOptionText('cfg-override-cfmesh-optimise',
+      `Auto (${engine}: ${cfmesh.optimise_layer === undefined ? 'n/a' : String(cfmesh.optimise_layer)})`);
+    this.setAutoOptionText('cfg-override-firstlayer-mode', `Auto (${engine}: ${layers.first_layer_mode || 'relative'})`);
+  }
+
+  syncMesherOptions(available) {
+    const sel = document.getElementById('cfg-mesher-engine');
+    if (!sel || !Array.isArray(sel.options) || !Array.isArray(available)) return;
+    const known = new Set(Array.from(sel.options).map((option) => option.value));
+    available.forEach((name) => {
+      if (known.has(name)) return;
+      const option = document.createElement('option');
+      option.value = name;
+      option.textContent = `${name} mesher (from server schema)`;
+      sel.appendChild(option);
+    });
+  }
+
+  async loadSchemaDefaults() {
+    if (typeof fetch !== 'function') return;
+    try {
+      const res = await fetch('/api/config/schema-defaults');
+      if (!res.ok) return;
+      const data = await res.json();
+      this.mesherDefaults = data.mesher_defaults || {};
+      this.availableMeshers = data.available_meshers || [];
+      this.syncMesherOptions(this.availableMeshers);
+      this.refreshMesherPolicyHints();
+    } catch {
+      // Offline / older server: the static "Auto (…)" labels stay as fallback.
+    }
+  }
+
   clearAllOverrides() {
     delete this.activeConfig.overrides;
     const overrideIds = [
@@ -960,6 +1069,11 @@ class CFDApp {
       'cfg-override-layer-expansion',
       'cfg-override-layer-firstlayer',
       'cfg-override-layer-minthickness',
+      'cfg-override-firstlayer-mode',
+      'cfg-override-firstlayer-height',
+      'cfg-override-cfmesh-groundrefine',
+      'cfg-override-cfmesh-layermode',
+      'cfg-override-cfmesh-optimise',
       'cfg-override-fluid-rho',
       'cfg-override-fluid-nu',
       'cfg-override-turb-model',

@@ -257,36 +257,32 @@ def deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
-def load_config(
-    config_path: str | Path,
+def resolve_config_dict(
+    user_cfg: dict[str, Any],
     mesher: str | None = None,
     project_dir: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Load user config JSON and merge with defaults and the mesher profile.
+    """Resolve an in-memory case config dict into a complete configuration.
 
-    User only needs to specify:
-      - case_name
-      - stl_files
-      - flow (velocity, direction, ground)
-      - outputs (drag_axis, downforce_axis)
-
-    Everything else uses universal defaults plus the mesher-native profile
-    (`src/rapidfoam/mesher_profiles/<mesher>.json`, overlaid by an optional
-    `configs/meshers/<mesher>.json`), so one case config can drive either
-    engine while each writer still gets its own native settings.
+    This is the single source of truth for config resolution: the CLI funnels a
+    JSON file through it (via :func:`load_config`), and the web UI funnels the
+    browser payload through it, so validation, domain previews and generated
+    case files can never disagree about what a case contains.
 
     Merge order (later wins): DEFAULT_CONFIG -> mesher profile -> case config ->
-    case `mesh_params_<mesher>` block -> case `overrides` block.
+    case ``mesh_params_<mesher>`` block -> case ``overrides`` block.
 
     Args:
-        config_path: Case config JSON.
-        mesher: Optional CLI override ("cfmesh" | "snappy"); it selects the
-            profile and beats the config's own "mesher" key.
-        project_dir: Project root used to find `configs/meshers/<mesher>.json`.
+        user_cfg: Raw case config. Comment keys (leading ``_``) are stripped and
+            the ``overrides`` block is applied last.
+        mesher: Optional override ("cfmesh" | "snappy"); it selects the profile
+            and beats the config's own ``mesher`` key.
+        project_dir: Project root used to find ``configs/meshers/<mesher>.json``.
+
+    Raises:
+        ValueError: If ``user_cfg`` is not an object or ``overrides`` is not an
+            object.
     """
-    config_path = Path(config_path)
-    with open(config_path, encoding="utf-8") as f:
-        user_cfg = json.load(f)
     if not isinstance(user_cfg, dict):
         raise ValueError("Config must be a JSON object")
 
@@ -320,6 +316,41 @@ def load_config(
         cfg = deep_merge(cfg, overrides)
 
     return cfg
+
+
+def load_config(
+    config_path: str | Path,
+    mesher: str | None = None,
+    project_dir: str | Path | None = None,
+) -> dict[str, Any]:
+    """Load user config JSON and merge with defaults and the mesher profile.
+
+    User only needs to specify:
+      - case_name
+      - stl_files
+      - flow (velocity, direction, ground)
+      - outputs (drag_axis, downforce_axis)
+
+    Everything else uses universal defaults plus the mesher-native profile
+    (`src/rapidfoam/mesher_profiles/<mesher>.json`, overlaid by an optional
+    `configs/meshers/<mesher>.json`), so one case config can drive either
+    engine while each writer still gets its own native settings.
+
+    Merge order (later wins): DEFAULT_CONFIG -> mesher profile -> case config ->
+    case `mesh_params_<mesher>` block -> case `overrides` block. The merge itself
+    lives in :func:`resolve_config_dict`, which the web UI also calls so both
+    entry points resolve a case identically.
+
+    Args:
+        config_path: Case config JSON.
+        mesher: Optional CLI override ("cfmesh" | "snappy"); it selects the
+            profile and beats the config's own "mesher" key.
+        project_dir: Project root used to find `configs/meshers/<mesher>.json`.
+    """
+    config_path = Path(config_path)
+    with open(config_path, encoding="utf-8") as f:
+        user_cfg = json.load(f)
+    return resolve_config_dict(user_cfg, mesher=mesher, project_dir=project_dir)
 
 
 # ============================================================
