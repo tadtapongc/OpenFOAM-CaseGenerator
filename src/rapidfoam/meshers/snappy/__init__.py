@@ -82,7 +82,10 @@ class Snappy:
 
     # ---- execution ------------------------------------------------------
     def mesh_plan(self, cfg: dict[str, Any]) -> MeshPlan:
-        return snappy_mesh_plan(self.settings(cfg))
+        # Deliberately the config-only plan: snappy's commands follow
+        # parallel.n_procs, never the resolved domain box, so scripts can be written
+        # before (or without) measuring the geometry.
+        return snappy_plan_from_config(cfg)
 
     # ---- validation -----------------------------------------------------
     def validate(self, cfg: dict[str, Any]) -> tuple[list[str], list[str]]:

@@ -19,6 +19,11 @@ from rapidfoam.meshers.sizing import Sizing, resolve_first_layer_height, resolve
 #: Fidelities for which the layer-optimisation pass is skipped under "auto".
 DRAFT_FIDELITIES = ("fast", "draft", "iterate")
 
+#: Default ``cfmesh.feature_angle`` — the crease angle ``surfaceFeatureEdges``
+#: picks the feature edges at, and the only key besides the MPI policy that the
+#: meshing plan reads.
+FEATURE_ANGLE_DEFAULT: float = 45.0
+
 
 @dataclass(frozen=True)
 class Region:
@@ -124,7 +129,7 @@ def resolve_cfmesh_settings(cfg: dict[str, Any]) -> CfMeshSettings:
         stl_names=tuple(cfg.get("stl_names", ())),
         patches=patches,
         regions=regions,
-        feature_angle=float(engine.get("feature_angle", 45)),
+        feature_angle=float(engine.get("feature_angle", FEATURE_ANGLE_DEFAULT)),
         boundary_cell_size=_positive(
             engine.get("boundary_cell_size"), float(sizing.base_cell_size)
         ),
@@ -155,6 +160,7 @@ def resolve_cfmesh_settings(cfg: dict[str, Any]) -> CfMeshSettings:
 
 __all__ = [
     "DRAFT_FIDELITIES",
+    "FEATURE_ANGLE_DEFAULT",
     "CfMeshSettings",
     "Region",
     "resolve_cfmesh_settings",

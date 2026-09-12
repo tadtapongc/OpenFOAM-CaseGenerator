@@ -25,7 +25,7 @@ from rapidfoam.meshers.cfmesh.keys import (
     REMOVED_KEYS,
 )
 from rapidfoam.meshers.cfmesh.mesh_dict import render_mesh_dict, write_mesh_dict
-from rapidfoam.meshers.cfmesh.plan import cfmesh_mesh_plan
+from rapidfoam.meshers.cfmesh.plan import cfmesh_mesh_plan, cfmesh_plan_from_config
 from rapidfoam.meshers.cfmesh.settings import (
     CfMeshSettings,
     Region,
@@ -68,7 +68,10 @@ class CfMesh:
 
     # ---- execution ------------------------------------------------------
     def mesh_plan(self, cfg: dict[str, Any]) -> MeshPlan:
-        return cfmesh_mesh_plan(self.settings(cfg))
+        # Deliberately the config-only plan: the commands depend on the MPI policy
+        # and the crease angle, never on the resolved domain box, so scripts can be
+        # written before (or without) measuring the geometry.
+        return cfmesh_plan_from_config(cfg)
 
     # ---- validation -----------------------------------------------------
     def validate(self, cfg: dict[str, Any]) -> tuple[list[str], list[str]]:
@@ -115,6 +118,8 @@ __all__ = [
     "CfMeshSettings",
     "OPTIMISATION_KEYS",
     "Region",
+    "cfmesh_mesh_plan",
+    "cfmesh_plan_from_config",
     "generate_domain_stl",
     "render_mesh_dict",
     "resolve_cfmesh_settings",

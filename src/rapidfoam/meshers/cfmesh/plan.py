@@ -9,14 +9,19 @@ then ``checkMesh`` and ``renumberMesh`` finish.
 Parallel meshing is worth it and cheap to enable, but not every build ships the
 parallel octree, so the MPI attempt carries a serial fallback and keeps the failed
 attempt's log.
+
+Both settings the plan reads — ``cfmesh.parallel_meshing`` and
+``cfmesh.feature_angle`` — are plain engine keys, so
+:func:`cfmesh_plan_from_config` builds the plan from a raw config, before any STL
+bounds are measured.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from rapidfoam.meshers.cfmesh.settings import CfMeshSettings
-from rapidfoam.meshers.plan import MeshCommand, MeshPlan
+from rapidfoam.meshers.cfmesh.settings import FEATURE_ANGLE_DEFAULT, CfMeshSettings
+from rapidfoam.meshers.plan import MeshCommand, MeshPlan, resolve_parallel_meshing
 
 SURFACE_STL = "constant/triSurface/domain.stl"
 SURFACE_FMS = "constant/triSurface/domain.fms"
@@ -26,13 +31,12 @@ SURFACE_FMS = "constant/triSurface/domain.fms"
 OMP_ONE_THREAD = ("OMP_NUM_THREADS=1",)
 
 
-def cfmesh_mesh_plan(settings: CfMeshSettings) -> MeshPlan:
-    """The meshing commands for resolved cfMesh settings."""
-    parallel = settings.parallel_meshing
+def _cfmesh_plan(parallel: bool, feature_angle: float) -> MeshPlan:
+    """The command pipeline for a chosen MPI policy and crease angle."""
     commands = [
         MeshCommand(
             "surfaceFeatureEdges",
-            args=("-angle", f"{settings.feature_angle:g}", SURFACE_STL, SURFACE_FMS),
+            args=("-angle", f"{feature_angle:g}", SURFACE_STL, SURFACE_FMS),
         ),
         MeshCommand(
             "cartesianMesh",
@@ -55,11 +59,28 @@ def cfmesh_mesh_plan(settings: CfMeshSettings) -> MeshPlan:
     )
 
 
-def cfmesh_plan_from_config(cfg: dict[str, Any]) -> MeshPlan:
-    """Convenience wrapper for callers that only have the raw config."""
-    from rapidfoam.meshers.cfmesh.settings import resolve_cfmesh_settings
+def cfmesh_mesh_plan(settings: CfMeshSettings) -> MeshPlan:
+    """The meshing commands for resolved cfMesh settings."""
+    return _cfmesh_plan(settings.parallel_meshing, settings.feature_angle)
 
-    return cfmesh_mesh_plan(resolve_cfmesh_settings(cfg))
+
+def cfmesh_plan_from_config(cfg: dict[str, Any]) -> MeshPlan:
+    """The meshing commands for a raw config, without resolving the geometry.
+
+    ``cfmesh.parallel_meshing`` and ``cfmesh.feature_angle`` are the only settings
+    the plan reads, and both are declared engine keys, so nothing here depends on
+    the STL bounds — ``writers/scripts.py`` can render the scripts for a case whose
+    geometry has not been measured yet.
+    """
+    engine = cfg.get("cfmesh", {})
+    engine = engine if isinstance(engine, dict) else {}
+    return _cfmesh_plan(
+        resolve_parallel_meshing(
+            engine.get("parallel_meshing", "auto"),
+            cfg.get("parallel", {}).get("n_procs", 1),
+        ),
+        float(engine.get("feature_angle", FEATURE_ANGLE_DEFAULT)),
+    )
 
 
 __all__ = ["OMP_ONE_THREAD", "SURFACE_FMS", "SURFACE_STL", "cfmesh_mesh_plan",

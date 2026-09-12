@@ -335,6 +335,9 @@ def write_scripts(cfg: dict[str, Any], case_dir: Path) -> None:
     )
 
     mesher = mesher_for(cfg)
+    # The plan is geometry-free on purpose (meshers/*/plan.py): it reads the MPI
+    # policy and the engine's own keys, so scripts can be written before — or
+    # without — the STL bounds having been measured.
     plan = mesher.mesh_plan(cfg)
 
     # One plan, three spellings: the serial Allrun, the MPI Allrun.parallel (which
