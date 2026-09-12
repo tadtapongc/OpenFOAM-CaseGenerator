@@ -10,7 +10,7 @@
     "_stl_files": "ASCII STL geometry files located in the stl/ directory",
     "stl_files": ["geometry.stl"],
 
-    "_fidelity": "Preset resolution: 'fast' (iteration), 'standard' (recommended), 'fine' (report). The cell count also depends on the mesher and geometry: a 'standard' Formula Student car produced ~0.45M cells with snappy and ~4.4M with cfMesh, so tune mesh_params.body_cell_size (or body_cell_size) and check 'cells:' in log.checkMesh.",
+    "_fidelity": "Preset resolution: 'fast' (iteration), 'standard' (recommended), 'fine' (report). Cell size scales with the model: each preset meshes 'cells_per_length' cells along the longest bounding-box dimension (20/30/37.5 -> 0.15/0.10/0.08 m on a 3.0 m car), so a 1.2 m front wing is meshed proportionally finer than a full car at the same relative cost. The cell count also depends on the mesher: a 'standard' Formula Student car produced ~0.45M cells with snappy and ~4.4M with cfMesh. Pin the old absolute behaviour with mesh_params.base_cell_size (metres), retune the scaling with mesh_params.cells_per_length, and read 'cells:' from log.checkMesh after the first run.",
     "fidelity": "standard",
 
     "_mesher_comment": "Mesher engine: 'cfmesh' (robust boundary layers) or 'snappy' (classic multi-stage). Engine-specific knobs live in src/rapidfoam/mesher_profiles/<mesher>.json (overridable per project in configs/meshers/<mesher>.json). The same case file can drive either engine: rapidfoam -c configs/config.json --mesher snappy",
@@ -59,8 +59,9 @@
 
     "_section_parallel": "--- 5. Parallel Computing ---",
     "parallel": {
-        "_comment": "Number of CPU cores for MPI decomposition, meshing (cfMesh/snappy), and simpleFoam solving",
-        "n_procs": 32
+        "_comment": "Number of CPU cores for MPI decomposition, meshing (cfMesh cartesianMesh via cfmesh.parallel_meshing, or snappyHexMesh) and simpleFoam solving. cfMesh takes its rank count from system/decomposeParDict, so keep this equal to the SLURM --ntasks.",
+        "n_procs": 32,
+        "method": "scotch"
     },
 
     "_section_slurm": "--- 6. SLURM Cluster Configuration ---",
@@ -80,16 +81,22 @@
 
     "_section_overrides": "--- 7. Expert Overrides & Mesher-Native Blocks (Optional) ---",
     "_overrides_note": "All fields below have built-in defaults in the fidelity presets plus the mesher profile. Uncomment only if manual tuning is needed.",
-    "_mesher_blocks_note": "Anything the two engines read differently is expressed in mesh_params_<mesher> (this case only) or configs/meshers/<mesher>.json (whole project). cfMesh-native: body_cell_size/edge_cell_size/min_cell_size (metres), ground_refine, cfmesh.layer_mode, cfmesh.optimise_layer. snappy-native: surface_level/edge_level, nCellsBetweenLevels, maxGlobalCells, distance_levels.",
+    "_mesher_blocks_note": "See docs/meshers.md for what each engine means by a key. Anything the two engines read differently is expressed in mesh_params_<mesher> (this case only) or configs/meshers/<mesher>.json (whole project). cfMesh-native: min_cell_size (its automatic-refinement floor, 'body' by default) plus the cfmesh block (feature_angle, ground_refine, ground_cell_size, boundary_cell_size, refinement_thickness, optimise_layer, optimisation, parallel_meshing). snappy-native: nCellsBetweenLevels, maxGlobalCells, distance_levels/distance_shells. Both engines: body_cell_size/edge_cell_size in metres, surface_level/edge_level (cfMesh derives its body and edge cells from them), base_cell_size ('auto' = the preset's cells_per_length x the longest bounding-box dimension), cells_per_length, refinement_regions, the wake-level keys (wake_levels_below_surface, or an absolute near_wake_level/far_wake_level) and trailing_edge_refine/te_level/te_height_cells/te_depth_cells (the local trailing-edge box, on by default). rapidfoam validate names any key the selected engine does not read.",
     "mesh_params_cfmesh": {
         "_body_cell_size": 0.00625,
         "_edge_cell_size": 0.003125,
         "_min_cell_size": "body",
-        "_ground_refine": false
+        "_te_note": "Trailing-edge refinement is ON by default in every fidelity preset: one box (objectRefinements/trailingEdgeBox) on the trailing-edge plane at base_cell_size / 2**te_level, because cfMesh's automatic refinement is capped by min_cell_size, so a trailing edge thinner than the body cell (a 1.4 mm wing trailing edge against a 6.25 mm cell) would stay slivery. Set trailing_edge_refine false to drop it, keep te_level 'auto' (= edge_level + 1) unless a specific trailing-edge gap needs resolving. Verify with: grep -A6 trailingEdgeBox system/meshDict",
+        "_trailing_edge_refine": true,
+        "_te_level": 7,
+        "_te_height_cells": 2,
+        "_te_depth_cells": 3
     },
     "mesh_params_snappy": {
         "_surface_level": [4, 5],
-        "_maxGlobalCells": 2000000
+        "_wake_levels_below_surface": [1, 3],
+        "_wake_note": "Wake boxes are sized as fractions of the model and their levels sit this many levels below surface_level[0] ([near, far]), so the wake keeps its share of the mesh when the surface level or the model size changes. State near_wake_level / far_wake_level for an absolute level. Every run prints a cell-budget estimate per region and warns when the regions approach maxGlobalCells, because snappy stops refining once the cap is hit: grep 'Cell budget' or read it above 'Case:'.",
+        "_maxGlobalCells": 18000000
     },
     "_optional_overrides_example": {
         "solver": {
@@ -103,9 +110,17 @@
             "_CofR": [0.0, 0.0, 0.0]
         },
         "mesh_params": {
-            "_base_cell_size": 0.10,
+            "_base_cell_size": "auto",
+            "_base_cell_size_desc": "Absolute override in metres (e.g. 0.10 to reproduce the pre-1.2 car-scale presets). 'auto' = cells_per_length x the longest bounding-box dimension, which is the default.",
+            "_cells_per_length": 30,
+            "_cells_per_length_desc": "Auto-size knob: 20 fast / 30 standard / 37.5 fine background cells along the model's longest bbox dimension. Raise it to resolve a front wing or a subassembly at the same preset.",
             "_surface_level": [4, 5],
             "_edge_level": 6,
+            "_min_cell_size": "body",
+            "_min_cell_size_desc": "cfMesh's global refinement floor: 'body' (default), 'edge' (resolves flap slots and trailing edges everywhere; measured 1.82M -> 3.95M cells on the test body), 'base', or metres.",
+            "_distance_shells": [[0.25, 4], [0.8, 3]],
+            "_distance_shells_desc": "Distance shells in units of the base cell (multiple x base_cell_size -> level); use distance_levels for absolute metres.",
+            "_trailing_edge_refine": true,
             "_near_wake_level": 3,
             "_far_wake_level": 1
         },
@@ -120,7 +135,6 @@
         },
         "cfmesh": {
             "_optimise_layer": "auto",
-            "_layer_mode": "patch_only",
             "_ground_refine": false,
             "_refinement_thickness": 0.05
         },

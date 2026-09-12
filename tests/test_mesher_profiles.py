@@ -16,13 +16,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from rapidfoam.cli import _do_generate
 from rapidfoam.config import load_config, validate
-from rapidfoam.geometry import (
+from rapidfoam.mesher_profiles import load_mesher_profile
+from rapidfoam.meshers import SUPPORTED_MESHERS, get_mesher, resolve_mesher
+from rapidfoam.meshers.refinement import MESH_PARAMS_KEYS, keys_for, unread_keys
+from rapidfoam.meshers.sizing import (
     MIN_CELL_SIZE_ALIASES,
-    resolve_cell_sizes,
     resolve_first_layer_height,
     resolve_min_cell_size,
+    resolve_sizing,
 )
-from rapidfoam.mesher_profiles import load_mesher_profile, resolve_mesher
 from rapidfoam.stl_utils import write_stl
 
 # A single triangle long in x, wide in y, thin in z: enough for domain + mesh
@@ -75,18 +77,19 @@ class ProfileMergeTest(ProjectScaffold):
     def test_cfmesh_profile_supplies_native_defaults(self):
         cfg = load_config(self.config(), project_dir=self.root)
         self.assertEqual(cfg["mesher"], "cfmesh")
-        self.assertEqual(cfg["mesh_params"]["cell_size_mode"], "absolute")
-        self.assertIs(cfg["mesh_params"]["cell_budget_enforced"], False)
-        self.assertEqual(cfg["cfmesh"]["layer_mode"], "patch_only")
-        self.assertIs(cfg["cfmesh"]["ground_refine"], False)
+        # Cell sizes are stated as intent (metres or "auto"), not as an engine mode.
+        self.assertEqual(cfg["mesh_params"]["base_cell_size"], "auto")
+        self.assertEqual(cfg["cfmesh"]["feature_angle"], 45)
+        self.assertEqual(cfg["cfmesh"]["ground_refine"], False)
         self.assertEqual(cfg["cfmesh"]["optimise_layer"], "auto")
+        self.assertEqual(cfg["cfmesh"]["parallel_meshing"], "auto")
         self.assertEqual(cfg["layers"]["first_layer_mode"], "relative")
+        self.assertFalse(get_mesher("cfmesh").enforces_cell_budget)
 
     def test_snappy_profile_is_selected_by_config(self):
         cfg = load_config(self.config(mesher="snappy"), project_dir=self.root)
         self.assertEqual(cfg["mesher"], "snappy")
-        self.assertEqual(cfg["mesh_params"]["cell_size_mode"], "relative_levels")
-        self.assertIs(cfg["mesh_params"]["cell_budget_enforced"], True)
+        self.assertTrue(get_mesher("snappy").enforces_cell_budget)
         # cfMesh-only policy keys must not leak into a snappy case
         self.assertNotIn("layer_mode", cfg["cfmesh"])
 
@@ -96,14 +99,14 @@ class ProfileMergeTest(ProjectScaffold):
         self.assertEqual(as_snappy["mesher"], "snappy")
         self.assertNotIn("layer_mode", as_snappy["cfmesh"])
         as_cfmesh = load_config(path, mesher="cfmesh", project_dir=self.root)
-        self.assertEqual(as_cfmesh["cfmesh"]["layer_mode"], "patch_only")
+        self.assertEqual(as_cfmesh["cfmesh"]["feature_angle"], 45)
 
     def test_case_values_beat_profile_values(self):
         cfg = load_config(self.config(cfmesh={"ground_refine": True, "optimise_layer": False}),
                           project_dir=self.root)
         self.assertIs(cfg["cfmesh"]["ground_refine"], True)
         self.assertIs(cfg["cfmesh"]["optimise_layer"], False)
-        self.assertEqual(cfg["cfmesh"]["layer_mode"], "patch_only")  # untouched profile key survives
+        self.assertEqual(cfg["cfmesh"]["feature_angle"], 45)  # untouched profile key survives
 
     def test_inline_mesh_params_block_applies_only_to_its_mesher(self):
         path = self.config(mesh_params_cfmesh={"body_cell_size": 0.02},
@@ -123,7 +126,8 @@ class ProfileMergeTest(ProjectScaffold):
         (override / "cfmesh.json").write_text(json.dumps({"cfmesh": {"optimise_layer": False}}))
         cfg = load_config(self.config(), project_dir=self.root)
         self.assertIs(cfg["cfmesh"]["optimise_layer"], False)
-        self.assertEqual(cfg["cfmesh"]["layer_mode"], "patch_only")
+        self.assertEqual(cfg["cfmesh"]["feature_angle"], 45)
+        self.assertEqual(cfg["cfmesh"]["ground_refine"], False)
         self.assertIs(load_mesher_profile("cfmesh", self.root)["cfmesh"]["optimise_layer"], False)
 
     def test_resolve_mesher_handles_the_legacy_dict_form(self):
@@ -139,6 +143,32 @@ class ProfileValidationTest(ProjectScaffold):
         cfg = load_config(self.config(mesh_params={"maxGlobalCells": 1000}), project_dir=self.root)
         _errors, warnings = validate(cfg, self.root)
         self.assertTrue(any("maxGlobalCells" in w for w in warnings), warnings)
+
+    def test_cfmesh_only_keys_are_flagged_for_snappy(self):
+        # min_cell_size is cfMesh's floor: snappy ignores it silently otherwise.
+        cfg = load_config(self.config(mesher="snappy", mesh_params={"min_cell_size": 0.002}),
+                          project_dir=self.root)
+        _errors, warnings = validate(cfg, self.root)
+        self.assertTrue(any("min_cell_size" in w for w in warnings), warnings)
+
+    def test_a_key_both_engines_read_is_not_flagged(self):
+        for mesher in ("cfmesh", "snappy"):
+            with self.subTest(mesher=mesher):
+                cfg = load_config(self.config(mesher=mesher, mesh_params={"near_wake_level": 4}),
+                                  project_dir=self.root)
+                _errors, warnings = validate(cfg, self.root)
+                self.assertFalse(any("near_wake_level" in w for w in warnings), warnings)
+
+    def test_unknown_snappy_block_key_is_flagged(self):
+        cfg = load_config(self.config(mesher="snappy", snappy={"octree_leves": 4}),
+                          project_dir=self.root)
+        _errors, warnings = validate(cfg, self.root)
+        self.assertTrue(any("octree_leves" in w for w in warnings), warnings)
+
+    def test_snappy_block_must_be_an_object(self):
+        cfg = load_config(self.config(mesher="snappy", snappy=[1, 2]), project_dir=self.root)
+        errors, _warnings = validate(cfg, self.root)
+        self.assertTrue(any("'snappy' must be an object" in e for e in errors), errors)
 
     def test_absolute_first_layer_mode_requires_a_height(self):
         cfg = load_config(self.config(layers={"first_layer_mode": "absolute"}), project_dir=self.root)
@@ -174,37 +204,83 @@ class ProfileValidationTest(ProjectScaffold):
         self.assertEqual(errors, [])
 
 
+class EngineKeyDeclarationTest(unittest.TestCase):
+    """Which engine reads a ``mesh_params`` key is declared once, as data.
+
+    The per-engine key lists, the ``ignores ...`` validation warning and the
+    Studio UI all derive from ``KeySpec.engines``, so there is no separate list
+    to update when a key moves between engines.
+    """
+
+    def test_engine_views_come_from_the_shared_table(self):
+        for name in SUPPORTED_MESHERS:
+            with self.subTest(mesher=name):
+                self.assertEqual(get_mesher(name).mesh_params_keys(), keys_for(name))
+
+    def test_engine_views_partition_the_shared_table(self):
+        cfmesh = set(keys_for("cfmesh"))
+        snappy = set(keys_for("snappy"))
+        self.assertEqual(cfmesh | snappy, set(MESH_PARAMS_KEYS))
+        every_key = dict.fromkeys(MESH_PARAMS_KEYS)
+        self.assertEqual(cfmesh - snappy, set(unread_keys(every_key, "snappy")))
+        self.assertEqual(snappy - cfmesh, set(unread_keys(every_key, "cfmesh")))
+
+    def test_declared_engines_are_real_meshers(self):
+        for key, spec in MESH_PARAMS_KEYS.items():
+            with self.subTest(key=key):
+                for engine in spec.engines:
+                    self.assertIn(engine, SUPPORTED_MESHERS)
+
+    def test_unread_keys_only_reports_keys_the_engine_misses(self):
+        mesh = {"maxGlobalCells": 1, "near_wake_level": 3, "not_a_key": True}
+        self.assertEqual(unread_keys(mesh, "cfmesh"), ["maxGlobalCells"])
+        self.assertEqual(unread_keys({"min_cell_size": 0.001, "edge_level": 6}, "snappy"),
+                         ["min_cell_size"])
+
+
 class TrailingEdgeRefinementTest(ProjectScaffold):
     """A thin trailing edge is resolved by a local box, not by a global floor.
 
     cfMesh's automatic curvature/proximity refinement stops at minCellSize, so
     the only local lever is an explicit refinement region. The scaffold STL is
     x 0..1.5, y 0..0.8, z 0..0.4 with the default -z flow, so the trailing-edge
-    plane sits at z = 0.
+    plane sits at z = 0. These tests pin ``base_cell_size: 0.10`` so the level
+    arithmetic matches the car-scale numbers; auto sizing would derive the base
+    from the scaffold itself (1.5 m / 30 = 0.05).
     """
 
     def regions(self, mesh_dict: str) -> str:
         return mesh_dict.split("objectRefinements", 1)[1].split("boundaryLayers", 1)[0]
 
-    def test_off_by_default(self):
-        mesh_dict = self.mesh_dict(self.generate("cfmesh", "te_off"))
+    def test_on_by_default(self):
+        # The fidelity presets turn it on, so a thin trailing edge is resolved
+        # without any case-level opt-in.
+        mesh_dict = self.mesh_dict(self.generate("cfmesh", "te_default"))
+        self.assertIn("trailingEdgeBox", mesh_dict)
+
+    def test_can_be_switched_off(self):
+        mesh_dict = self.mesh_dict(self.generate("cfmesh", "te_off",
+                                                 mesh_params={"trailing_edge_refine": False}))
         self.assertNotIn("trailingEdgeBox", mesh_dict)
 
     def test_auto_level_is_one_finer_than_the_edge_cell(self):
         # 0.10 / 2**7 = 0.00078125 m, one level below snappy's edge cell.
-        case = self.generate("cfmesh", "te_auto", mesh_params={"trailing_edge_refine": True})
+        case = self.generate("cfmesh", "te_auto",
+                             mesh_params={"trailing_edge_refine": True, "base_cell_size": 0.10})
         block = self.regions(self.mesh_dict(case))
         self.assertIn("trailingEdgeBox", block)
         self.assertIn("cellSize 0.000781;", block)
 
     def test_explicit_level_reaches_the_writer(self):
         case = self.generate("cfmesh", "te_level", mesh_params={"trailing_edge_refine": True,
+                                                               "base_cell_size": 0.10,
                                                                "te_level": 6})
         expected = f"cellSize {round(0.10 / 2 ** 6, 6)};"
         self.assertIn(expected, self.regions(self.mesh_dict(case)))
 
     def test_box_hugs_the_downstream_face(self):
-        case = self.generate("cfmesh", "te_box", mesh_params={"trailing_edge_refine": True})
+        case = self.generate("cfmesh", "te_box", mesh_params={"trailing_edge_refine": True,
+                                                             "base_cell_size": 0.10})
         cfg = json.loads((case / "case_config.json").read_text())
         region = next(r for r in cfg["mesh_params"]["refinement_regions"]
                       if r["name"] == "trailingEdgeBox")
@@ -222,7 +298,9 @@ class TrailingEdgeRefinementTest(ProjectScaffold):
         snappy_dict = self.snappy_dict(case)
         self.assertIn("trailingEdgeBox", snappy_dict)
         self.assertIn("mode inside", snappy_dict)
-        self.assertNotIn("trailingEdgeBox", self.snappy_dict(self.generate("snappy", "te_snappy_off")))
+        off = self.generate("snappy", "te_snappy_off",
+                            mesh_params={"trailing_edge_refine": False})
+        self.assertNotIn("trailingEdgeBox", self.snappy_dict(off))
 
     def test_user_region_with_the_same_name_wins(self):
         custom = [{"name": "trailingEdgeBox", "min": [0.0, 0.3, -0.02],
@@ -256,15 +334,15 @@ class CellSizeResolutionTest(unittest.TestCase):
     """Levels and absolute sizes must resolve to the same metres."""
 
     def test_levels_and_absolute_modes_agree(self):
-        levels = resolve_cell_sizes({"base_cell_size": 0.10, "surface_level": [4, 5], "edge_level": 6})
-        absolute = resolve_cell_sizes({"base_cell_size": 0.10, "body_cell_size": 0.00625})
-        self.assertEqual(levels["mode"], "relative_levels")
-        self.assertEqual(absolute["mode"], "absolute")
-        self.assertAlmostEqual(levels["body"], absolute["body"])
-        self.assertAlmostEqual(levels["edge"], 0.0015625)
+        levels = resolve_sizing({"base_cell_size": 0.10, "surface_level": [4, 5], "edge_level": 6})
+        absolute = resolve_sizing({"base_cell_size": 0.10, "body_cell_size": 0.00625})
+        self.assertEqual(levels.mode, "relative_levels")
+        self.assertEqual(absolute.mode, "absolute")
+        self.assertAlmostEqual(levels.body_cell_size, absolute.body_cell_size)
+        self.assertAlmostEqual(levels.edge_cell_size, 0.0015625)
         # cfMesh's floor is a *global* one, so it follows the body cell rather
         # than the edge cell snappy only uses on feature-edge cells.
-        self.assertAlmostEqual(levels["min"], levels["body"])
+        self.assertAlmostEqual(levels.min_cell_size, levels.body_cell_size)
 
     def test_first_layer_relative_and_absolute_agree(self):
         relative = resolve_first_layer_height({"first_layer_thickness": 0.3}, 0.00625)
@@ -337,8 +415,9 @@ class WriterEquivalenceTest(ProjectScaffold):
         case = self.generate("cfmesh", "cf_snapshot")
         snapshot = json.loads((case / "case_config.json").read_text())
         self.assertEqual(snapshot["mesher"], "cfmesh")
-        self.assertEqual(snapshot["cfmesh"]["layer_mode"], "patch_only")
-        self.assertIs(snapshot["mesh_params"]["cell_budget_enforced"], False)
+        self.assertEqual(snapshot["cfmesh"]["feature_angle"], 45)
+        self.assertEqual(snapshot["cfmesh"]["optimise_layer"], "auto")
+        self.assertEqual(snapshot["mesh_params"]["base_cell_size_mode"], "auto")
 
 
 class CfMeshRefinementFloorTest(ProjectScaffold):
@@ -352,35 +431,41 @@ class CfMeshRefinementFloorTest(ProjectScaffold):
 
     def test_profile_floors_cfmesh_at_the_body_cell(self):
         cfg = load_config(self.config(), project_dir=self.root)
-        self.assertEqual(cfg["mesh_params"]["min_cell_size"], "body")
-        sizes = resolve_cell_sizes(cfg["mesh_params"])
-        self.assertAlmostEqual(sizes["body"], 0.00625)     # 0.10 / 2**4
-        self.assertAlmostEqual(sizes["min"], sizes["body"])
-        self.assertAlmostEqual(sizes["edge"], 0.0015625)   # 0.10 / 2**6, snappy-only
+        # The floor is not a profile key any more: leaving it unset *means* the
+        # body cell (resolve_min_cell_size defaults to it).
+        self.assertNotIn("min_cell_size", cfg["mesh_params"])
+        sizing = resolve_sizing({"base_cell_size": 0.10, "surface_level": [4, 5],
+                                 "edge_level": 6})
+        self.assertAlmostEqual(sizing.body_cell_size, 0.00625)    # 0.10 / 2**4
+        self.assertAlmostEqual(sizing.min_cell_size, sizing.body_cell_size)
+        self.assertAlmostEqual(sizing.edge_cell_size, 0.0015625)  # 0.10 / 2**6
 
     def test_cfmesh_mesh_dict_floors_at_the_body_cell(self):
-        cfmesh_dict = self.mesh_dict(self.generate("cfmesh", "cf_floor"))
+        cfmesh_dict = self.mesh_dict(self.generate("cfmesh", "cf_floor",
+                                                  mesh_params={"base_cell_size": 0.10}))
         self.assertIn("minCellSize         0.00625;", cfmesh_dict)
         self.assertIn("cellSize 0.00625;", cfmesh_dict)  # same cell as the surface
 
     def test_aliases_resolve_to_the_matching_cell_size(self):
-        sizes = resolve_cell_sizes({"base_cell_size": 0.10, "surface_level": [4, 5], "edge_level": 6})
-        cases = {"base": sizes["base"], "body": sizes["body"], "surface": sizes["body"],
-                 "edge": sizes["edge"], "feature": sizes["edge"]}
+        sizing = resolve_sizing({"base_cell_size": 0.10, "surface_level": [4, 5], "edge_level": 6})
+        cases = {"base": sizing.base_cell_size, "body": sizing.body_cell_size, "surface": sizing.body_cell_size,
+                 "edge": sizing.edge_cell_size, "feature": sizing.edge_cell_size}
         self.assertEqual(set(cases), set(MIN_CELL_SIZE_ALIASES))
         for alias, expected in cases.items():
             self.assertAlmostEqual(
-                resolve_min_cell_size(alias, base=sizes["base"], body=sizes["body"], edge=sizes["edge"]),
+                resolve_min_cell_size(alias, base=sizing.base_cell_size, body=sizing.body_cell_size, edge=sizing.edge_cell_size),
                 expected, msg=alias)
 
     def test_unset_floor_defaults_to_the_body_cell(self):
-        sizes = resolve_cell_sizes({"base_cell_size": 0.10, "surface_level": [4, 5]})
-        self.assertAlmostEqual(sizes["min"], sizes["body"])
+        sizing = resolve_sizing({"base_cell_size": 0.10, "surface_level": [4, 5]})
+        self.assertAlmostEqual(sizing.min_cell_size, sizing.body_cell_size)
 
     def test_numeric_floor_and_edge_alias_still_reach_the_writer(self):
-        numeric = self.generate("cfmesh", "cf_floor_numeric", mesh_params={"min_cell_size": 0.003})
+        numeric = self.generate("cfmesh", "cf_floor_numeric",
+                                mesh_params={"base_cell_size": 0.10, "min_cell_size": 0.003})
         self.assertIn("minCellSize         0.003;", self.mesh_dict(numeric))
-        alias = self.generate("cfmesh", "cf_floor_edge", mesh_params={"min_cell_size": "edge"})
+        alias = self.generate("cfmesh", "cf_floor_edge",
+                              mesh_params={"base_cell_size": 0.10, "min_cell_size": "edge"})
         self.assertIn("minCellSize         0.0015625;", self.mesh_dict(alias))
 
     def test_bad_floor_is_reported(self):

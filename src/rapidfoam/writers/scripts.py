@@ -11,7 +11,8 @@ from pathlib import Path
 from typing import Any
 
 from rapidfoam.geometry import parse_axis
-from rapidfoam.mesher_profiles import resolve_mesher
+from rapidfoam.meshers import mesher_for
+from rapidfoam.meshers.plan import MeshCommand, MeshPlan
 
 MONITOR_CLEANUP = """\
 stop_monitor() {
@@ -183,27 +184,128 @@ if __name__ == "__main__":
 '''
 
 
-def _resolve_parallel_meshing(cfmesh_cfg: dict[str, Any], n_procs: Any) -> bool:
-    """Whether cartesianMesh runs under MPI.
+def _command_text(command: MeshCommand) -> str:
+    """``tool arg arg`` for a meshing command."""
+    return " ".join((command.tool, *command.args))
 
-    cfMesh has no pre-decomposition step of its own: it splits the octree
-    across the ranks given on the mpirun command line and reads the rank count
-    from ``system/decomposeParDict``, so a parallel mesh run needs
-    ``reconstructParMesh -constant`` afterwards. ``parallel_meshing: "auto"``
-    (the default) turns it on whenever the case has more than one rank.
-    """
-    value = cfmesh_cfg.get("parallel_meshing", "auto")
-    if isinstance(value, bool):
-        return value
-    text = str(value).strip().lower()
-    if text in ("true", "yes", "1"):
-        return True
-    if text in ("false", "no", "0"):
-        return False
-    try:
-        return int(n_procs) > 1
-    except (TypeError, ValueError):
-        return False
+
+def _plan_title(plan: MeshPlan, parallel: bool) -> str:
+    """Section header, e.g. ``cfMesh cartesianMesh, MPI``."""
+    return f"{plan.label}{', MPI' if parallel else ''}"
+
+
+def _allrun_command_lines(command: MeshCommand, *, parallel: bool) -> list[str]:
+    """One command as ``Allrun`` spells it (RunFunctions, no explicit logs)."""
+    lines = [f"export {name}" for name in command.env_allrun]
+    runner = "runParallel" if (parallel and command.mpi) else "runApplication"
+    call = f"{runner} {_command_text(command)}"
+
+    if parallel and command.mpi and command.serial_retry:
+        # A build without the parallel octree still has to mesh: retry serially.
+        # runApplication appends to an existing log, so the failed attempt is moved
+        # aside afterwards - that log is what tells the two builds apart.
+        lines.append(f"if {call}; then")
+        if command.reconstruct_after:
+            lines.append("    runApplication reconstructParMesh -constant")
+            lines.append("    rm -rf processor*")
+        lines.append("else")
+        lines.append(f'    echo ">>> Parallel {command.tool} failed; meshing serially" >&2')
+        lines.append(f'    echo ">>> Reason kept in {command.log}.parallel:" >&2')
+        lines.append(f'    [ -f {command.log} ] && tail -n 20 {command.log} >&2 || true')
+        lines.append(f"    mv -f {command.log} {command.log}.parallel 2>/dev/null || true")
+        lines.append("    rm -rf processor*")
+        lines.append(f"    runApplication {_command_text(command)}")
+        lines.append("fi")
+        lines.append("")
+        return lines
+
+    lines.append(call)
+    if parallel and command.mpi and command.reconstruct_after:
+        lines.append("runApplication reconstructParMesh -constant")
+        lines.append("rm -rf processor*")
+    return lines
+
+
+def _slurm_command_lines(command: MeshCommand) -> list[str]:
+    """One command as ``run.sh`` spells it (explicit mpirun, per-stage logs)."""
+    label = f'>>> Running {command.tool}'
+    if command.mpi:
+        label += " (parallel, $SLURM_NTASKS ranks)"
+    lines = [f'echo "{label}"']
+
+    if not command.mpi:
+        lines += [f"export {name}" for name in command.env]
+        lines.append(f"{_command_text(command)} > {command.log} 2>&1")
+        lines.append("")
+        return lines
+
+    lines += [f"export {name}" for name in command.env_mpi]
+    argv = " ".join((
+        "mpirun --oversubscribe -np $SLURM_NTASKS",
+        _command_text(command),
+        *command.mpi_args,
+    ))
+
+    if not command.serial_retry:
+        lines.append(f"{argv} > {command.log} 2>&1")
+        if command.reconstruct_after:
+            lines += [
+                "",
+                'echo ">>> Reconstructing mesh"',
+                "reconstructParMesh -constant > log.reconstructParMesh 2>&1",
+                "rm -rf processor*",
+            ]
+        lines.append("")
+        return lines
+
+    # Parallel attempt, serial retry. The attempt keeps its own log: the retry
+    # overwrites log.<tool>, which is where a rejected -parallel flag lands.
+    lines += [
+        "PARALLEL_MESH=0",
+        f"if {argv} > {command.log}.parallel 2>&1; then",
+        f"    mv {command.log}.parallel {command.log}",
+        "    PARALLEL_MESH=1",
+        "else",
+        f'    echo ">>> Parallel {command.tool} failed; meshing serially"',
+        f'    echo ">>> Reason kept in {command.log}.parallel:"',
+        f"    tail -n 20 {command.log}.parallel || true",
+        "    rm -rf processor*",
+        f"    {_command_text(command)} > {command.log} 2>&1",
+        "fi",
+        "",
+    ]
+    if command.reconstruct_after:
+        lines += [
+            'if [ "$PARALLEL_MESH" -eq 1 ]; then',
+            '    echo ">>> Reconstructing mesh"',
+            "    reconstructParMesh -constant > log.reconstructParMesh 2>&1",
+            "    rm -rf processor*",
+            "fi",
+            "",
+        ]
+    return lines
+
+
+def render_allrun_mesh(plan: MeshPlan, *, parallel: bool) -> str:
+    """The mesh phase for ``Allrun`` (``parallel=False``) and ``Allrun.parallel``."""
+    lines = [f"# Mesh ({_plan_title(plan, parallel)})"]
+    if plan.deploy_user_appbin:
+        lines.append('[ -n "$FOAM_USER_APPBIN" ] && export PATH="$FOAM_USER_APPBIN:$PATH"')
+    for command in plan.commands:
+        lines.extend(_allrun_command_lines(command, parallel=parallel))
+    return "\n".join(lines).rstrip()
+
+
+def render_slurm_mesh(plan: MeshPlan) -> str:
+    """The mesh phase for ``run.sh`` — explicit mpirun and per-stage logs."""
+    parallel = plan.parallel_meshing
+    lines = [f"# ======================== MESH ({_plan_title(plan, parallel)}) "
+             "========================"]
+    if plan.deploy_user_appbin:
+        lines.append('[ -n "$FOAM_USER_APPBIN" ] && export PATH="$FOAM_USER_APPBIN:$PATH"')
+    for command in plan.commands:
+        lines.extend(_slurm_command_lines(command))
+    return "\n".join(lines).rstrip()
 
 
 def write_scripts(cfg: dict[str, Any], case_dir: Path) -> None:
@@ -232,132 +334,14 @@ def write_scripts(cfg: dict[str, Any], case_dir: Path) -> None:
         _convergence_monitor_script(cfg),
     )
 
-    mesher_type = resolve_mesher(cfg)
-    cfmesh_cfg = cfg.get("cfmesh", {})
-    if not isinstance(cfmesh_cfg, dict):
-        cfmesh_cfg = {}
-    feature_angle = cfmesh_cfg.get("feature_angle", 45)
-    cfmesh_parallel = _resolve_parallel_meshing(cfmesh_cfg, n)
+    mesher = mesher_for(cfg)
+    plan = mesher.mesh_plan(cfg)
 
-    if mesher_type == "cfmesh":
-        # cfMesh meshes in parallel on its own: it splits the octree over the
-        # ranks handed to mpirun (the count comes from system/decomposeParDict)
-        # and the stitched mesh must be reconstructed with reconstructParMesh.
-        # No decomposePar is needed for meshing - only the solver's.
-        if cfmesh_parallel:
-            mesh_block_parallel = f"""# Mesh (cfMesh cartesianMesh, MPI)
-[ -n "$FOAM_USER_APPBIN" ] && export PATH="$FOAM_USER_APPBIN:$PATH"
-runApplication surfaceFeatureEdges -angle {feature_angle} constant/triSurface/domain.stl constant/triSurface/domain.fms
-
-# One OpenMP thread per rank: the octree passes are threaded, so MPI x threads oversubscribes.
-export OMP_NUM_THREADS=1
-if runParallel cartesianMesh; then
-    runApplication reconstructParMesh -constant
-    rm -rf processor*
-else
-    # Builds that reject the -parallel flag: mesh serially instead (log removed so
-    # runApplication does not skip the retry).
-    echo ">>> Parallel cartesianMesh failed; meshing serially" >&2
-    rm -rf processor*
-    rm -f log.cartesianMesh
-    runApplication cartesianMesh
-fi
-
-runApplication checkMesh -noFunctionObjects
-runApplication renumberMesh -overwrite -noFunctionObjects"""
-        else:
-            mesh_block_parallel = f"""# Mesh (cfMesh cartesianMesh)
-[ -n "$FOAM_USER_APPBIN" ] && export PATH="$FOAM_USER_APPBIN:$PATH"
-runApplication surfaceFeatureEdges -angle {feature_angle} constant/triSurface/domain.stl constant/triSurface/domain.fms
-runApplication cartesianMesh
-runApplication checkMesh -noFunctionObjects
-runApplication renumberMesh -overwrite -noFunctionObjects"""
-        mesh_block_serial = f"""[ -n "$FOAM_USER_APPBIN" ] && export PATH="$FOAM_USER_APPBIN:$PATH"
-runApplication surfaceFeatureEdges -angle {feature_angle} constant/triSurface/domain.stl constant/triSurface/domain.fms
-runApplication cartesianMesh
-runApplication checkMesh -noFunctionObjects
-runApplication renumberMesh -overwrite -noFunctionObjects"""
-        if cfmesh_parallel:
-            mesh_section_slurm = f"""# ======================== MESH (cfMesh, MPI) ========================
-[ -n "$FOAM_USER_APPBIN" ] && export PATH="$FOAM_USER_APPBIN:$PATH"
-echo ">>> Running surfaceFeatureEdges"
-surfaceFeatureEdges -angle {feature_angle} constant/triSurface/domain.stl constant/triSurface/domain.fms > log.surfaceFeatureEdges 2>&1
-
-echo ">>> Running cartesianMesh (parallel, $SLURM_NTASKS ranks)"
-# One OpenMP thread per rank: the octree passes are threaded, so MPI x threads oversubscribes.
-export OMP_NUM_THREADS=1
-PARALLEL_MESH=0
-if mpirun --oversubscribe -np $SLURM_NTASKS cartesianMesh -parallel > log.cartesianMesh 2>&1; then
-    PARALLEL_MESH=1
-else
-    echo ">>> Parallel cartesianMesh failed; meshing serially"
-    rm -rf processor*
-    cartesianMesh > log.cartesianMesh 2>&1
-fi
-
-if [ "$PARALLEL_MESH" -eq 1 ]; then
-    echo ">>> Reconstructing mesh"
-    reconstructParMesh -constant > log.reconstructParMesh 2>&1
-    rm -rf processor*
-fi
-
-echo ">>> Checking mesh"
-checkMesh -noFunctionObjects > log.checkMesh 2>&1
-
-echo ">>> Renumbering mesh"
-renumberMesh -overwrite -noFunctionObjects > log.renumberMesh 2>&1"""
-        else:
-            mesh_section_slurm = f"""# ======================== MESH (cfMesh) ========================
-[ -n "$FOAM_USER_APPBIN" ] && export PATH="$FOAM_USER_APPBIN:$PATH"
-echo ">>> Running surfaceFeatureEdges"
-surfaceFeatureEdges -angle {feature_angle} constant/triSurface/domain.stl constant/triSurface/domain.fms > log.surfaceFeatureEdges 2>&1
-
-echo ">>> Running cartesianMesh"
-export OMP_NUM_THREADS=${{SLURM_CPUS_PER_TASK:-$SLURM_NTASKS}}
-cartesianMesh > log.cartesianMesh 2>&1
-
-echo ">>> Checking mesh"
-checkMesh -noFunctionObjects > log.checkMesh 2>&1
-
-echo ">>> Renumbering mesh"
-renumberMesh -overwrite -noFunctionObjects > log.renumberMesh 2>&1"""
-    else:
-        mesh_block_parallel = """# Mesh
-runApplication surfaceFeatureExtract
-runApplication blockMesh
-runApplication decomposePar
-runParallel snappyHexMesh -overwrite -noFunctionObjects
-runParallel checkMesh -allGeometry -allTopology -noFunctionObjects
-runApplication reconstructParMesh -constant
-rm -rf processor*
-runApplication renumberMesh -overwrite -noFunctionObjects"""
-        mesh_block_serial = """runApplication surfaceFeatureExtract
-runApplication blockMesh
-runApplication snappyHexMesh -overwrite -noFunctionObjects
-runApplication checkMesh -allGeometry -allTopology -noFunctionObjects
-runApplication renumberMesh -overwrite -noFunctionObjects"""
-        mesh_section_slurm = """# ======================== MESH ========================
-echo ">>> Running surfaceFeatureExtract"
-surfaceFeatureExtract > log.surfaceFeatureExtract 2>&1
-
-echo ">>> Running blockMesh"
-blockMesh > log.blockMesh 2>&1
-
-echo ">>> Decomposing for meshing"
-decomposePar > log.decomposePar 2>&1
-
-echo ">>> Running snappyHexMesh (parallel)"
-mpirun --oversubscribe -np $SLURM_NTASKS snappyHexMesh -overwrite -noFunctionObjects -parallel > log.snappyHexMesh 2>&1
-
-echo ">>> Checking mesh (parallel)"
-mpirun --oversubscribe -np $SLURM_NTASKS checkMesh -allGeometry -allTopology -noFunctionObjects -parallel > log.checkMesh 2>&1
-
-echo ">>> Reconstructing mesh"
-reconstructParMesh -constant > log.reconstructParMesh 2>&1
-rm -rf processor*
-
-echo ">>> Renumbering mesh"
-renumberMesh -overwrite -noFunctionObjects > log.renumberMesh 2>&1"""
+    # One plan, three spellings: the serial Allrun, the MPI Allrun.parallel (which
+    # honours the plan's MPI choice) and run.sh's explicit-mpirun section.
+    mesh_block_serial = render_allrun_mesh(plan, parallel=False)
+    mesh_block_parallel = render_allrun_mesh(plan, parallel=plan.parallel_meshing)
+    mesh_section_slurm = render_slurm_mesh(plan)
 
     # ---- Allrun.parallel ----
     _write_script(case_dir / "Allrun.parallel", f"""\

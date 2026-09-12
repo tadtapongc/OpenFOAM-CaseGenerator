@@ -27,12 +27,14 @@ from rapidfoam.config import DEFAULT_CONFIG, find_stl, resolve_config_dict, vali
 from rapidfoam.geometry import (
     face_role,
     face_assignments,
-    FIDELITY_PRESETS,
     compute_domain_box,
     flow_axis_index_sign,
     up_axis_index,
 )
-from rapidfoam.mesher_profiles import SUPPORTED_MESHERS
+from rapidfoam.meshers import SUPPORTED_MESHERS, get_mesher
+from rapidfoam.meshers.keys import docs as key_docs
+from rapidfoam.meshers.presets import FIDELITY_PRESETS
+from rapidfoam.meshers.refinement import MESH_PARAMS_KEYS
 from rapidfoam.postproc.forces import (
     check_convergence,
     find_force_files,
@@ -313,19 +315,29 @@ async def api_config_defaults() -> dict[str, Any]:
         "default_config": DEFAULT_CONFIG,
         "available_meshers": list(SUPPORTED_MESHERS),
         # Profile-resolved defaults per engine: what "Auto" means for the mesher
-        # selected in the UI (cell_size_mode, layer_mode, ground_refine, ...).
+        # selected in the UI (ground_refine, parallel_meshing, ...).
         "mesher_defaults": {
             name: _public_config(resolve_config_dict({}, mesher=name, project_dir=PROJECT_ROOT))
             for name in SUPPORTED_MESHERS
         },
-        "fidelity_presets": {
+        # The config surface itself, so the UI does not carry its own copy of the
+        # keys, their defaults or their descriptions.
+        "mesher_keys": {
             name: {
-                "desc": p.get("desc", ""),
-                "cell_estimate": p.get("cell_estimate", ""),
-                "n_cells_target": p.get("n_cells_target", 0),
-                "runtime_estimate": p.get("runtime_estimate", ""),
+                "engine": key_docs(get_mesher(name).engine_keys()),
+                "mesh_params": key_docs(get_mesher(name).mesh_params_keys()),
+                "removed": get_mesher(name).removed_keys(),
             }
-            for name, p in FIDELITY_PRESETS.items()
+            for name in SUPPORTED_MESHERS
+        },
+        "mesh_params_keys": key_docs(MESH_PARAMS_KEYS),
+        # The presets in full, not just their headline numbers: the Studio's
+        # Overrides tab reads the levels, the wake offsets and the layer settings
+        # from here, so its "Auto (…)" labels are re-rendered for the selected
+        # engine and fidelity from the same table the runners size the mesh with.
+        "fidelity_presets": {
+            name: _public_config(dict(preset))
+            for name, preset in FIDELITY_PRESETS.items()
         },
     }
 
@@ -516,6 +528,21 @@ async def api_stl_upload(
         }
 
 
+def _cell_budget_response(cfg: dict[str, Any]) -> dict[str, Any] | None:
+    """Cell-budget estimate for a config, or ``None`` when it cannot be priced.
+
+    A UI validation step must never fail on a preview: missing STLs, an unreadable
+    file or an unresolved domain all mean "no estimate", not an error.
+    """
+    from rapidfoam.meshers.budget import budget_from_case
+
+    try:
+        budget = budget_from_case(cfg, PROJECT_ROOT / "stl")
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return budget.as_dict() if budget is not None else None
+
+
 @app.post("/api/case/validate")
 async def api_case_validate(req: GenerateCaseRequest) -> dict[str, Any]:
     """Validate configuration without writing configuration or case files."""
@@ -526,7 +553,10 @@ async def api_case_validate(req: GenerateCaseRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc))
     if errors:
         raise HTTPException(status_code=400, detail=", ".join(errors))
-    return {"success": True, "warnings": warnings}
+    budget = _cell_budget_response(merged)
+    if budget:
+        warnings = warnings + [f"Cell budget: {message}" for message in budget["warnings"]]
+    return {"success": True, "warnings": warnings, "cell_budget": budget}
 
 
 @app.post("/api/case/generate-and-submit")

@@ -113,17 +113,18 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False,
     from rapidfoam.config import find_stl, load_config, validate
     from rapidfoam.geometry import (
         compute_domain_box,
-        compute_mesh_params,
         face_assignments,
         face_role,
-        resolve_cell_sizes,
-        resolve_first_layer_height,
         turbulence_values,
         vec_str,
         velocity_vector,
     )
-    from rapidfoam.mesher_profiles import project_profile_path, resolve_mesher
-    from rapidfoam.stl_utils import copy_stl, stl_info
+    from rapidfoam.mesher_profiles import project_profile_path
+    from rapidfoam.meshers import mesher_for
+    from rapidfoam.meshers.budget import estimate_cell_budget
+    from rapidfoam.meshers.refinement import resolve_mesh_params
+    from rapidfoam.meshers.sizing import resolve_first_layer_height, resolve_sizing
+    from rapidfoam.stl_utils import copy_stl, stl_info, stl_surface_area
 
     if not cfg_path.exists():
         sys.exit(f"ERROR: {cfg_path} not found")
@@ -176,6 +177,8 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False,
     all_min = [float("inf")] * 3
     all_max = [float("-inf")] * 3
     stl_info_map: dict[str, tuple[str, int, tuple[tuple[float, float, float], tuple[float, float, float]]]] = {}
+    stl_area = 0.0
+    stl_area_known = True
     for stem, path in stl_pairs:
         try:
             info = stl_info(path)
@@ -183,6 +186,10 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False,
             smin, smax = info[2]
         except (OSError, ValueError) as exc:
             sys.exit(f"ERROR: {exc}")
+        try:
+            stl_area += stl_surface_area(path)
+        except (OSError, ValueError):
+            stl_area_known = False
         for i in range(3):
             all_min[i] = min(all_min[i], smin[i])
             all_max[i] = max(all_max[i], smax[i])
@@ -233,9 +240,10 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False,
                   f"{axis_labels[i]}_max (clearance: {clearance_max:.3f} m)")
 
     # Derive mesh parameters from geometry
-    cfg["mesh_params"] = compute_mesh_params(cfg, combined_bounds)
+    cfg["mesh_params"] = resolve_mesh_params(cfg, combined_bounds)
     # Apply fidelity presets conditionally
-    from rapidfoam.geometry import FIDELITY_PRESETS
+    from rapidfoam.meshers.presets import FIDELITY_PRESETS
+
     fidelity = cfg.get("fidelity", "standard")
     preset = FIDELITY_PRESETS.get(fidelity, FIDELITY_PRESETS["standard"])
     
@@ -285,19 +293,32 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False,
         print(f"    Distance shells: {shells}")
     for r in mesh.get("refinement_regions", []):
         print(f"    Region {r['name']}: Level {r['level']}")
-    mesher_type = resolve_mesher(cfg)
-    sizes = resolve_cell_sizes(mesh)
+    mesher = mesher_for(cfg)
+    mesher_type = mesher.name
+    sizing = resolve_sizing(mesh)
     layers_cfg = cfg.get("layers", {})
-    first_layer = resolve_first_layer_height(layers_cfg, sizes["body"])
-    print(f"    Body / edge cell:  {sizes['body']*1000:.2f} / {sizes['edge']*1000:.2f} mm "
-          f"(floor {sizes['min']*1000:.2f} mm)")
+    first_layer = resolve_first_layer_height(layers_cfg, sizing.body_cell_size)
+    print(f"    Body / edge cell:  {sizing.body_cell_size*1000:.2f} / "
+          f"{sizing.edge_cell_size*1000:.2f} mm (floor {sizing.min_cell_size*1000:.2f} mm)")
     print(f"    First layer:       {first_layer*1000:.2f} mm x {layers_cfg.get('n_layers', 0)} layers")
-    if not mesh.get("cell_budget_enforced", mesher_type == "snappy"):
-        print("    Note: cfMesh has no maxGlobalCells cap — the cell count follows the body/edge "
-              "cell size, cfmesh.ground_refine and cfmesh.optimise_layer.")
+    if not mesher.enforces_cell_budget:
+        print(f"    Note: {mesher.label} has no maxGlobalCells cap — the cell count follows the "
+              "body/edge cell size, cfmesh.ground_refine and cfmesh.optimise_layer.")
+
+    # Where the cells go: every refinement region priced as volume / cell**3, so a
+    # region that would eat the cap (or a fine TE box that costs more than the model)
+    # is visible before the mesh runs, not in the log afterwards.
+    budget = estimate_cell_budget(cfg, surface_area=stl_area if stl_area_known else None)
+    for line in budget.report_lines():
+        print(line)
+    if not stl_area_known:
+        print("  ℹ  Cell budget: the STL area could not be read, so the distance "
+              "shells are not priced.")
+    for message in budget.warnings():
+        print(f"  ⚠  Cell budget: {message}")
 
     div_u_scheme = cfg.get("schemes", {}).get("div_U", "bounded Gauss limitedLinear 1")
-    mesher_name = "cfMesh (cartesianMesh)" if mesher_type == "cfmesh" else "snappyHexMesh"
+    mesher_name = mesher.label
     profile_note = ""
     if project_profile_path(mesher_type, project_dir).is_file():
         profile_note = f" [configs/meshers/{mesher_type}.json]"
@@ -355,24 +376,10 @@ def _do_generate(cfg_path: Path, project_dir: Path, dry_run: bool = False,
         write_fv_schemes,
         write_fv_solution,
     )
-    if mesher_type == "cfmesh":
-        from rapidfoam.writers.cfmesh import generate_domain_stl, write_mesh_dict
-        generate_domain_stl(cfg, case_dir, stl_pairs)
-        write_mesh_dict(cfg, case_dir)
-        print("    ✓ domain.stl (wind tunnel box + CAD)")
-        print("    ✓ system/meshDict (cfMesh)")
-    else:
-        from rapidfoam.writers.snappy import (
-            write_block_mesh_dict,
-            write_snappy_hex_mesh_dict,
-            write_surface_feature_extract_dict,
-        )
-        write_block_mesh_dict(cfg, case_dir)
-        write_surface_feature_extract_dict(cfg, case_dir)
-        write_snappy_hex_mesh_dict(cfg, case_dir)
-        print("    ✓ system/blockMeshDict")
-        print("    ✓ system/surfaceFeatureExtractDict")
-        print("    ✓ system/snappyHexMeshDict")
+    # The selected mesher writes its own files (domain.stl + meshDict for cfMesh,
+    # blockMesh/surfaceFeatureExtract/snappyHexMesh dicts for snappy).
+    for artifact in mesher.write_case(cfg, case_dir, stl_pairs):
+        print(f"    ✓ {artifact}")
 
     write_control_dict(cfg, case_dir)
     write_fv_schemes(cfg, case_dir)

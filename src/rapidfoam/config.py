@@ -13,11 +13,8 @@ import math
 from pathlib import Path
 from typing import Any
 
-from rapidfoam.mesher_profiles import (
-    SUPPORTED_MESHERS,
-    load_mesher_profile,
-    resolve_mesher,
-)
+from rapidfoam.mesher_profiles import SUPPORTED_MESHERS, load_mesher_profile
+from rapidfoam.meshers import get_mesher, resolve_mesher
 
 log = logging.getLogger(__name__)
 
@@ -231,11 +228,19 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "nNonOrthogonalCorrectors": 10,
     },
 
-    # Mesher engine ("cfmesh" | "snappy")
+    # Mesher engine ("cfmesh" | "snappy"). The engine keys themselves come from
+    # the engine's profile (src/rapidfoam/mesher_profiles/<engine>.json, overlaid
+    # by configs/meshers/<engine>.json) and are declared in
+    # src/rapidfoam/meshers/<engine>/keys.py; docs/meshers.md documents them.
+    # An empty block here only guarantees the section exists.
     "mesher": "cfmesh",
-    "cfmesh": {
-        "workflow": "cartesianMesh",
-        "feature_angle": 45,
+    "cfmesh": {},
+
+    # Mesh sizing intent. "auto" = cells_per_length cells along the model's
+    # longest bounding-box dimension; a number in metres pins the absolute
+    # behaviour. The presets supply cells_per_length, so it is not defaulted here.
+    "mesh_params": {
+        "base_cell_size": "auto",
     },
 }
 
@@ -362,13 +367,10 @@ def validate(cfg: dict[str, Any], project_dir: Path) -> tuple[list[str], list[st
     errors: list[str] = []
     warnings: list[str] = []
 
-    from rapidfoam.geometry import (
-        FIDELITY_PRESETS,
-        MIN_CELL_SIZE_ALIASES,
-        face_assignments,
-        face_role,
-        parse_axis,
-    )
+    from rapidfoam.geometry import face_assignments, face_role, parse_axis
+    from rapidfoam.meshers.keys import removed, unknown_keys, validate_keys
+    from rapidfoam.meshers.presets import FIDELITY_PRESETS
+    from rapidfoam.meshers.refinement import MESH_PARAMS_KEYS, RESOLVED_ONLY_KEYS
 
     # Check containers before dereferencing nested values.
     sections = [key for key, value in DEFAULT_CONFIG.items() if isinstance(value, dict)]
@@ -470,20 +472,15 @@ def validate(cfg: dict[str, Any], project_dir: Path) -> tuple[list[str], list[st
 
     for section, keys in {
         "fluid": ("nu", "rho"), "turbulence": ("intensity", "nut_ratio"),
-        "mesh_params": ("base_cell_size", "boundary_cell_size", "ground_cell_size"), "solver": ("end_time", "write_interval"),
+        "solver": ("end_time", "write_interval"),
         "layers": ("expansion_ratio", "first_layer_thickness", "min_thickness"),
         "force_refs": ("lRef", "Aref"),
     }.items():
         for key in keys:
             positive(section, key)
-    for section, keys in {
-        "parallel": ("n_procs",), "slurm": ("nodes", "cpus_per_task"),
-        "mesh_params": ("maxGlobalCells", "maxLocalCells", "nCellsBetweenLevels"),
-    }.items():
-        for key in keys:
-            positive(section, key, integer=True)
-    for key in ("edge_level", "near_wake_level", "far_wake_level", "wake_level", "minRefinementCells"):
-        positive("mesh_params", key, integer=True, allow_zero=True)
+    for key in ("nodes", "cpus_per_task"):
+        positive("slurm", key, integer=True)
+    positive("parallel", "n_procs", integer=True)
     positive("layers", "n_layers", integer=True, allow_zero=True)
     positive("solver", "purge_write", integer=True, allow_zero=True)
     for key in cfg.get("domain", {}):
@@ -492,97 +489,38 @@ def validate(cfg: dict[str, Any], project_dir: Path) -> tuple[list[str], list[st
     for key in ("ground_plane", "ground_clearance", "symmetry_plane", "centerline"):
         value = cfg.get(key)
         if value is not None and (not finite(value) or (key == "ground_clearance" and value < 0)):
-            errors.append(f"{key} must be finite" + (" and ≥ 0" if key == "ground_clearance" else ""))
+            errors.append(f"{key} must be finite"
+                          + (" and >= 0" if key == "ground_clearance" else ""))
     vector(cfg["force_refs"].get("CofR"), "force_refs.CofR")
+
+    # ------------------------------------------------------------------
+    # Mesh parameters and the engine block are validated from the tables the
+    # meshers declare (rapidfoam/meshers/), so a key cannot be read in one
+    # module and validated in another, and a removed key fails loudly instead of
+    # being silently ignored.
+    # ------------------------------------------------------------------
     mesh = cfg.get("mesh_params", {})
-    for key in ("locationInMesh", "location_in_mesh"):
-        if key in mesh:
-            vector(mesh[key], f"mesh_params.{key}")
-    level = mesh.get("surface_level")
-    if level is not None and (not isinstance(level, (list, tuple)) or len(level) != 2
-                             or not all(isinstance(n, int) and not isinstance(n, bool) and n >= 0 for n in level)
-                             or level[0] > level[1]):
-        errors.append("mesh_params.surface_level must be two ordered nonnegative integers")
-    for key in ("body_cell_size", "edge_cell_size", "min_cell_size", "refinement_thickness"):
-        if key == "min_cell_size" and isinstance(mesh.get(key), str):
-            # cfMesh's global refinement floor also takes aliases, e.g. "body"
-            # (= snappy's surface_level[0]) or "edge" (= snappy's edge_level).
-            if mesh[key].strip().lower() not in MIN_CELL_SIZE_ALIASES:
-                errors.append(
-                    "mesh_params.min_cell_size must be a number in metres or one of "
-                    f"{', '.join(sorted(MIN_CELL_SIZE_ALIASES))}"
-                )
-            continue
-        positive("mesh_params", key)
-
-    # Trailing-edge refinement (mesh_params.trailing_edge_refine -> a thin
-    # refinement box on the downstream-most face of the geometry).
-    for key in ("te_height_cells", "te_depth_cells"):
-        positive("mesh_params", key)
-    if "trailing_edge_refine" in mesh and not isinstance(mesh["trailing_edge_refine"], bool):
-        errors.append("mesh_params.trailing_edge_refine must be true or false")
-    te_level = mesh.get("te_level")
-    if te_level is not None and not (
-        (isinstance(te_level, int) and not isinstance(te_level, bool) and te_level >= 0)
-        or (isinstance(te_level, str) and te_level.strip().lower() == "auto")
-    ):
-        errors.append("mesh_params.te_level must be a nonnegative integer or 'auto'")
-
-    # ---- Mesher-profile keys (src/rapidfoam/mesher_profiles/<mesher>.json) ----
-    mode = mesh.get("cell_size_mode")
-    if mode is not None and str(mode).lower() not in ("absolute", "relative_levels"):
-        errors.append("mesh_params.cell_size_mode must be 'absolute' or 'relative_levels'")
-    if "ground_refine" in mesh and not isinstance(mesh["ground_refine"], bool):
-        errors.append("mesh_params.ground_refine must be true or false")
-
-    cfmesh_cfg = cfg.get("cfmesh", {})
-    if not isinstance(cfmesh_cfg, dict):
-        errors.append("'cfmesh' must be an object")
+    if mesher_type in SUPPORTED_MESHERS:
+        engine = get_mesher(mesher_type)
+        engine_errors, engine_warnings = engine.validate(cfg)
+        errors += engine_errors
+        warnings += engine_warnings
+        errors += unknown_keys(mesh, MESH_PARAMS_KEYS, "mesh_params",
+                               allowed=set(engine.removed_keys()) | set(RESOLVED_ONLY_KEYS))
     else:
-        optimise = cfmesh_cfg.get("optimise_layer", "auto")
-        valid_optimise = isinstance(optimise, bool) or (
-            isinstance(optimise, str) and optimise.strip().lower() in ("auto", "true", "false")
-        )
-        if not valid_optimise:
-            errors.append("cfmesh.optimise_layer must be true, false or 'auto'")
-        enum_keys = {
-            "layer_mode": ("patch_only", "global"),
-        }
-        for key, allowed in enum_keys.items():
-            if key in cfmesh_cfg and str(cfmesh_cfg[key]).lower() not in allowed:
-                errors.append(f"cfmesh.{key} must be one of {', '.join(repr(a) for a in allowed)}")
-        if "ground_refine" in cfmesh_cfg and not isinstance(cfmesh_cfg["ground_refine"], bool):
-            errors.append("cfmesh.ground_refine must be true or false")
-        parallel = cfmesh_cfg.get("parallel_meshing", "auto")
-        valid_parallel = isinstance(parallel, bool) or (
-            isinstance(parallel, str) and parallel.strip().lower() in ("auto", "true", "false")
-        )
-        if not valid_parallel:
-            errors.append("cfmesh.parallel_meshing must be true, false or 'auto'")
-        positive("cfmesh", "refinement_thickness")
-        positive("cfmesh", "feature_angle")
+        errors += removed(mesh, {"cell_size_mode": "cell sizes are stated once",
+                                 "cell_budget_enforced": "no mesher reads this"},
+                          "mesh_params")
+    errors += validate_keys(mesh, MESH_PARAMS_KEYS, "mesh_params")
 
     layers_cfg = cfg.get("layers", {})
     first_layer_mode = str(layers_cfg.get("first_layer_mode", "relative")).lower()
     if first_layer_mode not in ("relative", "absolute"):
         errors.append("layers.first_layer_mode must be 'relative' or 'absolute'")
     elif first_layer_mode == "absolute" and not layers_cfg.get("first_layer_height"):
-        errors.append("layers.first_layer_height (metres) is required when layers.first_layer_mode is 'absolute'")
+        errors.append("layers.first_layer_height (metres) is required when "
+                      "layers.first_layer_mode is 'absolute'")
     positive("layers", "first_layer_height")
-
-    # Keys that only one engine reads — flag them instead of silently ignoring
-    if mesher_type == "cfmesh":
-        ignored = sorted(
-            key for key in ("maxGlobalCells", "maxLocalCells", "nCellsBetweenLevels",
-                            "minRefinementCells", "distance_levels", "resolveFeatureAngle")
-            if key in mesh
-        )
-        if ignored:
-            warnings.append(
-                f"cfMesh ignores {', '.join(ignored)} (snappy-only keys). Control cfMesh cost with "
-                "mesh_params.body_cell_size / edge_cell_size / min_cell_size, cfmesh.ground_refine, "
-                "cfmesh.optimise_layer and the wake box levels instead."
-            )
 
     # Ground settings precedence warning
     if cfg.get("ground_plane") is not None and cfg.get("ground_clearance") is not None:

@@ -171,7 +171,10 @@ class ProjectTest(unittest.TestCase):
         cfg = json.loads((case / "case_config.json").read_text())
         self.assertEqual(cfg["domain_box"]["max"][:2], [1, 1.1])
         self.assertEqual(cfg["domain_box"]["min"][:2], [-4, -4])
-        for region in cfg["mesh_params"]["refinement_regions"]:
+        wake_regions = [r for r in cfg["mesh_params"]["refinement_regions"]
+                        if r["name"] in ("nearWakeBox", "farWakeBox")]
+        self.assertEqual(len(wake_regions), 2)
+        for region in wake_regions:
             self.assertEqual(region["max"][:2], [1, 1.11])
         self.assertIn("locationInMesh (-3.7500 -3.7450", (case / "system/snappyHexMeshDict").read_text())
 
@@ -489,6 +492,21 @@ class ProjectTest(unittest.TestCase):
         allrun = (case / "Allrun").read_text()
         self.assertIn("runApplication cartesianMesh", allrun)
         self.assertNotIn("reconstructParMesh", allrun)
+
+    def test_cfmesh_parallel_mesh_failure_log_survives_the_serial_retry(self):
+        case = self.generate(mesher="cfmesh", parallel={"n_procs": 8})
+
+        run_sh = (case / "run.sh").read_text()
+        # The two attempts must not share one log, otherwise the reason a build
+        # rejected -parallel is overwritten by the serial retry.
+        self.assertIn("cartesianMesh -parallel > log.cartesianMesh.parallel 2>&1", run_sh)
+        self.assertIn("mv log.cartesianMesh.parallel log.cartesianMesh", run_sh)
+        self.assertIn("tail -n 20 log.cartesianMesh.parallel", run_sh)
+        self.assertNotIn("cartesianMesh -parallel > log.cartesianMesh 2>&1", run_sh)
+
+        allrun_parallel = (case / "Allrun.parallel").read_text()
+        self.assertIn("mv -f log.cartesianMesh log.cartesianMesh.parallel", allrun_parallel)
+        self.assertIn("tail -n 20 log.cartesianMesh >&2", allrun_parallel)
 
     def test_cfmesh_meshing_can_be_forced_serial(self):
         case = self.generate(mesher="cfmesh", parallel={"n_procs": 8},

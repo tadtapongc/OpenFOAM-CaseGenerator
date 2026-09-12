@@ -569,13 +569,25 @@
                   <!-- 3. Mesh Parameter Overrides -->
                   <div class="form-group col-span-2 overrides-section-header">
                     <h4 class="section-subtitle">3. Mesh Parameter Overrides</h4>
-                    <span class="field-hint">Custom cell refinement levels overriding fidelity presets. Leave empty to use active fidelity preset.</span>
+                    <span class="field-hint">Custom cell sizing overriding the fidelity presets. Leave empty to follow the active preset &mdash; every Auto label below is resolved for the selected Mesher Engine, and a knob that engine does not read is disabled with the reason. See docs/meshers.md.</span>
                   </div>
 
                   <div class="form-group">
                     <label for="cfg-override-basecell">Base Cell Size (m)</label>
-                    <input type="number" id="cfg-override-basecell" class="input" step="0.01" placeholder="Auto / Preset (0.10)">
-                    <span class="field-hint">Background hex cell size</span>
+                    <input type="number" id="cfg-override-basecell" class="input" step="0.01" placeholder="Auto (model length / 30 = 0.10 m on a 3.0 m car)">
+                    <span class="field-hint">Background hex cell size. Blank = auto: the fidelity preset's cells_per_length across the model's longest dimension, so a smaller model is meshed proportionally finer.</span>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="cfg-override-cellsperlength">Cells Per Length (auto sizing)</label>
+                    <input type="number" id="cfg-override-cellsperlength" class="input" step="0.5" min="1" placeholder="Auto / Preset (30)">
+                    <span class="field-hint">mesh_params.cells_per_length - background cells across the model's longest dimension (20 fast / 30 standard / 37.5 fine). Raise it to resolve a front wing or a subassembly at the same preset.</span>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="cfg-override-mincellsize">Minimum Cell Size (cfMesh floor)</label>
+                    <input type="text" id="cfg-override-mincellsize" class="input" placeholder="Auto / Preset (body)">
+                    <span class="field-hint">mesh_params.min_cell_size - cfMesh's global automatic-refinement floor: body (default), edge (resolves flap slots everywhere at ~2x the cells), base, or metres. snappy does not read it, so this field is disabled while snappy is selected.</span>
                   </div>
 
                   <div class="form-group">
@@ -596,13 +608,13 @@
                   <div class="form-group">
                     <label for="cfg-override-nearwake">Near Wake Refinement Level</label>
                     <input type="number" id="cfg-override-nearwake" class="input" min="0" max="8" placeholder="Auto / Preset (3)">
-                    <span class="field-hint">Refinement immediately behind geometry</span>
+                    <span class="field-hint">Absolute level overriding the preset's wake_levels_below_surface[0]; blank keeps surface_level[0] minus that offset, as the Auto hint states</span>
                   </div>
 
                   <div class="form-group">
                     <label for="cfg-override-farwake">Far Wake Refinement Level</label>
                     <input type="number" id="cfg-override-farwake" class="input" min="0" max="8" placeholder="Auto / Preset (1)">
-                    <span class="field-hint">Refinement level down to outlet</span>
+                    <span class="field-hint">Absolute level overriding the preset's wake_levels_below_surface[1]; blank keeps surface_level[0] minus that offset</span>
                   </div>
 
                   <!-- 4. Boundary Layer Mesh Overrides -->
@@ -705,7 +717,7 @@
                   <!-- 7. Mesher Engine Policy (profile keys) -->
                   <div class="form-group col-span-2 overrides-section-header">
                     <h4 class="section-subtitle">7. Mesher Engine Policy</h4>
-                    <span class="field-hint">Engine-native policy taken from src/rapidfoam/mesher_profiles/&lt;mesher&gt;.json (overridable per project via configs/meshers/). Leave on Auto to follow the profile.</span>
+                    <span class="field-hint">Engine-native policy taken from src/rapidfoam/mesher_profiles/&lt;mesher&gt;.json (overridable per project via configs/meshers/). Leave on Auto to follow the profile; the keys and their meanings are documented in docs/meshers.md and returned by GET /api/config/schema-defaults. The three keys below are cfMesh's, so they are disabled while snappy is selected.</span>
                   </div>
 
                   <div class="form-group">
@@ -719,13 +731,13 @@
                   </div>
 
                   <div class="form-group">
-                    <label for="cfg-override-cfmesh-layermode">Boundary Layer Scope (cfMesh)</label>
-                    <select id="cfg-override-cfmesh-layermode" class="input">
-                      <option value="" selected>Auto (profile: patch_only)</option>
-                      <option value="patch_only">Patch only — STL surfaces (and road when enabled)</option>
-                      <option value="global">Global — legacy, layers every patch including the road</option>
+                    <label for="cfg-override-cfmesh-parallel">Parallel Meshing (cfMesh)</label>
+                    <select id="cfg-override-cfmesh-parallel" class="input">
+                      <option value="" selected>Auto (profile: auto — on when n_procs &gt; 1)</option>
+                      <option value="on">On — cartesianMesh under mpirun, stitched with reconstructParMesh</option>
+                      <option value="off">Off — always mesh serially</option>
                     </select>
-                    <span class="field-hint">cfmesh.layer_mode — which patches receive prism layers</span>
+                    <span class="field-hint">cfmesh.parallel_meshing — a build that rejects the parallel octree falls back to a serial mesh and keeps log.cartesianMesh.parallel</span>
                   </div>
 
                   <div class="form-group">

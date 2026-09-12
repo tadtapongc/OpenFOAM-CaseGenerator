@@ -1,32 +1,10 @@
 {
-    "_note": "cfMesh (cartesianMesh) native meshing profile. Merged only when mesher = cfmesh.",
-    "_merge_order": "DEFAULT_CONFIG -> this profile -> case config -> case mesh_params_cfmesh -> case overrides",
-    "_override_how": "Repeat any key in your case config (e.g. \"cfmesh\": {\"ground_refine\": true}), or drop configs/meshers/cfmesh.json for a project-local override.",
+    "_note": "cfMesh (cartesianMesh) profile. Merged only when mesher = cfmesh, before the case config, so a project can retune the engine once. The keys, their defaults and their descriptions are declared in src/rapidfoam/meshers/cfmesh/keys.py and documented in docs/meshers.md.",
+    "_override_how": "Repeat a key in your case config, or drop configs/meshers/cfmesh.json in your project to override the shipped profile for every case.",
     "mesher": "cfmesh",
 
-    "mesh_params": {
-        "_cell_size_mode": "'absolute' = cfMesh-native: localRefinement takes cellSize in metres. Derivation: body = mesh_params.body_cell_size, else base_cell_size / 2**surface_level[0] (the coarse level, matching snappy); edge = mesh_params.edge_cell_size, else base_cell_size / 2**edge_level.",
-        "cell_size_mode": "absolute",
-        "_min_cell_size": "cfMesh's *global* automatic-refinement floor. meshOctreeAutomaticRefinement::setMaxRefLevel derives the deepest octree level the curvature and proximity passes may reach from minCellSize alone, so this key -- not edge_level -- sets the resolved cell size on the body. One wing A/B with an identical STL and config, changing only this key: 0.0015625 m = 3.95 M cells / 311 s mesh / 79m49s job versus 0.00625 m = 1.82 M cells / 130 s mesh / 12m58s job. The same floor is why a trailing edge thinner than the body cell stays slivery -- see trailing_edge_refine. Aliases: 'body' (default = the surface_level[0] cell), 'edge' (= base_cell_size / 2**edge_level), 'base'; or a number in metres.",
-        "min_cell_size": "body",
-        "_cell_budget": "cfMesh has no maxGlobalCells/maxLocalCells equivalent, so the budget is not enforced. Cost is controlled by body/edge cell size, min_cell_size, ground_refine, trailing_edge_refine, the wake box levels and cfmesh.optimise_layer instead.",
-        "cell_budget_enforced": false,
-
-        "_trailing_edge_refine": "true adds one thin refinement region (an objectRefinements box named trailingEdgeBox) on the downstream-most face of the geometry at level te_level. cfMesh's automatic refinement stops at min_cell_size, so a trailing edge thinner than the body cell -- the bundled test body ends in a 1.4 mm blunt strip against a 6.25 mm cell -- can only be resolved locally: lowering min_cell_size instead refines every curved surface it touches (one octree level on the A/B above marked 29229 + 116543 boxes by curvature criteria). Both meshers read the region, so it works with snappy too. Off by default.",
-        "trailing_edge_refine": false,
-        "_te_level": "Cell size of the trailing-edge box: base_cell_size / 2**te_level. 'auto' (default) = edge_level + 1, one level finer than snappy's feature-edge cell, which puts roughly two cells across a thin blunt trailing edge. For a 0.00625 m body cell and a 0.0014 m trailing edge that is level 7 = 0.78 mm; level 6 (1.5625 mm) only halves the slivers, level 8 resolves the gap cleanly at 8x the box cost.",
-        "te_level": "auto",
-        "_te_height_cells": "Half-height of the trailing-edge box in body cells, centred on the body's mid-height, i.e. the wedge that is still thinner than a couple of cells.",
-        "te_height_cells": 2.0,
-        "_te_depth_cells": "Box extent upstream of the trailing-edge plane in body cells, plus one cell downstream. Three cells leaves cfMesh room to grade from te_level back to the body cell.",
-        "te_depth_cells": 3.0
-    },
-
     "cfmesh": {
-        "workflow": "cartesianMesh",
         "feature_angle": 45,
-
-        "_optimise_layer": "true | false | 'auto' (auto = on for fidelity standard/fine, off for fast). Layer optimisation plus normal smoothing is the most expensive cfMesh pass; draft/iteration meshes do not need it.",
         "optimise_layer": "auto",
         "optimisation": {
             "nSmoothNormals": 3,
@@ -35,21 +13,11 @@
             "reCalculateNormals": 1,
             "relThicknessTol": 0.1
         },
-
-        "_layer_mode": "'patch_only' = top-level nLayers 0 plus per-patch entries, so only the STL surfaces (and the ground when layers.ground_layers is true) receive layers. 'global' = legacy behaviour, which layered every patch including the road.",
-        "layer_mode": "patch_only",
-
-        "_ground_refine": "true refines the road patch to mesh_params.ground_cell_size (default base_cell_size/2). false matches the snappy writer, which never refines the ground plane.",
         "ground_refine": false,
-
-        "_parallel_meshing": "true | false | 'auto' (auto = on when parallel.n_procs > 1). Runs cartesianMesh under mpirun: cfMesh decomposes the octree itself using numberOfSubdomains from system/decomposeParDict, so no decomposePar is needed for meshing, and the stitched mesh comes back via reconstructParMesh -constant before checkMesh. OpenMP is pinned to one thread per rank to avoid oversubscription. Allrun.parallel and run.sh fall back to a serial mesh if the build rejects the parallel run; set false to always mesh serially.",
-        "parallel_meshing": "auto",
-
-        "_refinement_thickness": "Optional: emit 'refinementThickness' inside every localRefinement entry to grow a distance shell around the surfaces. cfMesh's own transition is what dominates cell count, so this is the main dial for matching snappy's distance_levels."
+        "parallel_meshing": "auto"
     },
 
     "layers": {
-        "_first_layer_mode": "'relative' = first_layer_thickness x body cell size (body = surface_level[0] level; the pre-1.2 writer used the finer surface cell, which halved the first layer). 'absolute' = layers.first_layer_height in metres; cfMesh treats it as an upper bound and still compresses the stack to fit the local cell.",
         "first_layer_mode": "relative"
     }
 }

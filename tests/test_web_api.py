@@ -12,6 +12,7 @@ from fastapi import HTTPException
 
 from rapidfoam.config import load_config
 from rapidfoam.mesher_profiles import SUPPORTED_MESHERS
+from rapidfoam.meshers import get_mesher
 
 from rapidfoam.web.server import (
     DomainBoxRequest,
@@ -94,19 +95,60 @@ class TestWebAPI(unittest.TestCase):
         self.assertIn("available_meshers", res)
         self.assertEqual(res["available_meshers"], list(SUPPORTED_MESHERS))
 
+    def test_fidelity_presets_carry_the_sizing_policy(self):
+        """The Studio's Overrides "Auto" labels are rendered from the whole preset.
+
+        Only cells_per_length used to be returned, so the tab kept its own copy of
+        the levels, the wake offsets and the layer settings; the payload must now
+        state them (fast/standard/fine) for every engine to label itself.
+        """
+        res = asyncio.run(api_config_defaults())
+        presets = res["fidelity_presets"]
+        self.assertEqual(sorted(presets), ["fast", "fine", "standard"])
+        standard = presets["standard"]
+        self.assertEqual(standard["cells_per_length"], 30)
+        self.assertEqual(standard["surface_level"], [4, 5])
+        self.assertEqual(standard["edge_level"], 6)
+        self.assertEqual(standard["wake_levels_below_surface"], [1, 3])
+        self.assertEqual(standard["n_layers"], 5)
+        self.assertEqual(standard["expansion_ratio"], 1.2)
+        self.assertEqual(standard["first_layer_thickness"], 0.3)
+        self.assertEqual(standard["end_time"], 1500)
+        self.assertEqual(standard["write_interval"], 500)
+        # Values the presets do not state come from the universal defaults, which
+        # the same response carries.
+        self.assertIn("layers", res["default_config"])
+        self.assertEqual(res["default_config"]["layers"]["min_thickness"], 0.05)
+        self.assertEqual(presets["fine"]["cells_per_length"], 37.5)
+        self.assertEqual(presets["fast"]["wake_levels_below_surface"], [1, 2])
+
+    def test_schema_defaults_declare_who_reads_each_key(self):
+        """The UI must be able to say which engine a key belongs to."""
+        res = asyncio.run(api_config_defaults())
+        keys = {entry["key"]: entry for entry in res["mesh_params_keys"]}
+        self.assertEqual(keys["min_cell_size"]["engines"], ["cfmesh"])
+        self.assertEqual(keys["maxGlobalCells"]["engines"], ["snappy"])
+        self.assertEqual(keys["base_cell_size"]["engines"], [])  # both engines
+        # The per-engine view is the shared table filtered by that declaration.
+        snappy_keys = {entry["key"] for entry in res["mesher_keys"]["snappy"]["mesh_params"]}
+        cfmesh_keys = {entry["key"] for entry in res["mesher_keys"]["cfmesh"]["mesh_params"]}
+        self.assertNotIn("min_cell_size", snappy_keys)
+        self.assertNotIn("maxGlobalCells", cfmesh_keys)
+        self.assertEqual(cfmesh_keys | snappy_keys, set(keys))
+
     def test_config_schema_defaults_expose_mesher_profiles(self):
         """The UI must be able to show what "Auto" means for each engine."""
         res = asyncio.run(api_config_defaults())
         self.assertEqual(sorted(res["mesher_defaults"]), ["cfmesh", "snappy"])
         cfmesh = res["mesher_defaults"]["cfmesh"]
-        self.assertEqual(cfmesh["cfmesh"]["layer_mode"], "patch_only")
+        self.assertEqual(cfmesh["cfmesh"]["feature_angle"], 45)
         self.assertEqual(cfmesh["cfmesh"]["optimise_layer"], "auto")
         self.assertIs(cfmesh["cfmesh"]["ground_refine"], False)
-        self.assertEqual(cfmesh["mesh_params"]["cell_size_mode"], "absolute")
+        self.assertEqual(cfmesh["mesh_params"]["base_cell_size"], "auto")
         self.assertEqual(cfmesh["layers"]["first_layer_mode"], "relative")
         snappy = res["mesher_defaults"]["snappy"]
-        self.assertEqual(snappy["mesh_params"]["cell_size_mode"], "relative_levels")
-        self.assertIs(snappy["mesh_params"]["cell_budget_enforced"], True)
+        self.assertFalse(get_mesher("cfmesh").enforces_cell_budget)
+        self.assertTrue(get_mesher("snappy").enforces_cell_budget)
         # Private comment keys must not leak into the API payload.
         self.assertEqual([k for k in cfmesh if k.startswith("_")], [])
 
@@ -698,16 +740,16 @@ class TestWebAPI(unittest.TestCase):
         validation and previews saw a different config than case generation.
         """
         cfmesh = merge_config_with_defaults({"case_name": "web_cf", "stl_files": []})
-        self.assertEqual(cfmesh["mesh_params"]["cell_size_mode"], "absolute")
-        self.assertEqual(cfmesh["cfmesh"]["layer_mode"], "patch_only")
+        self.assertEqual(cfmesh["mesh_params"]["base_cell_size"], "auto")
+        self.assertEqual(cfmesh["cfmesh"]["feature_angle"], 45)
         self.assertIs(cfmesh["cfmesh"]["ground_refine"], False)
         self.assertEqual(cfmesh["layers"]["first_layer_mode"], "relative")
 
         snappy = merge_config_with_defaults(
             {"case_name": "web_sn", "stl_files": [], "mesher": "snappy"}
         )
-        self.assertEqual(snappy["mesh_params"]["cell_size_mode"], "relative_levels")
-        self.assertIs(snappy["mesh_params"]["cell_budget_enforced"], True)
+        self.assertFalse(get_mesher("cfmesh").enforces_cell_budget)
+        self.assertTrue(get_mesher("snappy").enforces_cell_budget)
 
     def test_web_merge_matches_cli_resolution(self):
         """Same config, same result: web merge == load_config() from a file."""

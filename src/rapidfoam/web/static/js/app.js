@@ -6,6 +6,60 @@ function escapeHTML(value) {
   return String(value ?? '').replace(/[&<>"']/g, ch => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch]));
 }
 
+/**
+ * Every Overrides control that shows what "Auto" resolves to.
+ *
+ * The Mesh Parameter controls are engine-scoped: the selected engine's key list
+ * in the schema (`mesher_keys[engine].mesh_params`) decides whether a control can
+ * be used at all, and its hint is labelled with that engine. Values come from the
+ * fidelity presets (`preset: true`), the engine profile (`profile: true`) or the
+ * universal defaults — all read from `GET /api/config/schema-defaults`, so the
+ * static HTML placeholders are only the pre-fetch fallback.
+ *
+ *   block/key  the config value the control writes (see buildConfigFromVisualForm)
+ *   index      which entry of a list value (surface_level[0])
+ *   label      hint prefix when it is not "Auto"
+ *   render     special formatting: a model-relative base cell, a wake level
+ *   fallback   value to show when no source states one (cfMesh's body alias)
+ *   notes      per-engine explanation, appended to the hint, or the reason shown
+ *              when that engine does not read the key at all
+ */
+const OVERRIDE_AUTO_HINTS = {
+  // 1. Solver & iteration
+  'cfg-override-solver-endtime': {block: 'solver', key: 'end_time', preset: true},
+  'cfg-override-solver-writeinterval': {block: 'solver', key: 'write_interval', preset: true},
+  'cfg-override-solver-purgewrite': {block: 'solver', key: 'purge_write'},
+  // 2. Aerodynamic force references
+  'cfg-override-ref-aref': {block: 'force_refs', key: 'Aref'},
+  'cfg-override-ref-lref': {block: 'force_refs', key: 'lRef'},
+  // 3. Mesh parameters (engine-scoped)
+  'cfg-override-basecell': {block: 'mesh_params', key: 'base_cell_size', preset: true, render: 'baseCell'},
+  'cfg-override-cellsperlength': {block: 'mesh_params', key: 'cells_per_length', preset: true},
+  'cfg-override-mincellsize': {block: 'mesh_params', key: 'min_cell_size', fallback: 'body',
+    notes: {snappy: "cfMesh's global automatic-refinement floor"}},
+  'cfg-override-surf-min': {block: 'mesh_params', key: 'surface_level', index: 0, label: 'Min', preset: true},
+  'cfg-override-surf-max': {block: 'mesh_params', key: 'surface_level', index: 1, label: 'Max', preset: true,
+    notes: {cfmesh: 'cfMesh refines feature edges one level finer on its own'}},
+  'cfg-override-edge': {block: 'mesh_params', key: 'edge_level', preset: true},
+  'cfg-override-nearwake': {block: 'mesh_params', key: 'wake_levels_below_surface', index: 0,
+    preset: true, render: 'wake'},
+  'cfg-override-farwake': {block: 'mesh_params', key: 'wake_levels_below_surface', index: 1,
+    preset: true, render: 'wake'},
+  // 4. Boundary layers
+  'cfg-override-layer-nlayers': {block: 'layers', key: 'n_layers', preset: true},
+  'cfg-override-layer-expansion': {block: 'layers', key: 'expansion_ratio', preset: true},
+  'cfg-override-layer-firstlayer': {block: 'layers', key: 'first_layer_thickness', preset: true},
+  'cfg-override-layer-minthickness': {block: 'layers', key: 'min_thickness'},
+  'cfg-override-firstlayer-mode': {block: 'layers', key: 'first_layer_mode', profile: true, select: true},
+  // 5. Fluid properties
+  'cfg-override-fluid-rho': {block: 'fluid', key: 'rho'},
+  'cfg-override-fluid-nu': {block: 'fluid', key: 'nu'},
+  // 6. Turbulence modelling
+  'cfg-override-turb-model': {block: 'turbulence', key: 'model', select: true},
+  'cfg-override-turb-intensity': {block: 'turbulence', key: 'intensity'},
+  'cfg-override-turb-nut-ratio': {block: 'turbulence', key: 'nut_ratio'},
+};
+
 class CFDApp {
   constructor() {
     this.viewer = null;
@@ -18,6 +72,11 @@ class CFDApp {
     this.archiveSearchTerm = '';
     this.isSyncingFromJson = false;
     this.currentSTLName = null;
+    // GET /api/config/schema-defaults: the tables the Overrides "Auto" hints are
+    // rendered from (null until the fetch answers).
+    this.fidelityPresets = null;
+    this.defaultConfig = null;
+    this.mesherKeys = null;
 
     this.activeConfig = {
       case_name: "my_case",
@@ -75,9 +134,16 @@ class CFDApp {
           _CofR: [0.0, 0.0, 0.0],
         },
         mesh_params: {
-          _base_cell_size: 0.10,
+          _base_cell_size: "auto",
+          _base_cell_size_desc: "Absolute override in metres ('auto' = cells_per_length x the longest bbox dimension, the default).",
+          _cells_per_length: 30,
+          _cells_per_length_desc: "20 fast / 30 standard / 37.5 fine background cells along the model's longest dimension.",
           _surface_level: [4, 5],
           _edge_level: 6,
+          _min_cell_size: "body",
+          _distance_shells: [[0.25, 4], [0.8, 3]],
+          _trailing_edge_refine: true,
+          _wake_levels_below_surface: [1, 3],
           _near_wake_level: 3,
           _far_wake_level: 1,
         },
@@ -292,8 +358,9 @@ class CFDApp {
     // Auto symmetry plane shortcut in Domain & Ground form
     document.getElementById('btn-auto-sym-inline')?.addEventListener('click', () => this.autoSymmetryPlaneCenter());
 
-    // Mesher engine policy: keep the "Auto (…)" labels and the absolute
-    // first-layer input in sync with the selected engine / layer mode.
+    // Mesher engine policy: switching engines re-labels the whole Overrides tab
+    // (the "Auto (…)" hints, the profile knobs and which controls apply at all)
+    // and toggles the absolute first-layer input.
     document.getElementById('cfg-mesher-engine')?.addEventListener('change', () => {
       this.updateMesherPolicyVisibility();
       this.refreshMesherPolicyHints();
@@ -442,6 +509,8 @@ class CFDApp {
       this.setVal('cfg-override-surf-max', '');
     }
     this.setVal('cfg-override-edge', meshParams?.edge_level ?? '');
+    this.setVal('cfg-override-cellsperlength', meshParams?.cells_per_length ?? '');
+    this.setVal('cfg-override-mincellsize', meshParams?.min_cell_size ?? '');
     this.setVal('cfg-override-nearwake', meshParams?.near_wake_level ?? '');
     this.setVal('cfg-override-farwake', meshParams?.far_wake_level ?? '');
 
@@ -456,7 +525,7 @@ class CFDApp {
     // 4b. Mesher engine policy (cfMesh profile keys)
     const cfmesh = overrides.cfmesh || null;
     this.setVal('cfg-override-cfmesh-groundrefine', this.boolToTriState(cfmesh?.ground_refine));
-    this.setVal('cfg-override-cfmesh-layermode', cfmesh?.layer_mode ?? '');
+    this.setVal('cfg-override-cfmesh-parallel', this.boolToTriState(cfmesh?.parallel_meshing));
     this.setVal('cfg-override-cfmesh-optimise', this.boolToTriState(cfmesh?.optimise_layer));
 
     // 5. Fluid Properties (Priority 5: Ambient medium)
@@ -649,6 +718,11 @@ class CFDApp {
 
     // 3. Mesh Params (Priority 3)
     const meshOverrides = {};
+    // Base cell accepts metres, or the literal "auto" (preset's cells_per_length).
+    const baseCellText = getOptionalStr('cfg-override-basecell');
+    if (baseCellText !== null && baseCellText.toLowerCase() === 'auto') {
+      meshOverrides.base_cell_size = 'auto';
+    }
     const baseCell = getOptionalFloat('cfg-override-basecell');
     if (baseCell !== null) meshOverrides.base_cell_size = baseCell;
     const surfMin = getOptionalInt('cfg-override-surf-min');
@@ -658,6 +732,15 @@ class CFDApp {
     }
     const edgeLevel = getOptionalInt('cfg-override-edge');
     if (edgeLevel !== null) meshOverrides.edge_level = edgeLevel;
+    const cellsPerLength = getOptionalFloat('cfg-override-cellsperlength');
+    if (cellsPerLength !== null) meshOverrides.cells_per_length = cellsPerLength;
+    // min_cell_size accepts metres or an alias ('body' / 'edge' / 'base').
+    const minCellSize = getOptionalStr('cfg-override-mincellsize');
+    if (minCellSize) {
+      const numeric = Number(minCellSize);
+      meshOverrides.min_cell_size = Number.isFinite(numeric) && minCellSize.trim() !== ''
+        ? numeric : minCellSize.trim();
+    }
     const nearWake = getOptionalInt('cfg-override-nearwake');
     if (nearWake !== null) meshOverrides.near_wake_level = nearWake;
     const farWake = getOptionalInt('cfg-override-farwake');
@@ -680,14 +763,15 @@ class CFDApp {
     if (firstLayerHeight !== null) layersOverrides.first_layer_height = firstLayerHeight;
     if (Object.keys(layersOverrides).length > 0) overrides.layers = layersOverrides;
 
-    // 4b. Mesher engine policy => cfmesh.ground_refine / layer_mode / optimise_layer
+    // 4b. Mesher engine policy => cfmesh.ground_refine / optimise_layer / parallel_meshing
     // "auto" is left out on purpose: an absent key means "follow the profile".
     const cfmeshOverrides = {};
     const groundRefine = getOptionalStr('cfg-override-cfmesh-groundrefine');
     if (groundRefine === 'on') cfmeshOverrides.ground_refine = true;
     else if (groundRefine === 'off') cfmeshOverrides.ground_refine = false;
-    const layerMode = getOptionalStr('cfg-override-cfmesh-layermode');
-    if (layerMode) cfmeshOverrides.layer_mode = layerMode;
+    const parallelMeshing = getOptionalStr('cfg-override-cfmesh-parallel');
+    if (parallelMeshing === 'on') cfmeshOverrides.parallel_meshing = true;
+    else if (parallelMeshing === 'off') cfmeshOverrides.parallel_meshing = false;
     const optimiseLayer = getOptionalStr('cfg-override-cfmesh-optimise');
     if (optimiseLayer === 'on') cfmeshOverrides.optimise_layer = true;
     else if (optimiseLayer === 'off') cfmeshOverrides.optimise_layer = false;
@@ -714,10 +798,11 @@ class CFDApp {
     const exposed = {
       solver: ['end_time', 'write_interval', 'purge_write'],
       force_refs: ['Aref', 'lRef', 'CofR'],
-      mesh_params: ['base_cell_size', 'surface_level', 'edge_level', 'near_wake_level', 'far_wake_level'],
+      mesh_params: ['base_cell_size', 'cells_per_length', 'min_cell_size', 'surface_level',
+        'edge_level', 'near_wake_level', 'far_wake_level'],
       layers: ['n_layers', 'expansion_ratio', 'first_layer_thickness', 'min_thickness',
         'first_layer_mode', 'first_layer_height'],
-      cfmesh: ['ground_refine', 'layer_mode', 'optimise_layer'],
+      cfmesh: ['ground_refine', 'optimise_layer', 'parallel_meshing'],
       fluid: ['rho', 'nu'], turbulence: ['model', 'intensity', 'nut_ratio'],
     };
     for (const [section, values] of Object.entries(cfg.overrides || {})) {
@@ -747,9 +832,16 @@ class CFDApp {
           _CofR: [0.0, 0.0, 0.0],
         },
         mesh_params: {
-          _base_cell_size: 0.10,
+          _base_cell_size: "auto",
+          _base_cell_size_desc: "Absolute override in metres ('auto' = cells_per_length x the longest bbox dimension, the default).",
+          _cells_per_length: 30,
+          _cells_per_length_desc: "20 fast / 30 standard / 37.5 fine background cells along the model's longest dimension.",
           _surface_level: [4, 5],
           _edge_level: 6,
+          _min_cell_size: "body",
+          _distance_shells: [[0.25, 4], [0.8, 3]],
+          _trailing_edge_refine: true,
+          _wake_levels_below_surface: [1, 3],
           _near_wake_level: 3,
           _far_wake_level: 1,
         },
@@ -955,30 +1047,124 @@ class CFDApp {
     }
   }
 
-  updateOverridePlaceholders(fidelity = 'standard') {
-    const presets = {
-      fast: { base_cell: '0.15', surf_min: '3', surf_max: '4', edge: '5', nearwake: '2', farwake: '1', endtime: '800', writeint: '400', n_layers: '3', expansion: '1.30', first_layer: '0.40' },
-      standard: { base_cell: '0.10', surf_min: '4', surf_max: '5', edge: '6', nearwake: '3', farwake: '1', endtime: '1500', writeint: '500', n_layers: '5', expansion: '1.20', first_layer: '0.30' },
-      fine: { base_cell: '0.08', surf_min: '5', surf_max: '6', edge: '7', nearwake: '4', farwake: '2', endtime: '3000', writeint: '500', n_layers: '6', expansion: '1.15', first_layer: '0.20' },
-    };
-    const p = presets[fidelity] || presets.standard;
+  currentMesher() {
+    return this.getVal('cfg-mesher-engine') || 'cfmesh';
+  }
 
-    const setPlaceholder = (id, text) => {
+  currentFidelity() {
+    const card = document.querySelector('.fidelity-card.selected');
+    return (card && card.dataset && card.dataset.fidelity) || 'standard';
+  }
+
+  // True once /api/config/schema-defaults answered: only then can a hint state a
+  // resolved value instead of the static HTML label (the offline fallback).
+  schemaReady() {
+    return Boolean(this.defaultConfig && this.fidelityPresets);
+  }
+
+  // The value the schema states for a hint: the preset (flat), the engine profile
+  // or the universal defaults, in the order the control falls back.
+  hintSourceValue(spec, engine, fidelity) {
+    const read = (source, block) => {
+      const scope = block ? (source && source[block]) : source;
+      if (!scope || typeof scope !== 'object') return undefined;
+      let value = scope[spec.key];
+      if (spec.index !== undefined && Array.isArray(value)) value = value[spec.index];
+      if (value === undefined || value === null || typeof value === 'object') return undefined;
+      return value;
+    };
+    const profile = (this.mesherDefaults || {})[engine];
+    const preset = (this.fidelityPresets || {})[fidelity];
+    if (spec.profile) return read(profile, spec.block) ?? read(this.defaultConfig, spec.block);
+    if (spec.preset) return read(preset, null) ?? read(this.defaultConfig, spec.block);
+    return read(this.defaultConfig, spec.block);
+  }
+
+  // Does the selected engine read this mesh_params key? null when the schema has
+  // not answered (or does not describe the key), so nothing is disabled blindly.
+  engineReadsMeshParam(engine, key) {
+    const entries = ((this.mesherKeys || {})[engine] || {}).mesh_params;
+    if (!Array.isArray(entries)) return null;
+    return entries.some((entry) => entry.key === key);
+  }
+
+  formatHintNumber(value) {
+    if (typeof value !== 'number') return String(value);
+    return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(4)));
+  }
+
+  autoHintText(spec, engine, fidelity) {
+    const scoped = spec.block === 'mesh_params' || spec.profile === true;
+    const preset = (this.fidelityPresets || {})[fidelity] || {};
+    let shown = null;
+
+    if (spec.render === 'baseCell') {
+      // "auto" = the model's longest dimension / cells_per_length, so the number
+      // only exists per model; the 3.0 m car keeps the old HTML wording legible.
+      const pinned = this.hintSourceValue({block: spec.block, key: spec.key}, engine, fidelity);
+      const cpl = preset.cells_per_length;
+      if (typeof pinned === 'number') shown = `${this.formatHintNumber(pinned)} m pinned`;
+      else if (typeof cpl === 'number' && cpl > 0) {
+        shown = `model length / ${this.formatHintNumber(cpl)} = ${(3 / cpl).toFixed(2)} m on a 3.0 m car`;
+      }
+    } else if (spec.render === 'wake') {
+      // The wake levels are offsets under the surface level now, so the hint
+      // states the pair the preset resolves to instead of a bare number.
+      const below = Array.isArray(preset.wake_levels_below_surface)
+        ? preset.wake_levels_below_surface[spec.index] : undefined;
+      const surface = Array.isArray(preset.surface_level) ? preset.surface_level[0] : undefined;
+      if (typeof below === 'number' && typeof surface === 'number') {
+        shown = `level ${this.formatHintNumber(surface - below)} = surface L`
+          + `${this.formatHintNumber(surface)} - ${this.formatHintNumber(below)}`;
+      }
+    } else {
+      const value = this.hintSourceValue(spec, engine, fidelity) ?? spec.fallback;
+      if (value !== undefined) shown = this.formatHintNumber(value);
+    }
+    if (shown === null) return null;
+
+    const label = spec.label || (scoped ? 'Auto' : 'Auto / Preset');
+    const tag = scoped ? `${engine}: ` : '';
+    const note = spec.notes && spec.notes[engine] ? ` — ${spec.notes[engine]}` : '';
+    return `${label} (${tag}${shown}${note})`;
+  }
+
+  /**
+   * Re-label every Overrides "Auto" hint for the selected mesher and fidelity.
+   *
+   * Called on engine change, fidelity change, config load and once the schema
+   * fetch answers, so the tab can never show another engine's numbers: a
+   * mesh_params knob the engine does not read is disabled and says why, and the
+   * rest are labelled `Auto (<engine>: <value>)`.
+   */
+  updateOverridePlaceholders(fidelity = null) {
+    const engine = this.currentMesher();
+    const level = fidelity || this.currentFidelity();
+
+    Object.entries(OVERRIDE_AUTO_HINTS).forEach(([id, spec]) => {
       const el = document.getElementById(id);
-      if (el) el.placeholder = text;
-    };
+      if (!el) return;
 
-    setPlaceholder('cfg-override-basecell', `Auto / Preset (${p.base_cell})`);
-    setPlaceholder('cfg-override-surf-min', `Min (${p.surf_min})`);
-    setPlaceholder('cfg-override-surf-max', `Max (${p.surf_max})`);
-    setPlaceholder('cfg-override-edge', `Auto / Preset (${p.edge})`);
-    setPlaceholder('cfg-override-nearwake', `Auto / Preset (${p.nearwake})`);
-    setPlaceholder('cfg-override-farwake', `Auto / Preset (${p.farwake})`);
-    setPlaceholder('cfg-override-solver-endtime', `Auto / Preset (${p.endtime})`);
-    setPlaceholder('cfg-override-solver-writeinterval', `Auto / Preset (${p.writeint})`);
-    setPlaceholder('cfg-override-layer-nlayers', `Auto / Preset (${p.n_layers})`);
-    setPlaceholder('cfg-override-layer-expansion', `Auto / Preset (${p.expansion})`);
-    setPlaceholder('cfg-override-layer-firstlayer', `Auto / Preset (${p.first_layer})`);
+      if (spec.block === 'mesh_params') {
+        const reads = this.engineReadsMeshParam(engine, spec.key);
+        if (reads === false) {
+          el.disabled = true;
+          if (!spec.select) {
+            const why = spec.notes && spec.notes[engine] ? ` — ${spec.notes[engine]}` : '';
+            el.placeholder = `Not read by ${engine}${why}`;
+          }
+          return;
+        }
+        // Only touch the flag when the schema actually judged the key, so a
+        // schema-less load never enables a control the engine cannot use.
+        if (reads === true) el.disabled = false;
+      }
+
+      const text = this.schemaReady() ? this.autoHintText(spec, engine, level) : null;
+      if (!text) return; // no schema yet: the static HTML label stays
+      if (spec.select) this.setAutoOptionText(id, text);
+      else el.placeholder = text;
+    });
   }
 
   boolToTriState(value) {
@@ -993,10 +1179,10 @@ class CFDApp {
     if (heightGroup) heightGroup.style.display = absolute ? 'block' : 'none';
 
     // cfMesh profile knobs only mean something to cfMesh; grey them out otherwise.
-    ['cfg-override-cfmesh-groundrefine', 'cfg-override-cfmesh-layermode', 'cfg-override-cfmesh-optimise']
+    ['cfg-override-cfmesh-groundrefine', 'cfg-override-cfmesh-parallel', 'cfg-override-cfmesh-optimise']
       .forEach((id) => {
         const el = document.getElementById(id);
-        if (el) el.disabled = (this.getVal('cfg-mesher-engine') || 'cfmesh') !== 'cfmesh';
+        if (el) el.disabled = this.currentMesher() !== 'cfmesh';
       });
   }
 
@@ -1007,14 +1193,20 @@ class CFDApp {
   }
 
   refreshMesherPolicyHints() {
-    const engine = this.getVal('cfg-mesher-engine') || 'cfmesh';
+    const engine = this.currentMesher();
+    // Re-label the whole Overrides tab first: the mesh-parameter hints, the
+    // first-layer mode and the engine-scoped availability all follow the engine.
+    this.updateOverridePlaceholders(this.currentFidelity());
+
     const defaults = (this.mesherDefaults || {})[engine];
     if (!defaults) return; // keep the static HTML labels until /api/config/schema-defaults answers
     const cfmesh = defaults.cfmesh || {};
     const layers = defaults.layers || {};
     const onOff = (v) => (v === undefined || v === null ? 'n/a' : (v ? 'on' : 'off'));
     this.setAutoOptionText('cfg-override-cfmesh-groundrefine', `Auto (${engine}: ${onOff(cfmesh.ground_refine)})`);
-    this.setAutoOptionText('cfg-override-cfmesh-layermode', `Auto (${engine}: ${cfmesh.layer_mode || 'n/a'})`);
+    this.setAutoOptionText('cfg-override-cfmesh-parallel',
+      `Auto (${engine}: ${onOff(cfmesh.parallel_meshing === 'auto' ? undefined : cfmesh.parallel_meshing)}
+        - on when n_procs > 1)`.replace(/\s+/g, ' '));
     this.setAutoOptionText('cfg-override-cfmesh-optimise',
       `Auto (${engine}: ${cfmesh.optimise_layer === undefined ? 'n/a' : String(cfmesh.optimise_layer)})`);
     this.setAutoOptionText('cfg-override-firstlayer-mode', `Auto (${engine}: ${layers.first_layer_mode || 'relative'})`);
@@ -1041,6 +1233,11 @@ class CFDApp {
       const data = await res.json();
       this.mesherDefaults = data.mesher_defaults || {};
       this.availableMeshers = data.available_meshers || [];
+      // The tables the Overrides "Auto" hints are rendered from: the fidelity
+      // presets, the universal defaults and the per-engine key lists.
+      this.fidelityPresets = data.fidelity_presets || null;
+      this.defaultConfig = data.default_config || null;
+      this.mesherKeys = data.mesher_keys || null;
       this.syncMesherOptions(this.availableMeshers);
       this.refreshMesherPolicyHints();
     } catch {
@@ -1063,6 +1260,8 @@ class CFDApp {
       'cfg-override-surf-min',
       'cfg-override-surf-max',
       'cfg-override-edge',
+      'cfg-override-cellsperlength',
+      'cfg-override-mincellsize',
       'cfg-override-nearwake',
       'cfg-override-farwake',
       'cfg-override-layer-nlayers',
@@ -1072,7 +1271,7 @@ class CFDApp {
       'cfg-override-firstlayer-mode',
       'cfg-override-firstlayer-height',
       'cfg-override-cfmesh-groundrefine',
-      'cfg-override-cfmesh-layermode',
+      'cfg-override-cfmesh-parallel',
       'cfg-override-cfmesh-optimise',
       'cfg-override-fluid-rho',
       'cfg-override-fluid-nu',

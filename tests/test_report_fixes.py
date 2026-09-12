@@ -12,7 +12,8 @@ import unittest
 from unittest.mock import Mock, patch, PropertyMock
 
 from rapidfoam.config import load_config, validate
-from rapidfoam.geometry import compute_mesh_params
+from rapidfoam.meshers.cfmesh import resolve_cfmesh_settings
+from rapidfoam.meshers.refinement import resolve_mesh_params
 from rapidfoam.web import server
 from rapidfoam.web.ssh_client import ClusterSSHClient
 
@@ -64,23 +65,29 @@ class ReportFixesTest(unittest.TestCase):
 
     def test_cfmesh_sizes_reach_writer_and_validate(self):
         from rapidfoam.cli import _do_generate
-        # ground_refine is opt-in since 1.2 (cfMesh used to refine every ground
-        # plane unconditionally, which snappy never did).
-        self.cfg['overrides'] = {'mesh_params': {'boundary_cell_size': 0.0123,
-                                                 'ground_cell_size': 0.0456,
-                                                 'ground_refine': True}}
+        # The road refinement is opt-in and engine-owned: cfmesh.ground_refine is
+        # its single home (snappy never refines the ground plane).
+        self.cfg['overrides'] = {'cfmesh': {'boundary_cell_size': 0.0123,
+                                            'ground_cell_size': 0.0456,
+                                            'ground_refine': True}}
         cfg_path = self.root / 'input.json'
         cfg_path.write_text(json.dumps(self.cfg))
         cfg = load_config(cfg_path)
-        mesh = compute_mesh_params(cfg, ((0, 0, 0), (1, 2, 3)))
-        self.assertEqual(mesh['boundary_cell_size'], 0.0123)
-        self.assertEqual(mesh['ground_cell_size'], 0.0456)
+        cfg["mesh_params"] = resolve_mesh_params(cfg, ((0, 0, 0), (1, 2, 3)))
+        settings = resolve_cfmesh_settings(cfg)
+        self.assertEqual(settings.boundary_cell_size, 0.0123)
+        self.assertEqual(settings.ground_cell_size, 0.0456)
+        self.assertTrue(settings.ground_refine)
         with contextlib.redirect_stdout(io.StringIO()):
             _do_generate(cfg_path, self.root)
         text = (self.root / 'cases/test/system/meshDict').read_text()
         self.assertIn('0.0123', text)
         self.assertIn('0.0456', text)
-        cfg['mesh_params']['boundary_cell_size'] = -1
+        cfg['cfmesh']['boundary_cell_size'] = -1
+        self.assertTrue(any('cfmesh.boundary_cell_size' in e
+                            for e in validate(cfg, self.root)[0]))
+        # The pre-rewrite spelling is rejected loudly, naming the new home.
+        cfg['mesh_params']['boundary_cell_size'] = 0.01
         self.assertTrue(any('boundary_cell_size' in e for e in validate(cfg, self.root)[0]))
         cfg['turbulence']['model'] = 'kEpsilon'
         self.assertTrue(any('kOmegaSST' in e for e in validate(cfg, self.root)[0]))

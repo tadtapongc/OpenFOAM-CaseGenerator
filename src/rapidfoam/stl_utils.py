@@ -9,6 +9,7 @@ Supports:
 
 from __future__ import annotations
 
+import math
 import shutil
 import struct
 from pathlib import Path
@@ -188,6 +189,57 @@ def write_stl(filepath: str | Path, name: str, triangles: Sequence[Triangle]) ->
             f.write("    endloop\n")
             f.write("  endfacet\n")
         f.write(f"endsolid {name}\n")
+
+
+def stl_surface_area(filepath: str | Path) -> float:
+    """Total triangle area of an ASCII STL, streamed with O(1) memory.
+
+    The cell-budget audit needs the wetted area to estimate how many cells the
+    distance shells around the surface ask for (``area x band / cell**3``); a
+    bounding box alone cannot express that.
+
+    Raises the same errors as :func:`stl_info`.
+    """
+    filepath = Path(filepath)
+    if not filepath.exists():
+        raise FileNotFoundError(f"STL file not found: {filepath}")
+    if is_binary_stl(filepath):
+        raise ValueError(f"Binary STL not supported: {filepath}")
+
+    area = 0.0
+    corners: list[tuple[float, float, float]] = []
+    name: str | None = None
+    with open(filepath, "r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            line = line.strip()
+            if name is None and line.startswith("solid"):
+                name = line[5:].strip() or filepath.stem
+                continue
+            if not line.startswith("vertex"):
+                continue
+            parts = line.split()
+            if len(parts) < 4:
+                continue
+            try:
+                corners.append((float(parts[1]), float(parts[2]), float(parts[3])))
+            except ValueError:
+                continue
+            if len(corners) == 3:
+                area += _triangle_area(*corners)
+                corners = []
+    if name is None:
+        raise ValueError(f"Not a valid ASCII STL: {filepath}")
+    return area
+
+
+def _triangle_area(a, b, c) -> float:
+    """Half the length of the cross product of two triangle edges."""
+    u = (b[0] - a[0], b[1] - a[1], b[2] - a[2])
+    v = (c[0] - a[0], c[1] - a[1], c[2] - a[2])
+    cross = (u[1] * v[2] - u[2] * v[1],
+             u[2] * v[0] - u[0] * v[2],
+             u[0] * v[1] - u[1] * v[0])
+    return 0.5 * math.sqrt(cross[0] ** 2 + cross[1] ** 2 + cross[2] ** 2)
 
 
 def stl_bounds(filepath: str | Path) -> BBox:
